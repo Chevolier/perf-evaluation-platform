@@ -9,7 +9,7 @@ const ModelSelectionPage = ({ selectedModels, onModelChange, onNext }) => {
   const [deploymentStatus, setDeploymentStatus] = useState({});
 
   // EMD local models that need deployment
-  const emdModels = ['qwen2-vl-7b', 'qwen2.5-vl-32b', 'qwen2.5-0.5b', 'gemma-3-4b', 'ui-tars-1.5-7b'];
+  const emdModels = ['qwen2-vl-7b', 'qwen2.5-vl-7b', 'qwen2.5-vl-32b', 'qwen2.5-0.5b', 'gemma-3-4b', 'ui-tars-1.5-7b'];
 
   // Removed unused triggerEMDDeployment function
 

@@ -14,6 +14,7 @@ const modelGroups = [
     label: '本地开源模型 (EMD)',
     options: [
       { label: 'Qwen2-VL-7B-Instruct', value: 'qwen2-vl-7b' },
+      { label: 'Qwen2.5-VL-7B-Instruct', value: 'qwen2.5-vl-7b' },
       { label: 'Qwen2.5-VL-32B-Instruct', value: 'qwen2.5-vl-32b' },
       { label: 'Qwen2.5-0.5B-Instruct', value: 'qwen2.5-0.5b' },
       { label: 'Gemma-3-4B-IT', value: 'gemma-3-4b' },

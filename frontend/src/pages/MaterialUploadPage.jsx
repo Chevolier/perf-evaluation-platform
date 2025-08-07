@@ -9,7 +9,7 @@ const MaterialUploadPage = ({ dataset, onDatasetChange, onNext, onPrev, selected
   const [deploying, setDeploying] = useState(false);
   const [deploymentStatus, setDeploymentStatus] = useState({});
   
-  const emdModels = ['qwen2-vl-7b', 'qwen2.5-vl-32b', 'qwen2.5-0.5b', 'gemma-3-4b', 'ui-tars-1.5-7b'];
+  const emdModels = ['qwen2-vl-7b', 'qwen2.5-vl-7b', 'qwen2.5-vl-32b', 'qwen2.5-0.5b', 'gemma-3-4b', 'ui-tars-1.5-7b'];
   
   const checkAndDeployModels = async () => {
     const localModels = selectedModels.filter(model => emdModels.includes(model));

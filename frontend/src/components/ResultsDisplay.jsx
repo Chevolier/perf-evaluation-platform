@@ -60,13 +60,19 @@ const ResultsDisplay = ({ results, loading }) => {
     }
     
     if (typeof response === 'string') {
-      return response;
+      // Try to parse string as JSON in case it's a stringified response
+      try {
+        const parsed = JSON.parse(response);
+        return formatResponse(parsed); // Recursive call with parsed object
+      } catch (e) {
+        return response;
+      }
     }
     
     // Extract text from EMD/OpenAI API response (choices format)
-    if (response && response.choices && Array.isArray(response.choices) && response.choices.length > 0) {
+    if (response && typeof response === 'object' && response.choices && Array.isArray(response.choices) && response.choices.length > 0) {
       const choice = response.choices[0];
-      if (choice.message && choice.message.content) {
+      if (choice && choice.message && typeof choice.message.content === 'string') {
         return choice.message.content;
       }
     }
