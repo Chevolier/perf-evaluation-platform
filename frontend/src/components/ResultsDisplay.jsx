@@ -28,10 +28,13 @@ const ResultsDisplay = ({ results, loading }) => {
         return <CheckCircleOutlined style={{ color: '#52c41a' }} />;
       case 'error':
         return <ExclamationCircleOutlined style={{ color: '#ff4d4f' }} />;
+      case 'not_deployed':
+        return <ExclamationCircleOutlined style={{ color: '#faad14' }} />;
       case 'loading':
+      case 'processing':
         return <ClockCircleOutlined style={{ color: '#1890ff' }} />;
       default:
-        return <ClockCircleOutlined style={{ color: '#faad14' }} />;
+        return <ClockCircleOutlined style={{ color: '#d9d9d9' }} />;
     }
   };
 
@@ -41,14 +44,31 @@ const ResultsDisplay = ({ results, loading }) => {
         return <Tag color="success">成功</Tag>;
       case 'error':
         return <Tag color="error">失败</Tag>;
-      default:
+      case 'not_deployed':
+        return <Tag color="warning">等待部署</Tag>;
+      case 'loading':
+      case 'processing':
         return <Tag color="processing">处理中</Tag>;
+      default:
+        return <Tag color="default">等待</Tag>;
     }
   };
 
   const formatResponse = (response) => {
+    if (!response) {
+      return 'N/A';
+    }
+    
     if (typeof response === 'string') {
       return response;
+    }
+    
+    // Extract text from EMD/OpenAI API response (choices format)
+    if (response && response.choices && Array.isArray(response.choices) && response.choices.length > 0) {
+      const choice = response.choices[0];
+      if (choice.message && choice.message.content) {
+        return choice.message.content;
+      }
     }
     
     // Extract text from Claude API response
@@ -156,15 +176,18 @@ const ResultsDisplay = ({ results, loading }) => {
   );
 
   const renderComparisonView = () => {
-    const modelNames = Object.keys(results);
-    const tableData = modelNames.map(modelName => ({
-      key: modelName,
-      model: modelName,
-      status: results[modelName].status,
-      response: formatResponse(results[modelName].response || results[modelName].error),
-      tokens: results[modelName].metadata?.tokens || 'N/A',
-      time: results[modelName].metadata?.processingTime || 'N/A'
-    }));
+    const modelNames = Object.keys(results || {});
+    const tableData = modelNames.map(modelName => {
+      const result = results[modelName] || {};
+      return {
+        key: modelName,
+        model: modelName,
+        status: result.status || 'loading',
+        response: formatResponse(result.response || result.error || '处理中...'),
+        tokens: result.metadata?.tokens || 'N/A',
+        time: result.metadata?.processingTime || 'N/A'
+      };
+    });
 
     const columns = [
       {
@@ -188,7 +211,7 @@ const ResultsDisplay = ({ results, loading }) => {
         render: (text) => (
           <div style={{ maxWidth: '400px', maxHeight: '200px', overflow: 'auto' }}>
             <Text copyable style={{ whiteSpace: 'pre-wrap', fontSize: '12px' }}>
-              {text.length > 200 ? text.substring(0, 200) + '...' : text}
+              {text && text.length > 200 ? text.substring(0, 200) + '...' : text || 'N/A'}
             </Text>
           </div>
         )
@@ -219,7 +242,7 @@ const ResultsDisplay = ({ results, loading }) => {
     );
   };
 
-  const modelCount = Object.keys(results).length;
+  const modelCount = Object.keys(results || {}).length;
 
   return (
     <div style={{ marginTop: '24px' }}>
@@ -231,13 +254,13 @@ const ResultsDisplay = ({ results, loading }) => {
             {renderComparisonView()}
           </Panel>
           <Panel header="详细结果" key="detailed">
-            {Object.entries(results).map(([modelName, result]) =>
+            {Object.entries(results || {}).map(([modelName, result]) =>
               renderSingleResult(modelName, result)
             )}
           </Panel>
         </Collapse>
       ) : (
-        Object.entries(results).map(([modelName, result]) =>
+        Object.entries(results || {}).map(([modelName, result]) =>
           renderSingleResult(modelName, result)
         )
       )}

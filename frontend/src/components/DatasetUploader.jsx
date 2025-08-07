@@ -4,10 +4,10 @@ import { UploadOutlined, FileImageOutlined, VideoCameraOutlined, FileZipOutlined
 
 const { TextArea } = Input;
 
-const DatasetUploader = ({ onChange }) => {
-  const [type, setType] = useState('image');
-  const [prompt, setPrompt] = useState('');
-  const [files, setFiles] = useState([]);
+const DatasetUploader = ({ onChange, value }) => {
+  const [type, setType] = useState(value?.type || 'image');
+  const [prompt, setPrompt] = useState(value?.prompt || '');
+  const [files, setFiles] = useState(value?.files || []);
 
   const beforeUpload = (file) => {
     if (type === 'image') {

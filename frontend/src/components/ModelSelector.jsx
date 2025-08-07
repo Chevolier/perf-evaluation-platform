@@ -15,6 +15,7 @@ const modelGroups = [
     options: [
       { label: 'Qwen2-VL-7B-Instruct', value: 'qwen2-vl-7b' },
       { label: 'Qwen2.5-VL-32B-Instruct', value: 'qwen2.5-vl-32b' },
+      { label: 'Qwen2.5-0.5B-Instruct', value: 'qwen2.5-0.5b' },
       { label: 'Gemma-3-4B-IT', value: 'gemma-3-4b' },
       { label: 'UI-TARS-1.5-7B', value: 'ui-tars-1.5-7b' },
     ]
