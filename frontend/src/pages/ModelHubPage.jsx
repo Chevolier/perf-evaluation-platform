@@ -25,132 +25,144 @@ const { Title, Text, Paragraph } = Typography;
 const ModelHubPage = () => {
   const [loading, setLoading] = useState(false);
   const [modelStatus, setModelStatus] = useState({});
-  const [deployingModels, setDeployingModels] = useState(new Set());
-  const deployingModelsRef = useRef(new Set());
-
-  // 模型分类
-  const modelCategories = {
+  // const [deployingModels, setDeployingModels] = useState(new Set());
+  // const deployingModelsRef = useRef(new Set());
+  const [modelCategories, setModelCategories] = useState({
     bedrock: {
       title: 'Bedrock 模型',
       icon: <CloudOutlined />,
       color: '#1890ff',
-      models: [
-        {
-          key: 'claude4',
-          name: 'Claude 4',
-          description: '最新的Claude模型，具备强大的推理能力',
-          alwaysAvailable: true
-        },
-        {
-          key: 'claude35',
-          name: 'Claude 3.5 Sonnet',
-          description: '平衡性能与速度的高效模型',
-          alwaysAvailable: true
-        },
-        {
-          key: 'nova',
-          name: 'Amazon Nova Pro',
-          description: 'AWS原生多模态大模型',
-          alwaysAvailable: true
-        }
-      ]
+      models: []
     },
     emd: {
       title: 'EMD 部署模型',
       icon: <ThunderboltOutlined />,
       color: '#52c41a',
-      models: [
-        {
-          key: 'qwen2-vl-7b',
-          name: 'Qwen2-VL-7B',
-          description: '通义千问视觉语言模型，7B参数',
-          alwaysAvailable: false
-        },
-        {
-          key: 'qwen2.5-vl-7b',
-          name: 'Qwen2.5-VL-7B',
-          description: '通义千问视觉语言模型，7B参数',
-          alwaysAvailable: false
-        },
-        {
-          key: 'qwen2.5-vl-32b',
-          name: 'Qwen2.5-VL-32B',
-          description: '通义千问视觉语言模型，32B参数',
-          alwaysAvailable: false
-        },
-        {
-          key: 'qwen2.5-0.5b',
-          name: 'Qwen2.5-0.5B',
-          description: '轻量级文本模型，适合快速推理',
-          alwaysAvailable: false
-        },
-        {
-          key: 'gemma-3-4b',
-          name: 'Gemma-3-4B',
-          description: 'Google开源语言模型',
-          alwaysAvailable: false
-        },
-        {
-          key: 'ui-tars-1.5-7b',
-          name: 'UI-TARS-1.5-7B',
-          description: '用户界面理解专用模型',
-          alwaysAvailable: false
+      models: []
+    }
+  });
+  
+  // 从后端获取模型列表
+  const fetchModelList = async () => {
+    try {
+      const response = await fetch('/api/model-list');
+      if (response.ok) {
+        const data = await response.json();
+        if (data.status === 'success' && data.models) {
+          // 处理Bedrock模型
+          if (data.models.bedrock) {
+            const bedrockModels = Object.entries(data.models.bedrock).map(([key, info]) => ({
+              key,
+              name: info.name,
+              description: info.description,
+              alwaysAvailable: true
+            }));
+            
+            setModelCategories(prev => {
+              const newState = {
+                ...prev,
+                bedrock: {
+                  ...prev.bedrock,
+                  models: bedrockModels
+                }
+              };
+              return newState;
+            });
+          }
+          
+          // 处理EMD模型
+          if (data.models.emd) {
+            const emdModels = Object.entries(data.models.emd).map(([key, info]) => ({
+              key,
+              name: info.name,
+              description: info.description,
+              alwaysAvailable: false
+            }));
+            
+            setModelCategories(prev => {
+              const newState = {
+                ...prev,
+                emd: {
+                  ...prev.emd,
+                  models: emdModels
+                }
+              };
+              return newState;
+            });
+          }
+          
+          // 在成功获取模型列表后检查模型状态
+          return true;
         }
-      ]
+      } else {
+      }
+      return false;
+    } catch (error) {
+      return false;
     }
   };
 
   // 检查模型状态
-  const checkModelStatus = async () => {
-    setLoading(true);
-    try {
-      // 获取所有模型列表
-      const allModels = [
-        ...modelCategories.bedrock.models.map(m => m.key),
-        ...modelCategories.emd.models.map(m => m.key)
-      ];
+  // const checkModelStatus = async () => {
+  //   setLoading(true);
+  //   try {
+  //     // 获取所有模型列表
+  //     console.log('[Debug] checkModelStatus - 当前 modelCategories:', modelCategories);
       
-      const response = await fetch('/api/check-model-status', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ models: allModels })
-      });
+  //     const allModels = [
+  //       ...modelCategories.bedrock.models.map(m => m.key),
+  //       ...modelCategories.emd.models.map(m => m.key)
+  //     ];
+  //     console.log('[Debug] 准备发送的模型列表:', allModels);
       
-      if (response.ok) {
-        const data = await response.json();
-        setModelStatus(prev => {
-          const newStatus = { ...prev };
+  //     const response = await fetch('/api/check-model-status', {
+  //       method: 'POST',
+  //       headers: {
+  //         'Content-Type': 'application/json'
+  //       },
+  //       body: JSON.stringify({ models: allModels })
+  //     });
+      
+  //     if (response.ok) {
+  //       const data = await response.json();
+  //       console.log('[Debug] 获取到模型状态响应:', data);
+        
+  //       setModelStatus(prev => {
+  //         const newStatus = { ...prev };
           
-          // 更新状态，但保留正在部署的模型状态
-          Object.entries(data.model_status || {}).forEach(([modelKey, status]) => {
-            // 如果模型不在deployingModels中，或者已经完成/失败，则更新状态
-            if (!deployingModelsRef.current.has(modelKey) || 
-                status.status === 'deployed' || 
-                status.status === 'available' || 
-                status.status === 'error' || 
-                status.status === 'failed') {
-              newStatus[modelKey] = status;
-            }
-          });
+  //         // 更新状态，但保留正在部署的模型状态
+  //         Object.entries(data.model_status || {}).forEach(([modelKey, status]) => {
+  //           // 如果模型不在deployingModels中，或者已经完成/失败，则更新状态
+  //           if (!deployingModelsRef.current.has(modelKey) || 
+  //               status.status === 'deployed' || 
+  //               status.status === 'available' || 
+  //               status.status === 'error' || 
+  //               status.status === 'failed') {
+  //             newStatus[modelKey] = status;
+  //           }
+  //         });
           
-          return newStatus;
-        });
-      }
-    } catch (error) {
-      console.error('检查模型状态失败:', error);
-      message.error('获取模型状态失败');
-    } finally {
-      setLoading(false);
-    }
-  };
+  //         console.log('[Debug] 更新后的模型状态:', newStatus);
+  //         return newStatus;
+  //       });
+  //     } else {
+  //       console.log('[Debug] 获取模型状态失败, HTTP状态码:', response.status);
+  //       const errorText = await response.text();
+  //       console.log('[Debug] 错误内容:', errorText);
+  //     }
+  //   } catch (error) {
+  //     console.error('[Debug] 检查模型状态异常:', error);
+  //     message.error('获取模型状态失败');
+  //   } finally {
+  //     setLoading(false);
+  //   }
+  // };
 
   // 部署模型
   const handleDeploy = async (modelKey) => {
-    const newDeployingSet = new Set([...deployingModels, modelKey]);
-    setDeployingModels(newDeployingSet);
-    deployingModelsRef.current = newDeployingSet;
+    // const newDeployingSet = new Set([...deployingModels, modelKey]);
+    // setDeployingModels(newDeployingSet);
+    // deployingModelsRef.current = newDeployingSet;
     
     try {
       const response = await fetch('/api/deploy-model', {
@@ -167,91 +179,164 @@ const ModelHubPage = () => {
         // 立即更新状态为部署中
         setModelStatus(prev => ({
           ...prev,
-          [modelKey]: { status: 'deploying', message: '正在部署中...' }
+          [modelKey]: { status: 'init', message: '初始化' }
         }));
         
-        // 开始轮询部署状态
-        startPollingDeploymentStatus(modelKey);
       } else {
         message.error(`${modelKey} 部署请求失败`);
-        const newSet = new Set(deployingModelsRef.current);
-        newSet.delete(modelKey);
-        setDeployingModels(newSet);
-        deployingModelsRef.current = newSet;
       }
     } catch (error) {
       console.error('部署模型失败:', error);
       message.error('部署请求失败');
-      const newSet = new Set(deployingModelsRef.current);
-      newSet.delete(modelKey);
-      setDeployingModels(newSet);
-      deployingModelsRef.current = newSet;
     }
   };
 
   // 轮询部署状态
-  const startPollingDeploymentStatus = (modelKey) => {
-    const pollInterval = setInterval(async () => {
-      try {
-        const response = await fetch('/api/check-model-status', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ models: [modelKey] })
-        });
+  // const startPollingDeploymentStatus = (modelKey) => {
+  //   const pollInterval = setInterval(async () => {
+  //     try {
+  //       const response = await fetch('/api/check-model-status', {
+  //         method: 'POST',
+  //         headers: {
+  //           'Content-Type': 'application/json'
+  //         },
+  //         body: JSON.stringify({ models: [modelKey] })
+  //       });
         
+  //       if (response.ok) {
+  //         const data = await response.json();
+  //         const status = data.model_status?.[modelKey];
+          
+  //         // 如果部署完成或失败，停止轮询
+  //         if (status && (status.status === 'deployed' || status.status === 'available' || status.status === 'error' || status.status === 'failed')) {
+  //           clearInterval(pollInterval);
+            
+  //           // 更新模型状态
+  //           setModelStatus(prev => ({
+  //             ...prev,
+  //             [modelKey]: status
+  //           }));
+            
+  //           // 从部署中状态移除
+  //           const newSet = new Set(deployingModelsRef.current);
+  //           newSet.delete(modelKey);
+  //           setDeployingModels(newSet);
+  //           deployingModelsRef.current = newSet;
+            
+  //           if (status.status === 'deployed' || status.status === 'available') {
+  //             message.success(`${modelKey} 部署成功！`);
+  //           } else if (status.status === 'error' || status.status === 'failed') {
+  //             message.error(`${modelKey} 部署失败: ${status.message || '未知错误'}`);
+  //           }
+  //         } else {
+  //           // 部署仍在进行中，更新状态但保持在deployingModels中
+  //           setModelStatus(prev => ({
+  //             ...prev,
+  //             [modelKey]: status || { status: 'deploying', message: '部署中...' }
+  //           }));
+  //         }
+  //       }
+  //     } catch (error) {
+  //       console.error('轮询部署状态失败:', error);
+  //     }
+  //   }, 3000); // 每3秒轮询一次
+
+  //   // 30分钟后停止轮询（防止无限轮询）
+  //   setTimeout(() => {
+  //     clearInterval(pollInterval);
+  //     const newSet = new Set(deployingModelsRef.current);
+  //     newSet.delete(modelKey);
+  //     setDeployingModels(newSet);
+  //     deployingModelsRef.current = newSet;
+  //     message.warning(`${modelKey} 部署超时，请手动刷新状态`);
+  //   }, 30 * 60 * 1000);
+  // };
+
+  useEffect(() => {
+    const initData = async () => {
+      console.log('[Debug] 初始化组件数据');
+      
+      try {
+        // 直接获取数据并处理，而不使用中间状态
+        const response = await fetch('/api/model-list');
         if (response.ok) {
           const data = await response.json();
-          const status = data.model_status?.[modelKey];
+          console.log('[Debug] 获取到模型列表数据:', data);
           
-          // 如果部署完成或失败，停止轮询
-          if (status && (status.status === 'deployed' || status.status === 'available' || status.status === 'error' || status.status === 'failed')) {
-            clearInterval(pollInterval);
-            
-            // 更新模型状态
-            setModelStatus(prev => ({
-              ...prev,
-              [modelKey]: status
-            }));
-            
-            // 从部署中状态移除
-            const newSet = new Set(deployingModelsRef.current);
-            newSet.delete(modelKey);
-            setDeployingModels(newSet);
-            deployingModelsRef.current = newSet;
-            
-            if (status.status === 'deployed' || status.status === 'available') {
-              message.success(`${modelKey} 部署成功！`);
-            } else if (status.status === 'error' || status.status === 'failed') {
-              message.error(`${modelKey} 部署失败: ${status.message || '未知错误'}`);
+          if (data.status === 'success' && data.models) {
+            // 构建bedrock模型列表
+            const bedrockModels = data.models.bedrock ? 
+              Object.entries(data.models.bedrock).map(([key, info]) => ({
+                key,
+                name: info.name,
+                description: info.description,
+                alwaysAvailable: true
+              })) : [];
+              
+            // 构建emd模型列表
+            const emdModels = data.models.emd ? 
+              Object.entries(data.models.emd).map(([key, info]) => ({
+                key,
+                name: info.name,
+                description: info.description,
+                alwaysAvailable: false
+              })) : [];
+              
+            console.log('[Debug] 处理后的模型列表:', { bedrockModels, emdModels });
+              
+            // 更新模型分类信息
+            setModelCategories({
+              bedrock: {
+                title: 'Bedrock 模型',
+                icon: <CloudOutlined />,
+                color: '#1890ff',
+                models: bedrockModels
+              },
+              emd: {
+                title: 'EMD 部署模型',
+                icon: <ThunderboltOutlined />,
+                color: '#52c41a',
+                models: emdModels
+              }
+            });
+              
+            // 立即准备模型列表并发送请求
+            const allModels = [...bedrockModels.map(m => m.key), ...emdModels.map(m => m.key)];
+            console.log('[Debug] 将发送到后端的模型列表:', allModels);
+              
+            if (allModels.length > 0) {
+              // 直接调用API检查状态，而不使用中间函数
+              const statusResponse = await fetch('/api/check-model-status', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ models: allModels })
+              });
+                
+              if (statusResponse.ok) {
+                const statusData = await statusResponse.json();
+                console.log('[Debug] 获取到模型状态响应:', statusData);
+                  
+                if (statusData.model_status) {
+                  setModelStatus(statusData.model_status);
+                }
+              } else {
+                console.log('[Debug] 状态检查失败, HTTP状态码:', statusResponse.status);
+                const errorText = await statusResponse.text();
+                console.log('[Debug] 错误内容:', errorText);
+              }
             }
-          } else {
-            // 部署仍在进行中，更新状态但保持在deployingModels中
-            setModelStatus(prev => ({
-              ...prev,
-              [modelKey]: status || { status: 'deploying', message: '部署中...' }
-            }));
           }
         }
       } catch (error) {
-        console.error('轮询部署状态失败:', error);
+        console.error('[Debug] 初始化数据异常:', error);
+      } finally {
+        setLoading(false);
       }
-    }, 3000); // 每3秒轮询一次
-
-    // 30分钟后停止轮询（防止无限轮询）
-    setTimeout(() => {
-      clearInterval(pollInterval);
-      const newSet = new Set(deployingModelsRef.current);
-      newSet.delete(modelKey);
-      setDeployingModels(newSet);
-      deployingModelsRef.current = newSet;
-      message.warning(`${modelKey} 部署超时，请手动刷新状态`);
-    }, 30 * 60 * 1000);
-  };
-
-  useEffect(() => {
-    checkModelStatus();
+    };
+    
+    initData();
   }, []);
 
   const getStatusTag = (model) => {
@@ -268,8 +353,12 @@ const ModelHubPage = () => {
         return <Tag color="success" icon={<CheckCircleOutlined />}>已部署</Tag>;
       case 'not_deployed':
         return <Tag color="warning">未部署</Tag>;
-      case 'deploying':
+      case 'failed':
+        return <Tag color="warning">部署失败</Tag>;
+      case 'inprogress':
         return <Tag color="processing">部署中</Tag>;
+      case 'init':
+        return <Tag color="processing">初始化</Tag>;
       default:
         return <Tag color="default">未知</Tag>;
     }
@@ -279,21 +368,22 @@ const ModelHubPage = () => {
     if (model.alwaysAvailable) return null;
     
     const status = modelStatus[model.key];
-    const isDeploying = deployingModels.has(model.key);
+    // const modelIsDeploying = deployingModels.has(model.key);
     
     if (status?.status === 'available' || status?.status === 'deployed') {
       return null;
     }
     
-    if (status?.status === 'deploying' || isDeploying) {
+    if (status?.status === 'inprogress' || status?.status === 'init') {
       return (
         <Button 
           type="primary" 
           size="small" 
-          loading
+          icon={<PlayCircleOutlined />}
+          // loading
           disabled
         >
-          部署中
+          部署
         </Button>
       );
     }
@@ -304,7 +394,6 @@ const ModelHubPage = () => {
         size="small"
         icon={<PlayCircleOutlined />}
         onClick={() => handleDeploy(model.key)}
-        loading={isDeploying}
       >
         部署
       </Button>
@@ -315,7 +404,6 @@ const ModelHubPage = () => {
     if (model.alwaysAvailable) return null;
     
     const status = modelStatus[model.key];
-    const isDeploying = deployingModels.has(model.key);
     
     // 只有在已部署状态下才显示清理按钮
     if (status?.status === 'available' || status?.status === 'deployed') {
@@ -327,7 +415,7 @@ const ModelHubPage = () => {
           onClick={() => handleCleanup(model.key)}
           style={{ width: '100%' }}
         >
-          清理资源
+          停止
         </Button>
       );
     }
@@ -342,7 +430,7 @@ const ModelHubPage = () => {
     // message.info(`${modelKey} 清理功能开发中...`);
   };
 
-  const renderModelCard = (model, category) => (
+  const renderModelCard = (model) => (
     <Card
       key={model.key}
       size="small"
@@ -364,7 +452,7 @@ const ModelHubPage = () => {
             {model.description}
           </Paragraph>
         </div>
-        <div style={{ marginLeft: 16 }}>
+        <div style={{ marginLeft: 2 }}>
           <Space direction="vertical" size="small">
             {getDeployButton(model)}
             {!model.alwaysAvailable && getCleanupButton(model)}
@@ -405,7 +493,7 @@ const ModelHubPage = () => {
             <Row gutter={[16, 16]}>
               {category.models.map(model => (
                 <Col key={model.key} xs={24} sm={12} lg={8} xl={6}>
-                  {renderModelCard(model, category)}
+                  {renderModelCard(model)}
                 </Col>
               ))}
             </Row>

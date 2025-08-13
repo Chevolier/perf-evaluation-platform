@@ -4,7 +4,8 @@ import {
   SettingOutlined, 
   PlayCircleOutlined, 
   ThunderboltOutlined,
-  RobotOutlined 
+  RobotOutlined,
+  LineChartOutlined 
 } from '@ant-design/icons';
 import ModelSelectionModal from './components/ModelSelectionModal';
 import PlaygroundPage from './pages/PlaygroundPage';
@@ -40,6 +41,12 @@ function App() {
       onClick: () => setCurrentPage('playground')
     },
     {
+      key: 'model-evaluation',
+      icon: <LineChartOutlined />,
+      label: '模型评测',
+      onClick: () => setCurrentPage('model-evaluation')
+    },
+    {
       key: 'stress-test',
       icon: <ThunderboltOutlined />,
       label: '压力测试',
@@ -67,6 +74,13 @@ function App() {
             onParamsChange={setParams}
             onModelChange={setSelectedModels}
           />
+        );
+      case 'model-evaluation':
+        return (
+          <div style={{ padding: '20px', textAlign: 'center' }}>
+            <Title level={3}>模型评测</Title>
+            <p style={{ color: '#666' }}>功能开发中，敬请期待...</p>
+          </div>
         );
       case 'stress-test':
         return (
@@ -96,7 +110,11 @@ function App() {
         fontWeight: 'bold',
         textAlign: 'center',
         boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-        zIndex: 1000
+        zIndex: 1000,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: '64px'
       }}>
         <Title level={2} style={{ color: '#fff', margin: 0 }}>
           多模态大模型评测平台
