@@ -10,6 +10,7 @@ import {
 import ModelSelectionModal from './components/ModelSelectionModal';
 import PlaygroundPage from './pages/PlaygroundPage';
 import ModelHubPage from './pages/ModelHubPage';
+import StressTestPage from './pages/StressTestPage';
 import 'antd/dist/reset.css';
 
 const { Header, Content, Sider } = Layout;
@@ -83,12 +84,7 @@ function App() {
           </div>
         );
       case 'stress-test':
-        return (
-          <div style={{ padding: '20px', textAlign: 'center' }}>
-            <Title level={3}>压力测试</Title>
-            <p style={{ color: '#666' }}>功能开发中，敬请期待...</p>
-          </div>
-        );
+        return <StressTestPage />;
       case 'settings':
         return (
           <div style={{ padding: '20px', textAlign: 'center' }}>

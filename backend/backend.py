@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import traceback
 from datetime import datetime
 
 # 第三方库 - Web相关
@@ -1907,6 +1908,501 @@ def check_model_status():
         
     except Exception as e:
         logging.error(f"Check model status error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+# 压力测试相关功能
+stress_test_sessions = {}
+
+def run_stress_test_evalscope(model_key, test_params, session_id):
+    """使用evalscope Python API运行压力测试"""
+    global stress_test_sessions
+    
+    try:
+        logging.info(f"[STRESS_TEST] Starting stress test for session {session_id} with model {model_key}")
+        logging.info(f"[STRESS_TEST] Test params: {test_params}")
+        
+        # 初始化测试状态
+        stress_test_sessions[session_id] = {
+            "status": "preparing",
+            "model": model_key,
+            "start_time": datetime.now().isoformat(),
+            "progress": 0,
+            "message": "准备测试环境...",
+            "results": None,
+            "error": None
+        }
+        logging.info(f"[STRESS_TEST] Session {session_id} initialized")
+        
+        # 检查模型是否可用
+        logging.info(f"[STRESS_TEST] Checking if model {model_key} is available")
+        deployed_models = get_current_models()["deployed"]
+        logging.info(f"[STRESS_TEST] Deployed models: {list(deployed_models.keys())}")
+        logging.info(f"[STRESS_TEST] Bedrock models: {list(BEDROCK_MODELS.keys())}")
+        
+        if model_key not in deployed_models and model_key not in BEDROCK_MODELS:
+            error_msg = f"模型 {model_key} 未部署或不可用"
+            logging.error(f"[STRESS_TEST] {error_msg}")
+            raise Exception(error_msg)
+        
+        logging.info(f"[STRESS_TEST] Model {model_key} is available. Setting status to running...")
+        stress_test_sessions[session_id]["status"] = "running"
+        stress_test_sessions[session_id]["message"] = "正在运行压力测试..."
+        stress_test_sessions[session_id]["progress"] = 10
+        logging.info(f"[STRESS_TEST] Session {session_id} status updated to running")
+        
+        # 获取测试参数
+        num_requests = test_params.get('num_requests', 100)
+        concurrency = test_params.get('concurrency', 10)
+        input_tokens_range = test_params.get('input_tokens_range', [50, 100])
+        output_tokens_range = test_params.get('output_tokens_range', [100, 200])
+        temperature = test_params.get('temperature', 0.1)
+        
+        logging.info(f"[STRESS_TEST] Test parameters - requests: {num_requests}, concurrency: {concurrency}")
+        logging.info(f"[STRESS_TEST] Token ranges - input: {input_tokens_range}, output: {output_tokens_range}")
+        
+        # 准备evalscope Python API
+        stress_test_sessions[session_id]["progress"] = 30
+        stress_test_sessions[session_id]["message"] = "配置evalscope参数..."
+        
+        # 根据模型类型构建API配置
+        if model_key in EMD_MODELS:
+            # EMD模型使用OpenAI格式API
+            model_id = EMD_MODELS[model_key]["model_path"]
+            deployed_tag = deployed_models[model_key]['tag']
+            base_url = get_emd_base_url(model_id, deployed_tag)
+            api_url = f"{base_url}/v1/chat/completions"
+            model_endpoint = f"{model_id}/{deployed_tag}"
+        else:
+            # Bedrock模型暂不支持（需要本地API调用）
+            raise Exception(f"Bedrock模型 {model_key} 暂不支持直接压力测试，请使用EMD模型")
+        
+        # 使用evalscope Python API
+        try:
+            # 动态导入evalscope模块（在evalscope环境中运行）
+            import sys
+            evalscope_env_path = "/home/ec2-user/SageMaker/efs/conda_envs/evalscope/lib/python3.10/site-packages"
+            if evalscope_env_path not in sys.path:
+                sys.path.insert(0, evalscope_env_path)
+            
+            # 创建临时Python脚本文件 - 包含修复EMD API兼容性的补丁
+            evalscope_script_content = f"""
+import sys
+sys.path.insert(0, '/home/ec2-user/SageMaker/efs/conda_envs/evalscope/lib/python3.10/site-packages')
+
+# 修复EMD API流式响应兼容性问题
+def patch_openai_api():
+    from evalscope.perf.plugin.api.openai_api import OpenaiPlugin
+    
+    # 保存原始方法
+    original_calculate_tokens = OpenaiPlugin._OpenaiPlugin__calculate_tokens_from_content
+    
+    def patched_calculate_tokens(self, request, delta_contents):
+        try:
+            # 最强力的数据清洗和类型转换
+            normalized_contents = []
+            
+            # 检查delta_contents本身的类型
+            if delta_contents is None:
+                return 0, 0
+            
+            # 确保delta_contents是可迭代的
+            if not hasattr(delta_contents, '__iter__') or isinstance(delta_contents, (str, bytes)):
+                # 如果不是列表，尝试包装成列表
+                delta_contents = [delta_contents] if delta_contents is not None else []
+            
+            for i, choice_contents in enumerate(delta_contents):
+                try:
+                    if choice_contents is None:
+                        normalized_contents.append([])
+                    elif isinstance(choice_contents, (list, tuple)):
+                        # 处理列表/元组：递归清理所有元素
+                        clean_list = []
+                        for item in choice_contents:
+                            if item is not None:
+                                if isinstance(item, (str, int, float, bool)):
+                                    clean_list.append(str(item))
+                                else:
+                                    clean_list.append(str(item) if hasattr(item, '__str__') else '')
+                        normalized_contents.append(clean_list)
+                    elif isinstance(choice_contents, (str, int, float, bool)):
+                        # 基础类型：转换为字符串列表
+                        normalized_contents.append([str(choice_contents)])
+                    elif isinstance(choice_contents, dict):
+                        # 字典类型：提取文本内容
+                        text_content = choice_contents.get('text', choice_contents.get('content', str(choice_contents)))
+                        normalized_contents.append([str(text_content)])
+                    else:
+                        # 其他类型：强制转换为字符串
+                        try:
+                            str_content = str(choice_contents) if choice_contents is not None else ''
+                            normalized_contents.append([str_content])
+                        except:
+                            normalized_contents.append([''])
+                except Exception as item_error:
+                    print(f"Error processing item {{i}}: {{item_error}}, type: {{type(choice_contents)}}")
+                    normalized_contents.append([''])
+            
+            # 确保我们有有效的数据结构
+            if not normalized_contents:
+                return 0, 0
+            
+            return original_calculate_tokens(self, request, normalized_contents)
+            
+        except Exception as e:
+            print(f"Primary patch failed: {{e}}, delta_contents type: {{type(delta_contents)}}")
+            # 超级安全的回退策略
+            try:
+                # 尝试完全重构数据
+                if delta_contents is None:
+                    return 0, 0
+                
+                # 强制创建安全的字符串列表结构
+                safe_structure = []
+                
+                if isinstance(delta_contents, (list, tuple)):
+                    for item in delta_contents:
+                        if item is None:
+                            safe_structure.append([])
+                        else:
+                            # 无论什么类型，都转换为字符串列表
+                            safe_structure.append([str(item)[:1000]])  # 限制长度防止内存问题
+                else:
+                    # 单个项目，包装成列表结构
+                    safe_structure.append([str(delta_contents)[:1000]] if delta_contents is not None else [''])
+                
+                return original_calculate_tokens(self, request, safe_structure)
+                
+            except Exception as fallback_error:
+                print(f"All fallback attempts failed: {{fallback_error}}")
+                # 最终安全网：返回保守的token估计
+                try:
+                    # 尝试基于请求内容估算token数
+                    if hasattr(request, 'get'):
+                        content = request.get('messages', [])
+                        if content:
+                            text_content = str(content)
+                            estimated_tokens = max(len(text_content) // 4, 10)  # 粗略估计
+                            return estimated_tokens, estimated_tokens
+                except:
+                    pass
+                
+                return 10, 10  # 最保守的默认值
+    
+    # 应用补丁
+    OpenaiPlugin._OpenaiPlugin__calculate_tokens_from_content = patched_calculate_tokens
+
+# 应用补丁
+patch_openai_api()
+
+from evalscope.perf.main import run_perf_benchmark
+from evalscope.perf.arguments import Arguments
+import json
+
+# 创建测试配置 - 保持流式传输以获得TTFT和延迟指标
+task_cfg = Arguments(
+    parallel=[{concurrency}],
+    number=[{num_requests}],
+    model='{model_endpoint}',
+    url='{api_url}',
+    api='openai',
+    dataset='random',
+    max_tokens={max(output_tokens_range)},
+    min_tokens={min(output_tokens_range)},
+    min_prompt_length={min(input_tokens_range)},
+    max_prompt_length={max(input_tokens_range)},
+    tokenizer_path='/home/ec2-user/SageMaker/efs/Models/Qwen3-32B-AWQ',
+    temperature={temperature},
+    stream=True  # 保持流式传输以获得准确的TTFT和延迟指标
+)
+
+# 运行基准测试
+try:
+    results = run_perf_benchmark(task_cfg)
+    print("EVALSCOPE_SUCCESS:", json.dumps(results) if results else "{{}}")
+except Exception as e:
+    print("EVALSCOPE_ERROR:", str(e))
+    import traceback
+    traceback.print_exc()
+"""
+            
+            # 创建临时脚本文件
+            import tempfile
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as script_file:
+                script_file.write(evalscope_script_content)
+                script_path = script_file.name
+            
+            stress_test_sessions[session_id]["progress"] = 20
+            stress_test_sessions[session_id]["message"] = "准备执行evalscope基准测试..."
+            
+            # 在evalscope环境中执行脚本
+            env = os.environ.copy()
+            evalscope_cmd = f"source /opt/conda/etc/profile.d/conda.sh && conda activate evalscope && python {script_path}"
+            
+            logging.info(f"[STRESS_TEST] Executing evalscope Python API...")
+            stress_test_sessions[session_id]["progress"] = 30
+            stress_test_sessions[session_id]["message"] = "执行evalscope基准测试..."
+            
+            try:
+                result = subprocess.run(
+                    evalscope_cmd,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=1800,  # 30分钟超时
+                    env=env,
+                    executable='/bin/bash'
+                )
+                
+                logging.info(f"[STRESS_TEST] Evalscope Python API completed with return code: {result.returncode}")
+                if result.stdout:
+                    logging.info(f"[STRESS_TEST] Evalscope stdout: {result.stdout}")
+                if result.stderr:
+                    logging.error(f"[STRESS_TEST] Evalscope stderr: {result.stderr}")
+                
+                stress_test_sessions[session_id]["progress"] = 90
+                stress_test_sessions[session_id]["message"] = "正在处理测试结果..."
+                
+            finally:
+                # 清理临时脚本文件
+                try:
+                    os.unlink(script_path)
+                except:
+                    pass
+            
+            # 解析结果
+            if "EVALSCOPE_SUCCESS:" in result.stdout:
+                # 提取成功结果
+                success_line = [line for line in result.stdout.split('\n') if 'EVALSCOPE_SUCCESS:' in line][0]
+                results_str = success_line.replace('EVALSCOPE_SUCCESS:', '').strip()
+                
+                try:
+                    # 尝试解析JSON结果
+                    import json
+                    raw_results = json.loads(results_str) if results_str else []
+                    
+                    # 转换为前端期望的格式
+                    if isinstance(raw_results, list) and len(raw_results) >= 2:
+                        summary_data = raw_results[0]
+                        percentile_data = raw_results[1] if len(raw_results) > 1 else {}
+                        
+                        # 创建前端兼容的结果格式
+                        results = {
+                            "qps": summary_data.get("Request throughput (req/s)", 0),
+                            "avg_ttft": summary_data.get("Average time to first token (s)", 0),
+                            "avg_latency": summary_data.get("Average latency (s)", 0),
+                            "tokens_per_second": summary_data.get("Total token throughput (tok/s)", 0),
+                            "p50_ttft": percentile_data.get("TTFT (s)", [0] * 10)[4] if "TTFT (s)" in percentile_data else 0,
+                            "p99_ttft": percentile_data.get("TTFT (s)", [0] * 10)[9] if "TTFT (s)" in percentile_data else 0,
+                            "p50_latency": percentile_data.get("Latency (s)", [0] * 10)[4] if "Latency (s)" in percentile_data else 0,
+                            "p99_latency": percentile_data.get("Latency (s)", [0] * 10)[9] if "Latency (s)" in percentile_data else 0,
+                            "summary": summary_data,
+                            "percentiles": percentile_data,
+                            "detailed_metrics": {
+                                "ttft_distribution": percentile_data.get("TTFT (s)", []),
+                                "latency_distribution": percentile_data.get("Latency (s)", []),
+                                "input_tokens": percentile_data.get("Input tokens", []),
+                                "output_tokens": percentile_data.get("Output tokens", [])
+                            }
+                        }
+                    else:
+                        # 备用解析方案
+                        results = {
+                            "summary": raw_results[0] if raw_results else {},
+                            "raw_data": raw_results
+                        }
+                        
+                except Exception as parse_error:
+                    logging.error(f"[STRESS_TEST] JSON parsing failed: {parse_error}")
+                    # 如果解析失败，尝试文本解析
+                    results = parse_evalscope_output(result.stdout)
+                
+                stress_test_sessions[session_id].update({
+                    "status": "completed",
+                    "progress": 100,
+                    "message": "测试完成",
+                    "results": results,
+                    "end_time": datetime.now().isoformat(),
+                    "raw_output": result.stdout
+                })
+                
+            elif "EVALSCOPE_ERROR:" in result.stdout:
+                # 提取错误信息
+                error_line = [line for line in result.stdout.split('\n') if 'EVALSCOPE_ERROR:' in line][0]
+                error_msg = error_line.replace('EVALSCOPE_ERROR:', '').strip()
+                
+                stress_test_sessions[session_id].update({
+                    "status": "failed",
+                    "progress": 100,
+                    "message": "测试失败",
+                    "error": error_msg,
+                    "raw_output": result.stdout,
+                    "end_time": datetime.now().isoformat()
+                })
+            else:
+                # 未找到明确的成功或错误标记
+                if result.returncode == 0:
+                    # 进程成功但输出格式可能不符合预期
+                    results = parse_evalscope_output(result.stdout)
+                    stress_test_sessions[session_id].update({
+                        "status": "completed",
+                        "progress": 100,
+                        "message": "测试完成",
+                        "results": results,
+                        "end_time": datetime.now().isoformat(),
+                        "raw_output": result.stdout
+                    })
+                else:
+                    stress_test_sessions[session_id].update({
+                        "status": "failed",
+                        "progress": 100,
+                        "message": "测试失败",
+                        "error": result.stderr or "未知错误",
+                        "raw_output": result.stdout,
+                        "end_time": datetime.now().isoformat()
+                    })
+                    
+        except Exception as api_error:
+            logging.error(f"[STRESS_TEST] Evalscope API error: {str(api_error)}")
+            raise Exception(f"Evalscope API调用失败: {str(api_error)}")
+                
+    except Exception as e:
+        logging.error(f"[STRESS_TEST] Exception in stress test session {session_id}: {str(e)}")
+        logging.error(f"[STRESS_TEST] Exception traceback: {traceback.format_exc()}")
+        stress_test_sessions[session_id].update({
+            "status": "failed",
+            "progress": 100,
+            "message": f"测试异常: {str(e)}",
+            "error": str(e),
+            "end_time": datetime.now().isoformat()
+        })
+
+def parse_evalscope_output(output):
+    """解析evalscope输出结果"""
+    try:
+        # 简单的输出解析，实际可能需要根据evalscope的具体输出格式调整
+        lines = output.split('\n')
+        results = {
+            "summary": {
+                "total_requests": 0,
+                "successful_requests": 0,
+                "failed_requests": 0,
+                "average_latency": 0,
+                "min_latency": 0,
+                "max_latency": 0,
+                "p95_latency": 0,
+                "p99_latency": 0,
+                "requests_per_second": 0,
+                "average_ttft": 0,
+                "tokens_per_second": 0
+            },
+            "detailed_metrics": [],
+            "errors": []
+        }
+        
+        # 这里可以添加更详细的解析逻辑
+        for line in lines:
+            if "Total requests" in line:
+                try:
+                    results["summary"]["total_requests"] = int(line.split(":")[-1].strip())
+                except:
+                    pass
+            elif "Successful" in line:
+                try:
+                    results["summary"]["successful_requests"] = int(line.split(":")[-1].strip())
+                except:
+                    pass
+            elif "Average latency" in line:
+                try:
+                    results["summary"]["average_latency"] = float(line.split(":")[-1].strip().replace('ms', ''))
+                except:
+                    pass
+        
+        return results
+    except Exception as e:
+        return {"error": f"Failed to parse results: {str(e)}", "raw_output": output}
+
+@app.route('/api/stress-test/start', methods=['POST'])
+def start_stress_test():
+    """启动压力测试"""
+    try:
+        data = request.json
+        model_key = data.get('model')
+        test_params = data.get('params', {})
+        
+        if not model_key:
+            return jsonify({"error": "Model is required"}), 400
+        
+        # 生成唯一的测试会话ID
+        import uuid
+        session_id = str(uuid.uuid4())[:8]
+        
+        # 在后台线程中运行测试
+        thread = threading.Thread(
+            target=run_stress_test_evalscope,
+            args=(model_key, test_params, session_id),
+            daemon=True
+        )
+        thread.start()
+        
+        return jsonify({
+            "status": "success",
+            "session_id": session_id,
+            "message": "压力测试已启动"
+        })
+        
+    except Exception as e:
+        logging.error(f"Start stress test error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/stress-test/status/<session_id>', methods=['GET'])
+def get_stress_test_status(session_id):
+    """获取压力测试状态"""
+    try:
+        if session_id not in stress_test_sessions:
+            logging.warning(f"[STRESS_TEST_STATUS] Session {session_id} not found in sessions")
+            return jsonify({"error": "Test session not found"}), 404
+        
+        session_data = stress_test_sessions[session_id]
+        logging.info(f"[STRESS_TEST_STATUS] Session {session_id} status: {session_data.get('status')}, progress: {session_data.get('progress')}")
+        
+        return jsonify({
+            "status": "success",
+            "test_session": session_data
+        })
+        
+    except Exception as e:
+        logging.error(f"Get stress test status error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/stress-test/download/<session_id>', methods=['GET'])
+def download_stress_test_report(session_id):
+    """下载压力测试报告"""
+    try:
+        if session_id not in stress_test_sessions:
+            return jsonify({"error": "Test session not found"}), 404
+        
+        session_data = stress_test_sessions[session_id]
+        
+        # 生成详细报告
+        report = {
+            "test_info": {
+                "model": session_data["model"],
+                "start_time": session_data["start_time"],
+                "end_time": session_data.get("end_time"),
+                "status": session_data["status"]
+            },
+            "results": session_data.get("results"),
+            "raw_output": session_data.get("raw_output"),
+            "error": session_data.get("error")
+        }
+        
+        # 返回JSON格式的报告
+        response = jsonify(report)
+        response.headers["Content-Disposition"] = f"attachment; filename=stress_test_report_{session_id}.json"
+        return response
+        
+    except Exception as e:
+        logging.error(f"Download stress test report error: {e}")
         return jsonify({"error": str(e)}), 500
 
 # @app.route('/api/deploy-selected-models', methods=['POST'])
