@@ -82,12 +82,12 @@ EMD_MODELS = {
         "description": "用户界面理解专用模型",
     },
     'qwen3-0.6b': {
-        "model_path": 'Qwen3-0.6B-Instruct',
+        "model_path": 'Qwen3-0.6B',
         "name": "Qwen3-0.6B",
         "description": "最新Qwen3模型，0.6B参数，高效轻量",
     },
     'qwen3-8b': {
-        "model_path": 'Qwen3-8B-Instruct',
+        "model_path": 'Qwen3-8B',
         "name": "Qwen3-8B",
         "description": "最新Qwen3模型，8B参数，强大性能",
     }
@@ -353,7 +353,7 @@ def create_emd_openai_client(model_id, tag):
     """Create OpenAI client for EMD endpoints"""
     base_url = get_emd_base_url(model_id, tag)
     if base_url:
-        return OpenAI(api_key="", base_url=f"{base_url}")
+        return OpenAI(api_key="", base_url=f"{base_url}/v1")
     return None
 
 # def create_emd_sagemaker_client(model_id, model_tag=None):
@@ -1055,7 +1055,7 @@ def call_emd_model_internal(data, model_key):
         print("openai_client", openai_client)
         if openai_client:
             logging.info(f"✅ EMD OpenAI client available, proceeding with inference")
-            result = call_emd_via_openai(openai_client, data, model_id, deployed_tag, log_entry)
+            result = call_emd_via_openai(openai_client, data, model_id, deployed_tag, model_key, log_entry)
             end_time = time.time()
             processing_time = f"{end_time - start_time:.2f}s"
             
@@ -1093,7 +1093,7 @@ def call_emd_model_internal(data, model_key):
         
         # No client available - provide helpful error message
         logging.error(f"❌ No EMD client available for {model_id}")
-        error_msg = f"模型 {model_key} 的部署不可用。当前可用模型: {list(DEPLOYED_MODELS.keys())}。"
+        error_msg = f"模型 {model_key} 的部署不可用。当前可用模型: {list(deployed_models.keys())}。"
         raise Exception(error_msg)
         
     except Exception as e:
@@ -1104,7 +1104,7 @@ def call_emd_model_internal(data, model_key):
         logging.error(json.dumps(log_entry, ensure_ascii=False))
         raise Exception(str(e))
 
-def call_emd_via_openai(client, data, model_id, tag, log_entry):
+def call_emd_via_openai(client, data, model_id, tag, model_key, log_entry):
     """Call EMD model via OpenAI API - Updated with working pattern"""
     text = data.get('text', '')
     frames = data.get('frames', [])
