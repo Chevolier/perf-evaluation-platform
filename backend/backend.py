@@ -15,7 +15,7 @@ import traceback
 from datetime import datetime
 
 # 第三方库 - Web相关
-from flask import Flask, request, jsonify, Response
+from flask import Flask, request, jsonify, Response, make_response
 from flask_cors import CORS
 import requests
 
@@ -2376,34 +2376,221 @@ def get_stress_test_status(session_id):
 
 @app.route('/api/stress-test/download/<session_id>', methods=['GET'])
 def download_stress_test_report(session_id):
-    """下载压力测试报告"""
+    """下载压力测试PDF报告"""
     try:
         if session_id not in stress_test_sessions:
             return jsonify({"error": "Test session not found"}), 404
         
         session_data = stress_test_sessions[session_id]
         
-        # 生成详细报告
-        report = {
-            "test_info": {
-                "model": session_data["model"],
-                "start_time": session_data["start_time"],
-                "end_time": session_data.get("end_time"),
-                "status": session_data["status"]
-            },
-            "results": session_data.get("results"),
-            "raw_output": session_data.get("raw_output"),
-            "error": session_data.get("error")
-        }
+        if session_data.get("status") != "completed" or not session_data.get("results"):
+            return jsonify({"error": "Test not completed or no results available"}), 400
         
-        # 返回JSON格式的报告
-        response = jsonify(report)
-        response.headers["Content-Disposition"] = f"attachment; filename=stress_test_report_{session_id}.json"
+        # 生成PDF报告
+        pdf_content = generate_pdf_report(session_data, session_id)
+        
+        # 返回PDF文件
+        response = make_response(pdf_content)
+        response.headers['Content-Type'] = 'application/pdf'
+        response.headers['Content-Disposition'] = f'attachment; filename=stress_test_report_{session_id}.pdf'
         return response
         
     except Exception as e:
         logging.error(f"Download stress test report error: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
+
+def generate_pdf_report(session_data, session_id):
+    """生成PDF格式的压力测试报告"""
+    from reportlab.lib.pagesizes import letter, A4
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import inch
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+    from datetime import datetime
+    import io
+    
+    # 创建PDF缓冲区
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=72, leftMargin=72, topMargin=72, bottomMargin=18)
+    
+    # 获取样式
+    styles = getSampleStyleSheet()
+    
+    # 自定义样式
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=24,
+        spaceAfter=30,
+        alignment=TA_CENTER,
+        textColor=colors.darkblue
+    )
+    
+    heading_style = ParagraphStyle(
+        'CustomHeading',
+        parent=styles['Heading2'],
+        fontSize=16,
+        spaceAfter=15,
+        spaceBefore=20,
+        textColor=colors.darkblue
+    )
+    
+    # 构建PDF内容
+    story = []
+    
+    # 标题
+    story.append(Paragraph("压力测试报告", title_style))
+    story.append(Spacer(1, 20))
+    
+    # 测试信息
+    story.append(Paragraph("测试基本信息", heading_style))
+    
+    test_info_data = [
+        ['项目', '值'],
+        ['模型', session_data.get('model', 'N/A')],
+        ['会话ID', session_id],
+        ['开始时间', session_data.get('start_time', 'N/A')],
+        ['结束时间', session_data.get('end_time', 'N/A')],
+        ['状态', '完成' if session_data.get('status') == 'completed' else session_data.get('status', 'N/A')]
+    ]
+    
+    test_info_table = Table(test_info_data, colWidths=[2*inch, 4*inch])
+    test_info_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 14),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+    ]))
+    
+    story.append(test_info_table)
+    story.append(Spacer(1, 20))
+    
+    # 性能指标概览
+    results = session_data.get('results', {})
+    if results:
+        story.append(Paragraph("性能指标概览", heading_style))
+        
+        metrics_data = [
+            ['指标', '数值', '单位'],
+            ['QPS (每秒查询数)', f"{results.get('qps', 0):.2f}", 'queries/sec'],
+            ['平均首字延迟', f"{results.get('avg_ttft', 0):.3f}", 'seconds'],
+            ['平均端到端延迟', f"{results.get('avg_latency', 0):.3f}", 'seconds'],
+            ['吞吐量', f"{results.get('tokens_per_second', 0):.2f}", 'tokens/sec'],
+            ['P50 首字延迟', f"{results.get('p50_ttft', 0):.3f}", 'seconds'],
+            ['P99 首字延迟', f"{results.get('p99_ttft', 0):.3f}", 'seconds'],
+            ['P50 端到端延迟', f"{results.get('p50_latency', 0):.3f}", 'seconds'],
+            ['P99 端到端延迟', f"{results.get('p99_latency', 0):.3f}", 'seconds']
+        ]
+        
+        metrics_table = Table(metrics_data, colWidths=[2.5*inch, 1.5*inch, 2*inch])
+        metrics_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.lightblue),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('FONTSIZE', (0, 1), (-1, -1), 10)
+        ]))
+        
+        story.append(metrics_table)
+        story.append(Spacer(1, 20))
+        
+        # 百分位数据详细表
+        percentiles = results.get('percentiles', {})
+        if percentiles and 'Percentiles' in percentiles:
+            story.append(PageBreak())
+            story.append(Paragraph("百分位数据详细表", heading_style))
+            
+            percentile_labels = percentiles['Percentiles']
+            percentile_data = [['百分位', 'TTFT (s)', '延迟 (s)', 'ITL (s)', 'TPOT (s)', '输入Token', '输出Token', '吞吐量 (tok/s)']]
+            
+            for i, label in enumerate(percentile_labels):
+                row = [
+                    label,
+                    f"{percentiles.get('TTFT (s)', [0]*len(percentile_labels))[i]:.4f}",
+                    f"{percentiles.get('Latency (s)', [0]*len(percentile_labels))[i]:.4f}",
+                    f"{percentiles.get('ITL (s)', [0]*len(percentile_labels))[i]:.4f}",
+                    f"{percentiles.get('TPOT (s)', [0]*len(percentile_labels))[i]:.4f}",
+                    str(percentiles.get('Input tokens', [0]*len(percentile_labels))[i]),
+                    str(percentiles.get('Output tokens', [0]*len(percentile_labels))[i]),
+                    f"{percentiles.get('Output (tok/s)', [0]*len(percentile_labels))[i]:.2f}"
+                ]
+                percentile_data.append(row)
+            
+            percentile_table = Table(percentile_data, colWidths=[0.8*inch]*8)
+            percentile_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.darkgreen),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 9),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.lightgreen),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ('FONTSIZE', (0, 1), (-1, -1), 8)
+            ]))
+            
+            story.append(percentile_table)
+            story.append(Spacer(1, 20))
+        
+        # 详细摘要信息
+        summary = results.get('summary', {})
+        if summary:
+            story.append(Paragraph("测试执行摘要", heading_style))
+            
+            summary_data = [
+                ['项目', '值'],
+                ['测试耗时', f"{summary.get('Time taken for tests (s)', 0):.2f} 秒"],
+                ['并发数', str(summary.get('Number of concurrency', 0))],
+                ['总请求数', str(summary.get('Total requests', 0))],
+                ['成功请求数', str(summary.get('Succeed requests', 0))],
+                ['失败请求数', str(summary.get('Failed requests', 0))],
+                ['平均输入Token数', f"{summary.get('Average input tokens per request', 0):.1f}"],
+                ['平均输出Token数', f"{summary.get('Average output tokens per request', 0):.1f}"],
+                ['平均Token间延迟', f"{summary.get('Average inter-token latency (s)', 0):.4f} 秒"],
+                ['平均每输出Token时间', f"{summary.get('Average time per output token (s)', 0):.4f} 秒"]
+            ]
+            
+            summary_table = Table(summary_data, colWidths=[3*inch, 3*inch])
+            summary_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.purple),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 12),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.lavender),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ('FONTSIZE', (0, 1), (-1, -1), 10)
+            ]))
+            
+            story.append(summary_table)
+    
+    # 页脚信息
+    story.append(Spacer(1, 30))
+    story.append(Paragraph(f"报告生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", 
+                          ParagraphStyle('Footer', fontSize=10, alignment=TA_CENTER, textColor=colors.grey)))
+    story.append(Paragraph("由 EMD 推理平台生成", 
+                          ParagraphStyle('Footer', fontSize=10, alignment=TA_CENTER, textColor=colors.grey)))
+    
+    # 构建PDF
+    doc.build(story)
+    
+    # 获取PDF数据
+    pdf_data = buffer.getvalue()
+    buffer.close()
+    
+    return pdf_data
 
 # @app.route('/api/deploy-selected-models', methods=['POST'])
 # def deploy_selected_models():

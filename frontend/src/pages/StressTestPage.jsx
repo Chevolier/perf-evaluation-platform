@@ -195,7 +195,7 @@ const StressTestPage = () => {
         const a = document.createElement('a');
         a.style.display = 'none';
         a.href = url;
-        a.download = `stress_test_report_${sessionId}.html`;
+        a.download = `stress_test_report_${sessionId}.pdf`;
         document.body.appendChild(a);
         a.click();
         window.URL.revokeObjectURL(url);
