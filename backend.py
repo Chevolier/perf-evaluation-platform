@@ -1572,16 +1572,16 @@ def deploy_emd_model_background(model_name, tag):
             instance_type = "g5.4xlarge"  # Medium instance for 7B models
         
         # Build EMD deploy command
-        # deploy_cmd = [
-        #     'emd', 'deploy',
-        #     '--model-id', model_id,
-        #     '--instance-type', instance_type,
-        #     '--engine-type', 'vllm',
-        #     '--service-type', 'sagemaker_realtime',
-        #     '--model-tag', tag,
-        #     '--extra-params', '{}',
-        #     '--skip-confirm'
-        # ]
+        deploy_cmd = [
+            'emd', 'deploy',
+            '--model-id', model_id,
+            '--instance-type', instance_type,
+            '--engine-type', 'vllm',
+            '--service-type', 'sagemaker_realtime',
+            '--model-tag', tag,
+            '--extra-params', '{}',
+            '--skip-confirm'
+        ]
 
         logging.info(f"🚀 Starting EMD deployment: model_id={model_id}, instance_type={instance_type}, tag={tag}")
         result = deploy(

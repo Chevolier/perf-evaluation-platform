@@ -57,7 +57,7 @@ A comprehensive platform for multimodal AI inference supporting both AWS Bedrock
 
 3. **Install EMD CLI:**
    ```bash
-   pip install emd-cli
+   # pip install emd-cli
    emd bootstrap
    ```
 
