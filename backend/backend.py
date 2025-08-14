@@ -2409,8 +2409,42 @@ def generate_pdf_report(session_data, session_id):
     from reportlab.lib.units import inch
     from reportlab.lib import colors
     from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
     from datetime import datetime
     import io
+    import os
+    
+    # 注册中文字体
+    try:
+        # 尝试注册中文字体，使用系统字体路径
+        chinese_font_paths = [
+            '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',  # 优先使用Noto CJK
+            '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc',  # WenQuanYi微米黑
+            '/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc',  # WenQuanYi正黑
+            '/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc',  # Linux Noto
+            '/System/Library/Fonts/PingFang.ttc',  # macOS
+        ]
+        
+        font_registered = False
+        for font_path in chinese_font_paths:
+            if os.path.exists(font_path):
+                try:
+                    pdfmetrics.registerFont(TTFont('ChineseFont', font_path))
+                    font_registered = True
+                    break
+                except:
+                    continue
+        
+        # 如果没有找到中文字体，使用Helvetica作为回退
+        if not font_registered:
+            chinese_font_name = 'Helvetica'
+        else:
+            chinese_font_name = 'ChineseFont'
+            
+    except Exception as e:
+        print(f"Font registration error: {e}")
+        chinese_font_name = 'Helvetica'
     
     # 创建PDF缓冲区
     buffer = io.BytesIO()
@@ -2419,10 +2453,11 @@ def generate_pdf_report(session_data, session_id):
     # 获取样式
     styles = getSampleStyleSheet()
     
-    # 自定义样式
+    # 自定义样式（使用中文字体）
     title_style = ParagraphStyle(
         'CustomTitle',
         parent=styles['Heading1'],
+        fontName=chinese_font_name,
         fontSize=24,
         spaceAfter=30,
         alignment=TA_CENTER,
@@ -2432,6 +2467,7 @@ def generate_pdf_report(session_data, session_id):
     heading_style = ParagraphStyle(
         'CustomHeading',
         parent=styles['Heading2'],
+        fontName=chinese_font_name,
         fontSize=16,
         spaceAfter=15,
         spaceBefore=20,
@@ -2462,10 +2498,11 @@ def generate_pdf_report(session_data, session_id):
         ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTNAME', (0, 0), (-1, 0), chinese_font_name),
         ('FONTSIZE', (0, 0), (-1, 0), 14),
         ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
         ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+        ('FONTNAME', (0, 1), (-1, -1), chinese_font_name),
         ('GRID', (0, 0), (-1, -1), 1, colors.black)
     ]))
     
@@ -2494,10 +2531,11 @@ def generate_pdf_report(session_data, session_id):
             ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTNAME', (0, 0), (-1, 0), chinese_font_name),
             ('FONTSIZE', (0, 0), (-1, 0), 12),
             ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
             ('BACKGROUND', (0, 1), (-1, -1), colors.lightblue),
+            ('FONTNAME', (0, 1), (-1, -1), chinese_font_name),
             ('GRID', (0, 0), (-1, -1), 1, colors.black),
             ('FONTSIZE', (0, 1), (-1, -1), 10)
         ]))
@@ -2532,10 +2570,11 @@ def generate_pdf_report(session_data, session_id):
                 ('BACKGROUND', (0, 0), (-1, 0), colors.darkgreen),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
                 ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTNAME', (0, 0), (-1, 0), chinese_font_name),
                 ('FONTSIZE', (0, 0), (-1, 0), 9),
                 ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
                 ('BACKGROUND', (0, 1), (-1, -1), colors.lightgreen),
+                ('FONTNAME', (0, 1), (-1, -1), chinese_font_name),
                 ('GRID', (0, 0), (-1, -1), 1, colors.black),
                 ('FONTSIZE', (0, 1), (-1, -1), 8)
             ]))
@@ -2566,10 +2605,11 @@ def generate_pdf_report(session_data, session_id):
                 ('BACKGROUND', (0, 0), (-1, 0), colors.purple),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
                 ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTNAME', (0, 0), (-1, 0), chinese_font_name),
                 ('FONTSIZE', (0, 0), (-1, 0), 12),
                 ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
                 ('BACKGROUND', (0, 1), (-1, -1), colors.lavender),
+                ('FONTNAME', (0, 1), (-1, -1), chinese_font_name),
                 ('GRID', (0, 0), (-1, -1), 1, colors.black),
                 ('FONTSIZE', (0, 1), (-1, -1), 10)
             ]))
@@ -2577,11 +2617,10 @@ def generate_pdf_report(session_data, session_id):
             story.append(summary_table)
     
     # 页脚信息
+    footer_style = ParagraphStyle('Footer', fontName=chinese_font_name, fontSize=10, alignment=TA_CENTER, textColor=colors.grey)
     story.append(Spacer(1, 30))
-    story.append(Paragraph(f"报告生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", 
-                          ParagraphStyle('Footer', fontSize=10, alignment=TA_CENTER, textColor=colors.grey)))
-    story.append(Paragraph("由 EMD 推理平台生成", 
-                          ParagraphStyle('Footer', fontSize=10, alignment=TA_CENTER, textColor=colors.grey)))
+    story.append(Paragraph(f"报告生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", footer_style))
+    story.append(Paragraph("由 EMD 推理平台生成", footer_style))
     
     # 构建PDF
     doc.build(story)
