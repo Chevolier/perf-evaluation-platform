@@ -80,6 +80,16 @@ EMD_MODELS = {
         "model_path": 'UI-TARS-1.5-7B',
         "name": "UI-TARS-1.5-7B",
         "description": "用户界面理解专用模型",
+    },
+    'qwen3-0.6b': {
+        "model_path": 'Qwen3-0.6B-Instruct',
+        "name": "Qwen3-0.6B",
+        "description": "最新Qwen3模型，0.6B参数，高效轻量",
+    },
+    'qwen3-8b': {
+        "model_path": 'Qwen3-8B-Instruct',
+        "name": "Qwen3-8B",
+        "description": "最新Qwen3模型，8B参数，强大性能",
     }
 }
 
@@ -163,6 +173,7 @@ def get_current_models():
         # 创建反向映射：完整模型名 -> 简化键名
         status = get_model_status()
         print("status", status)
+        logging.info(f"[DEBUG] EMD SDK get_model_status返回: {status}")
         reverse_mapping = {v["model_path"]: k for k, v in EMD_MODELS.items()}
         print("reverse_mapping", reverse_mapping)
         
@@ -191,13 +202,47 @@ def get_current_models():
         for model in status["inprogress"]:
             model_id = model.get("model_id")
             model_tag = model.get("model_tag")
+            stack_status = model.get("stack_status")
+            model_status = model.get("status")
+            execution_info = model.get("execution_info", {})
+            execution_status = execution_info.get("status")
             
             if model_id in reverse_mapping:
                 simple_key = reverse_mapping[model_id]
-                inprogress[simple_key] = {
-                    "tag": model_tag,
-                    "full_name": model_id
-                }
+                # Check if the inprogress model has actually failed
+                is_failed = False
+                
+                # Check various failure indicators
+                if stack_status is not None and any(fail_status in stack_status for fail_status in ["ROLLBACK_COMPLETE", "CREATE_FAILED", "DELETE_FAILED", "ROLLBACK_FAILED"]):
+                    is_failed = True
+                elif model_status == "Failed":
+                    is_failed = True
+                elif execution_status == "Failed":
+                    is_failed = True
+                
+                if is_failed:
+                    failed[simple_key] = {
+                        "tag": model_tag,
+                        "full_name": model_id
+                    }
+                else:
+                    inprogress[simple_key] = {
+                        "tag": model_tag,
+                        "full_name": model_id
+                    }
+        
+        # Also check if there's a "failed" category in the status
+        if "failed" in status:
+            for model in status["failed"]:
+                model_id = model.get("model_id")
+                model_tag = model.get("model_tag")
+                
+                if model_id in reverse_mapping:
+                    simple_key = reverse_mapping[model_id]
+                    failed[simple_key] = {
+                        "tag": model_tag,
+                        "full_name": model_id
+                    }
         logging.info(f"✅ 当前部署的模型: {deployed}")
         logging.info(f"✅ 当前正在部署的模型: {inprogress}")
         logging.info(f"✅ 当前部署失败的模型: {failed}")
@@ -1857,7 +1902,7 @@ def check_model_status():
         return jsonify({
             "status": "success",
             "model_status": model_status,
-            "deployed_models": deployed_models
+            "deployed_models": current_models["deployed"]
         })
         
     except Exception as e:

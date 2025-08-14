@@ -62,6 +62,7 @@ Thumbs.db
 logs/
 backend.log
 frontend.log
+outputs/
 
 # AWS
 .aws/
