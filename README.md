@@ -42,7 +42,8 @@ A comprehensive platform for multimodal AI inference supporting both AWS Bedrock
 
 1. **Install dependencies:**
    ```bash
-   cd backend
+   conda create -n eval-platform python=3.10 -y
+   conda activate eval-platform
    pip install -r requirements.txt
    ```
 
@@ -55,15 +56,15 @@ A comprehensive platform for multimodal AI inference supporting both AWS Bedrock
    export AWS_SESSION_TOKEN=your_token  # if using temporary credentials
    ```
 
-3. **Install EMD CLI:**
+<!-- 3. **Install EMD CLI:**
    ```bash
    # pip install emd-cli
    emd bootstrap
-   ```
+   ``` -->
 
 4. **Start the backend:**
    ```bash
-   python backend.py
+   python backend/backend.py
    ```
 
 ### Frontend Setup

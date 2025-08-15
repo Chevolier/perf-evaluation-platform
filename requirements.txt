@@ -6,3 +6,4 @@ pillow==10.2.0
 requests==2.31.0
 easy-model-deployer
 ffmpeg-python==0.2.0
+evalscope
