@@ -1,5 +1,0 @@
-bfcl-eval
-human_eval
-pytest
-pytest-cov
-python-dotenv
