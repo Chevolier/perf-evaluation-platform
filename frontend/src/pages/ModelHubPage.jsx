@@ -35,7 +35,7 @@ const ModelHubPage = () => {
       models: []
     },
     emd: {
-      title: 'EMD 部署模型',
+      title: '部署模型',
       icon: <ThunderboltOutlined />,
       color: '#52c41a',
       models: []
@@ -101,62 +101,6 @@ const ModelHubPage = () => {
       return false;
     }
   };
-
-  // 检查模型状态
-  // const checkModelStatus = async () => {
-  //   setLoading(true);
-  //   try {
-  //     // 获取所有模型列表
-  //     console.log('[Debug] checkModelStatus - 当前 modelCategories:', modelCategories);
-      
-  //     const allModels = [
-  //       ...modelCategories.bedrock.models.map(m => m.key),
-  //       ...modelCategories.emd.models.map(m => m.key)
-  //     ];
-  //     console.log('[Debug] 准备发送的模型列表:', allModels);
-      
-  //     const response = await fetch('/api/check-model-status', {
-  //       method: 'POST',
-  //       headers: {
-  //         'Content-Type': 'application/json'
-  //       },
-  //       body: JSON.stringify({ models: allModels })
-  //     });
-      
-  //     if (response.ok) {
-  //       const data = await response.json();
-  //       console.log('[Debug] 获取到模型状态响应:', data);
-        
-  //       setModelStatus(prev => {
-  //         const newStatus = { ...prev };
-          
-  //         // 更新状态，但保留正在部署的模型状态
-  //         Object.entries(data.model_status || {}).forEach(([modelKey, status]) => {
-  //           // 如果模型不在deployingModels中，或者已经完成/失败，则更新状态
-  //           if (!deployingModelsRef.current.has(modelKey) || 
-  //               status.status === 'deployed' || 
-  //               status.status === 'available' || 
-  //               status.status === 'error' || 
-  //               status.status === 'failed') {
-  //             newStatus[modelKey] = status;
-  //           }
-  //         });
-          
-  //         console.log('[Debug] 更新后的模型状态:', newStatus);
-  //         return newStatus;
-  //       });
-  //     } else {
-  //       console.log('[Debug] 获取模型状态失败, HTTP状态码:', response.status);
-  //       const errorText = await response.text();
-  //       console.log('[Debug] 错误内容:', errorText);
-  //     }
-  //   } catch (error) {
-  //     console.error('[Debug] 检查模型状态异常:', error);
-  //     message.error('获取模型状态失败');
-  //   } finally {
-  //     setLoading(false);
-  //   }
-  // };
 
   // 部署模型
   const handleDeploy = async (modelKey) => {
@@ -293,7 +237,7 @@ const ModelHubPage = () => {
                 models: bedrockModels
               },
               emd: {
-                title: 'EMD 部署模型',
+                title: '部署模型',
                 icon: <ThunderboltOutlined />,
                 color: '#52c41a',
                 models: emdModels
@@ -467,7 +411,7 @@ const ModelHubPage = () => {
       <div style={{ marginBottom: 24 }}>
         <Space>
           <RobotOutlined style={{ fontSize: '24px', color: '#1890ff' }} />
-          <Title level={2} style={{ margin: 0 }}>Model Hub</Title>
+          <Title level={2} style={{ margin: 0 }}>模型商店</Title>
         </Space>
         <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
           管理和部署所有可用的推理模型

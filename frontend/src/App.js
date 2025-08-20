@@ -5,12 +5,14 @@ import {
   PlayCircleOutlined, 
   ThunderboltOutlined,
   RobotOutlined,
-  LineChartOutlined 
+  LineChartOutlined,
+  BarChartOutlined
 } from '@ant-design/icons';
 import ModelSelectionModal from './components/ModelSelectionModal';
 import PlaygroundPage from './pages/PlaygroundPage';
 import ModelHubPage from './pages/ModelHubPage';
 import StressTestPage from './pages/StressTestPage';
+import VisualizationPage from './pages/VisualizationPage';
 import 'antd/dist/reset.css';
 
 const { Header, Content, Sider } = Layout;
@@ -32,26 +34,32 @@ function App() {
     {
       key: 'model-hub',
       icon: <RobotOutlined />,
-      label: 'Model Hub',
+      label: '模型部署',
       onClick: () => setCurrentPage('model-hub')
     },
     {
       key: 'playground',
       icon: <PlayCircleOutlined />,
-      label: 'Playground',
+      label: '在线体验',
       onClick: () => setCurrentPage('playground')
-    },
-    {
-      key: 'model-evaluation',
-      icon: <LineChartOutlined />,
-      label: '模型评测',
-      onClick: () => setCurrentPage('model-evaluation')
     },
     {
       key: 'stress-test',
       icon: <ThunderboltOutlined />,
-      label: '压力测试',
+      label: '性能评测',
       onClick: () => setCurrentPage('stress-test')
+    },
+    // {
+    //   key: 'model-evaluation',
+    //   icon: <LineChartOutlined />,
+    //   label: '效果评测',
+    //   onClick: () => setCurrentPage('model-evaluation')
+    // },
+    {
+      key: 'visualization',
+      icon: <BarChartOutlined />,
+      label: '结果展示',
+      onClick: () => setCurrentPage('visualization')
     },
     {
       key: 'settings',
@@ -85,6 +93,8 @@ function App() {
         );
       case 'stress-test':
         return <StressTestPage />;
+      case 'visualization':
+        return <VisualizationPage />;
       case 'settings':
         return (
           <div style={{ padding: '20px', textAlign: 'center' }}>
@@ -113,7 +123,7 @@ function App() {
         height: '64px'
       }}>
         <Title level={2} style={{ color: '#fff', margin: 0 }}>
-          多模态大模型评测平台
+          大模型评测平台
         </Title>
       </Header>
       
