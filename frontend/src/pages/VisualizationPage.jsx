@@ -29,8 +29,8 @@ const { Title, Text } = Typography;
 const { Option } = Select;
 const { TabPane } = Tabs;
 
-// API base URL - should match viz_server.py
-const API_BASE = process.env.REACT_APP_VIZ_API_BASE || 'http://localhost:8000';
+// API base URL - connect to our Flask backend
+const API_BASE = process.env.REACT_APP_API_BASE || '';
 
 const VisualizationPage = () => {
   const [loading, setLoading] = useState(false);
@@ -46,7 +46,7 @@ const VisualizationPage = () => {
   const fetchTreeStructure = async (reload = false) => {
     try {
       setLoading(true);
-      const response = await fetch(`${API_BASE}/api/tree-structure?reload=${reload}`);
+      const response = await fetch(`${API_BASE}/api/viz/tree-structure?reload=${reload}`);
       const data = await response.json();
       setTreeData(data.tree || []);
     } catch (err) {
@@ -59,7 +59,7 @@ const VisualizationPage = () => {
   // Fetch stats
   const fetchStats = async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/stats`);
+      const response = await fetch(`${API_BASE}/api/viz/stats`);
       const data = await response.json();
       setStats(data);
     } catch (err) {
@@ -70,7 +70,7 @@ const VisualizationPage = () => {
   // Fetch instance prices
   const fetchInstancePrices = async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/instance-prices`);
+      const response = await fetch(`${API_BASE}/api/viz/instance-prices`);
       const data = await response.json();
       setInstancePrices(data.prices || {});
     } catch (err) {
@@ -84,7 +84,7 @@ const VisualizationPage = () => {
     
     try {
       setLoading(true);
-      const response = await fetch(`${API_BASE}/api/comparison-data`, {
+      const response = await fetch(`${API_BASE}/api/viz/comparison-data`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -107,7 +107,8 @@ const VisualizationPage = () => {
       runtime: node.runtime,
       instance_type: node.instance_type,
       model_name: node.model_name,
-      id: node.id
+      id: node.id,
+      result_path: node.result_path  // Pass the result path for loading data
     }));
     
     setSelectedModels(combinations);
@@ -243,7 +244,7 @@ const VisualizationPage = () => {
             <Row justify="space-between" align="middle">
               <Col>
                 <Title level={2} style={{ margin: 0 }}>
-                  <BarChartOutlined /> 可视化结果
+                  <BarChartOutlined /> 基准测试可视化
                 </Title>
               </Col>
               <Col>
@@ -325,7 +326,8 @@ const VisualizationPage = () => {
                       type: model.type,
                       runtime: model.runtime,
                       instance_type: model.instance_type,
-                      model_name: model.model_name
+                      model_name: model.model_name,
+                      result_path: model.result_path
                     }))
                   }))
                 }))}
@@ -482,6 +484,59 @@ const VisualizationPage = () => {
                         : 'No pricing data available for selected models'
                       }
                     </Text>
+                  </div>
+                )}
+              </TabPane>
+
+              <TabPane tab={<><LineChartOutlined /> Percentile Data</> } key="percentiles">
+                {comparisonData.length > 0 ? (
+                  <div style={{ height: '500px', overflow: 'auto' }}>
+                    <Title level={4}>Performance Percentiles</Title>
+                    {comparisonData.map((item, index) => {
+                      const { combination, data } = item;
+                      const performanceData = data[0];
+                      const percentileData = performanceData?.percentile_data;
+                      
+                      if (!percentileData || percentileData.length === 0) {
+                        return null;
+                      }
+                      
+                      return (
+                        <div key={index} style={{ marginBottom: '20px' }}>
+                          <Text strong>{combination.runtime} - {combination.instance_type} - {combination.model_name}</Text>
+                          <div style={{ height: '200px', marginTop: '10px' }}>
+                            <Line
+                              data={percentileData.map(p => ({
+                                percentile: p.Percentiles,
+                                ttft: p['TTFT (s)'] * 1000, // Convert to ms
+                                latency: p['Latency (s)'] * 1000, // Convert to ms
+                                throughput: p['Output (tok/s)']
+                              }))}
+                              xField="percentile"
+                              yField="ttft"
+                              smooth={true}
+                              point={{ size: 4 }}
+                              tooltip={{
+                                formatter: (datum) => ({
+                                  name: 'TTFT (ms)',
+                                  value: `${datum.ttft?.toFixed(2)} ms`
+                                })
+                              }}
+                              yAxis={{
+                                label: { text: 'Time to First Token (ms)' }
+                              }}
+                              xAxis={{
+                                label: { text: 'Percentile' }
+                              }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div style={{ textAlign: 'center', padding: '50px' }}>
+                    <Text type="secondary">Select models to view percentile data</Text>
                   </div>
                 )}
               </TabPane>

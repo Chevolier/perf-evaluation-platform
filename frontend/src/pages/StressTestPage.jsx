@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Card,
   Typography,
@@ -37,9 +37,29 @@ const StressTestPage = () => {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [models, setModels] = useState([]);
-  const [testSessions, setTestSessions] = useState({});
-  const [currentSessionId, setCurrentSessionId] = useState(null);
+  
+  // 从localStorage恢复测试会话状态
+  const [testSessions, setTestSessions] = useState(() => {
+    try {
+      const saved = localStorage.getItem('stressTest_sessions');
+      return saved ? JSON.parse(saved) : {};
+    } catch (error) {
+      console.error('Failed to load test sessions from localStorage:', error);
+      return {};
+    }
+  });
+  
+  const [currentSessionId, setCurrentSessionId] = useState(() => {
+    try {
+      return localStorage.getItem('stressTest_currentSessionId') || null;
+    } catch (error) {
+      console.error('Failed to load current session ID from localStorage:', error);
+      return null;
+    }
+  });
+  
   const [pollingInterval, setPollingInterval] = useState(null);
+  const pollingRestored = useRef(false);
 
   // 获取可用模型列表
   const fetchModels = async () => {
@@ -210,6 +230,39 @@ const StressTestPage = () => {
     }
   };
 
+  // 保存测试会话到localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('stressTest_sessions', JSON.stringify(testSessions));
+    } catch (error) {
+      console.error('Failed to save test sessions to localStorage:', error);
+    }
+  }, [testSessions]);
+
+  // 保存当前会话ID到localStorage
+  useEffect(() => {
+    try {
+      if (currentSessionId) {
+        localStorage.setItem('stressTest_currentSessionId', currentSessionId);
+      } else {
+        localStorage.removeItem('stressTest_currentSessionId');
+      }
+    } catch (error) {
+      console.error('Failed to save current session ID to localStorage:', error);
+    }
+  }, [currentSessionId]);
+
+  // 恢复正在进行的测试的轮询 - 只在组件挂载时执行一次
+  useEffect(() => {
+    if (!pollingRestored.current && currentSessionId && testSessions[currentSessionId]) {
+      const session = testSessions[currentSessionId];
+      if (session.status === 'running') {
+        startPolling(currentSessionId);
+        pollingRestored.current = true;
+      }
+    }
+  }, [currentSessionId, testSessions]);
+
   useEffect(() => {
     fetchModels();
     return () => {
@@ -226,15 +279,27 @@ const StressTestPage = () => {
     const percentiles = results.percentiles;
     const percentileLabels = percentiles['Percentiles'] || [];
     
+    // 转换百分位标签为数值 (例: "P50" -> 50, "P99" -> 99)
+    const convertPercentileToNumber = (label) => {
+      if (typeof label === 'string' && label.startsWith('P')) {
+        return parseFloat(label.substring(1));
+      }
+      if (typeof label === 'number') {
+        return label;
+      }
+      // 如果无法解析，尝试直接解析数字
+      return parseFloat(label) || 0;
+    };
+
     // TTFT分布图 - 使用百分位数据，x轴为TTFT值，y轴为百分位
     const ttftData = percentileLabels.map((label, index) => ({
-      percentile: label,
+      percentile: convertPercentileToNumber(label),
       ttft: percentiles['TTFT (s)']?.[index] || 0
     })).reverse(); // 反转数据顺序，让高百分位显示在上方
 
     // 延迟分布图 - 使用百分位数据，x轴为延迟值，y轴为百分位
     const latencyData = percentileLabels.map((label, index) => ({
-      percentile: label,
+      percentile: convertPercentileToNumber(label),
       latency: percentiles['Latency (s)']?.[index] || 0
     })).reverse(); // 反转数据顺序，让高百分位显示在上方
 
@@ -246,10 +311,16 @@ const StressTestPage = () => {
       color: '#1890ff',
       point: { size: 3 },
       tooltip: {
-        formatter: (datum) => ({
-          name: `第${datum.percentile}百分位`,
-          value: `TTFT: ${datum.ttft?.toFixed(3)}s`
-        })
+        formatter: (datum) => [
+          {
+            name: 'TTFT',
+            value: `${datum.ttft?.toFixed(3)}s`
+          },
+          {
+            name: '百分位',
+            value: `P${datum.percentile}`
+          }
+        ]
       },
       xAxis: {
         title: {
@@ -274,10 +345,16 @@ const StressTestPage = () => {
       color: '#52c41a',
       point: { size: 3 },
       tooltip: {
-        formatter: (datum) => ({
-          name: `第${datum.percentile}百分位`,
-          value: `延迟: ${datum.latency?.toFixed(3)}s`
-        })
+        formatter: (datum) => [
+          {
+            name: '端到端延迟',
+            value: `${datum.latency?.toFixed(3)}s`
+          },
+          {
+            name: '百分位',
+            value: `P${datum.percentile}`
+          }
+        ]
       },
       xAxis: {
         title: {
@@ -296,7 +373,7 @@ const StressTestPage = () => {
 
     // Token使用分布数据 - 使用百分位数据
     const tokenData = percentileLabels.map((label, index) => ({
-      percentile: label,
+      percentile: convertPercentileToNumber(label),
       input_tokens: percentiles['Input tokens']?.[index] || 0,
       output_tokens: percentiles['Output tokens']?.[index] || 0
     })).reverse(); // 反转数据顺序，让高百分位显示在上方
@@ -327,10 +404,16 @@ const StressTestPage = () => {
                   point={{ size: 2 }}
                   height={160}
                   tooltip={{
-                    formatter: (datum) => ({
-                      name: `第${datum.percentile}百分位`,
-                      value: `输入Token: ${datum.input_tokens}`
-                    })
+                    formatter: (datum) => [
+                      {
+                        name: '输入Token',
+                        value: `${datum.input_tokens}`
+                      },
+                      {
+                        name: '百分位',
+                        value: `P${datum.percentile}`
+                      }
+                    ]
                   }}
                   xAxis={{
                     title: { text: '输入Token数' }
@@ -351,10 +434,16 @@ const StressTestPage = () => {
                   point={{ size: 2 }}
                   height={160}
                   tooltip={{
-                    formatter: (datum) => ({
-                      name: `第${datum.percentile}百分位`,
-                      value: `输出Token: ${datum.output_tokens}`
-                    })
+                    formatter: (datum) => [
+                      {
+                        name: '输出Token',
+                        value: `${datum.output_tokens}`
+                      },
+                      {
+                        name: '百分位',
+                        value: `P${datum.percentile}`
+                      }
+                    ]
                   }}
                   xAxis={{
                     title: { text: '输出Token数' }

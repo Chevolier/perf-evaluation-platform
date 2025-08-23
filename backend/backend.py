@@ -13,6 +13,7 @@ import threading
 import time
 import traceback
 from datetime import datetime
+from pathlib import Path
 
 # 第三方库 - Web相关
 from flask import Flask, request, jsonify, Response, make_response
@@ -2321,6 +2322,270 @@ def download_stress_test_report(session_id):
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
+
+##################
+## Visualization API Endpoints (matching viz_server.py functionality)
+##################
+
+@app.route('/api/viz/tree-structure', methods=['GET'])
+def get_viz_tree_structure():
+    """Get hierarchical tree structure of benchmark results"""
+    try:
+        outputs_dir = Path('./outputs')
+        tree_data = []
+        
+        if not outputs_dir.exists():
+            return jsonify({"tree": []})
+        
+        # Scan all output directories for benchmark results
+        for date_dir in outputs_dir.iterdir():
+            if not date_dir.is_dir():
+                continue
+                
+            runtime_node = {
+                'id': date_dir.name,
+                'label': f'Benchmark Run - {date_dir.name}',
+                'type': 'runtime',
+                'count': 0,
+                'children': []
+            }
+            
+            for result_dir in date_dir.iterdir():
+                if not result_dir.is_dir():
+                    continue
+                    
+                # Check if this directory has benchmark results
+                summary_file = result_dir / 'benchmark_summary.json'
+                args_file = result_dir / 'benchmark_args.json'
+                
+                if summary_file.exists() and args_file.exists():
+                    try:
+                        with open(args_file, 'r') as f:
+                            args_data = json.load(f)
+                        
+                        model_name = args_data.get('model', result_dir.name)
+                        
+                        instance_node = {
+                            'id': f"{date_dir.name}--{result_dir.name}",
+                            'label': f'{result_dir.name}',
+                            'type': 'instance_type',
+                            'count': 1,
+                            'children': [{
+                                'id': f"{date_dir.name}--{result_dir.name}--{model_name}",
+                                'label': model_name,
+                                'type': 'model',
+                                'count': 1,
+                                'runtime': date_dir.name,
+                                'instance_type': result_dir.name,
+                                'model_name': model_name,
+                                'result_path': str(result_dir)
+                            }]
+                        }
+                        
+                        runtime_node['children'].append(instance_node)
+                        runtime_node['count'] += 1
+                        
+                    except Exception as e:
+                        logging.warning(f"Failed to process {result_dir}: {e}")
+                        continue
+            
+            if runtime_node['children']:
+                tree_data.append(runtime_node)
+        
+        return jsonify({"tree": tree_data})
+        
+    except Exception as e:
+        logging.error(f"Error getting visualization tree structure: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/viz/stats', methods=['GET'])
+def get_viz_stats():
+    """Get overall statistics about benchmark results"""
+    try:
+        outputs_dir = Path('./outputs')
+        
+        if not outputs_dir.exists():
+            return jsonify({
+                "total_tests": 0,
+                "unique_combinations": 0,
+                "runtimes": [],
+                "instance_types": [],
+                "models": [],
+                "performance_summary": {
+                    "avg_first_token_latency": 0,
+                    "avg_throughput": 0,
+                    "avg_success_rate": 0
+                }
+            })
+        
+        total_tests = 0
+        runtimes = set()
+        models = set()
+        avg_metrics = {'ttft': [], 'throughput': [], 'success_rate': []}
+        
+        for date_dir in outputs_dir.iterdir():
+            if not date_dir.is_dir():
+                continue
+                
+            runtimes.add(date_dir.name)
+            
+            for result_dir in date_dir.iterdir():
+                if not result_dir.is_dir():
+                    continue
+                    
+                summary_file = result_dir / 'benchmark_summary.json'
+                args_file = result_dir / 'benchmark_args.json'
+                
+                if summary_file.exists() and args_file.exists():
+                    try:
+                        with open(summary_file, 'r') as f:
+                            summary_data = json.load(f)
+                        with open(args_file, 'r') as f:
+                            args_data = json.load(f)
+                        
+                        total_tests += 1
+                        models.add(args_data.get('model', 'unknown'))
+                        
+                        # Collect metrics
+                        avg_metrics['ttft'].append(summary_data.get('Average time to first token (s)', 0))
+                        avg_metrics['throughput'].append(summary_data.get('Output token throughput (tok/s)', 0))
+                        
+                        # Calculate success rate
+                        total_requests = summary_data.get('Total requests', 0)
+                        succeed_requests = summary_data.get('Succeed requests', 0)
+                        if total_requests > 0:
+                            success_rate = succeed_requests / total_requests
+                            avg_metrics['success_rate'].append(success_rate)
+                        
+                    except Exception as e:
+                        logging.warning(f"Failed to process stats for {result_dir}: {e}")
+        
+        # Calculate averages
+        avg_ttft = sum(avg_metrics['ttft']) / len(avg_metrics['ttft']) if avg_metrics['ttft'] else 0
+        avg_throughput = sum(avg_metrics['throughput']) / len(avg_metrics['throughput']) if avg_metrics['throughput'] else 0
+        avg_success_rate = sum(avg_metrics['success_rate']) / len(avg_metrics['success_rate']) if avg_metrics['success_rate'] else 0
+        
+        stats = {
+            "total_tests": total_tests,
+            "unique_combinations": total_tests,  # Each test is a unique combination for now
+            "runtimes": sorted(list(runtimes)),
+            "instance_types": [],  # We'll extract from result directory names
+            "models": sorted(list(models)),
+            "performance_summary": {
+                "avg_first_token_latency": avg_ttft,
+                "avg_throughput": avg_throughput,
+                "avg_success_rate": avg_success_rate
+            }
+        }
+        
+        return jsonify(stats)
+        
+    except Exception as e:
+        logging.error(f"Error getting visualization stats: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/viz/comparison-data', methods=['POST'])
+def get_viz_comparison_data():
+    """Get performance data for comparison"""
+    try:
+        data = request.json
+        combinations = data.get('combinations', [])
+        
+        result = []
+        
+        for combo in combinations:
+            runtime = combo.get('runtime', '')
+            instance_type = combo.get('instance_type', '')
+            model_name = combo.get('model_name', '')
+            result_path = combo.get('result_path', '')
+            
+            if result_path:
+                result_dir = Path(result_path)
+            else:
+                # Try to find the result directory
+                outputs_dir = Path('./outputs')
+                result_dir = outputs_dir / runtime / instance_type
+            
+            if not result_dir.exists():
+                continue
+            
+            summary_file = result_dir / 'benchmark_summary.json'
+            percentile_file = result_dir / 'benchmark_percentile.json'
+            args_file = result_dir / 'benchmark_args.json'
+            
+            if not (summary_file.exists() and args_file.exists()):
+                continue
+            
+            try:
+                # Load benchmark data
+                with open(summary_file, 'r') as f:
+                    summary_data = json.load(f)
+                
+                with open(args_file, 'r') as f:
+                    args_data = json.load(f)
+                
+                percentile_data = []
+                if percentile_file.exists():
+                    with open(percentile_file, 'r') as f:
+                        percentile_data = json.load(f)
+                
+                # Convert to format expected by frontend
+                performance_data = {
+                    'runtime': runtime,
+                    'instance_type': instance_type,
+                    'model_name': model_name,
+                    'input_tokens': args_data.get('min_prompt_length', 50),
+                    'output_tokens': args_data.get('min_tokens', 50),
+                    'processes': args_data.get('parallel', 1),
+                    'first_token_latency_mean': summary_data.get('Average time to first token (s)', 0) * 1000,  # Convert to ms
+                    'end_to_end_latency_mean': summary_data.get('Average latency (s)', 0) * 1000,  # Convert to ms
+                    'output_tokens_per_second_mean': summary_data.get('Output token throughput (tok/s)', 0),
+                    'success_rate': summary_data.get('Succeed requests', 0) / max(summary_data.get('Total requests', 1), 1),
+                    'requests_per_second': summary_data.get('Request throughput (req/s)', 0),
+                    'total_requests': summary_data.get('Total requests', 0),
+                    'successful_requests': summary_data.get('Succeed requests', 0),
+                    'failed_requests': summary_data.get('Failed requests', 0),
+                    'server_throughput': summary_data.get('Total token throughput (tok/s)', 0),
+                    'cost_per_million_tokens': 0,  # TODO: Add pricing calculation
+                    'cost_per_1k_requests': 0,
+                    'instance_price_used': 0,
+                    'percentile_data': percentile_data
+                }
+                
+                result.append({
+                    'combination': combo,
+                    'data': [performance_data]  # Wrap in array to match expected format
+                })
+                
+            except Exception as e:
+                logging.error(f"Error processing combination {combo}: {e}")
+                continue
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        logging.error(f"Error getting comparison data: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/viz/instance-prices', methods=['GET'])
+def get_viz_instance_prices():
+    """Get instance pricing information"""
+    # Mock pricing data - in production this would come from AWS Pricing API
+    mock_prices = {
+        "g5.2xlarge": 1.212,
+        "g5.4xlarge": 2.424,
+        "g5.12xlarge": 7.272,
+        "g6e.xlarge": 0.672,
+        "g6e.2xlarge": 1.344,
+        "p5.48xlarge": 98.32,
+        "p5en.48xlarge": 115.20,
+        "p4d.24xlarge": 32.77
+    }
+    
+    return jsonify({
+        "prices": mock_prices,
+        "config_file": "mock_instance_prices.json"
+    })
 
 def generate_pdf_report(session_data, session_id):
     """生成PDF格式的压力测试报告"""
