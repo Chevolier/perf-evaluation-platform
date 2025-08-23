@@ -115,3 +115,5 @@ htmlcov/
 *.bak
 *.backup
 *~
+
+data/
