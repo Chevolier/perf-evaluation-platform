@@ -1835,6 +1835,231 @@ def check_model_status():
 # 压力测试相关功能
 stress_test_sessions = {}
 
+def save_stress_test_results_tree(model_key, test_params, session_id, results, summary_data, percentile_data):
+    """Save stress test results in tree structure: outputs/model_name/inference_framework/instance/"""
+    try:
+        # Base outputs directory
+        outputs_base = "outputs"
+        
+        # Extract parameters
+        concurrency = test_params.get('concurrency', 1)
+        num_requests = test_params.get('num_requests', 100)
+        
+        # Determine model name, framework, and instance type
+        if model_key in EMD_MODELS:
+            # For EMD models
+            model_name = EMD_MODELS[model_key]["model_path"].replace("/", "_").replace("-", "_")
+            framework = "vllm"  # Default inference framework for EMD
+            
+            # Try to get actual instance type from deployment
+            deployed_models = get_current_models()["deployed"]
+            if model_key in deployed_models:
+                # Extract instance type, use tag as identifier for now
+                tag = deployed_models[model_key].get('tag', 'unknown')
+                instance = f"ml_g5_2xlarge_{tag}"  # Format: ml_g5_2xlarge_08230851
+            else:
+                instance = "ml_g5_2xlarge_unknown"
+        else:
+            # For Bedrock models
+            model_name = model_key.replace("-", "_")
+            framework = "bedrock"
+            instance = "serverless"
+        
+        # Create directory structure: outputs/model_name/framework/instance/
+        tree_dir = os.path.join(outputs_base, model_name, framework, instance)
+        os.makedirs(tree_dir, exist_ok=True)
+        
+        # Generate timestamp for this run
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # Save summary data (similar to benchmark_summary.json)
+        summary_file = os.path.join(tree_dir, f"benchmark_summary_{timestamp}.json")
+        summary_output = {
+            "session_id": session_id,
+            "timestamp": timestamp,
+            "model_key": model_key,
+            "test_params": test_params,
+            "summary_metrics": summary_data,
+            "performance": {
+                "qps": results.get("qps", 0),
+                "avg_ttft": results.get("avg_ttft", 0),
+                "avg_latency": results.get("avg_latency", 0),
+                "tokens_per_second": results.get("tokens_per_second", 0)
+            }
+        }
+        
+        with open(summary_file, 'w', encoding='utf-8') as f:
+            json.dump(summary_output, f, indent=2, ensure_ascii=False)
+        
+        # Save percentile data (similar to benchmark_percentile.json)
+        percentile_file = os.path.join(tree_dir, f"benchmark_percentile_{timestamp}.json")
+        percentile_output = {
+            "session_id": session_id,
+            "timestamp": timestamp,
+            "percentile_data": percentile_data,
+            "detailed_metrics": results.get("detailed_metrics", {})
+        }
+        
+        with open(percentile_file, 'w', encoding='utf-8') as f:
+            json.dump(percentile_output, f, indent=2, ensure_ascii=False)
+        
+        # Save complete results data
+        complete_file = os.path.join(tree_dir, f"benchmark_complete_{timestamp}.json")
+        complete_output = {
+            "session_id": session_id,
+            "timestamp": timestamp,
+            "model_key": model_key,
+            "model_name": model_name,
+            "framework": framework,
+            "instance": instance,
+            "test_params": test_params,
+            "summary": summary_data,
+            "percentiles": percentile_data,
+            "results": results,
+            "file_paths": {
+                "summary": summary_file,
+                "percentiles": percentile_file,
+                "complete": complete_file
+            }
+        }
+        
+        with open(complete_file, 'w', encoding='utf-8') as f:
+            json.dump(complete_output, f, indent=2, ensure_ascii=False)
+        
+        logging.info(f"[STRESS_TEST] Tree results saved to: {tree_dir}")
+        return tree_dir, {
+            "summary": summary_file,
+            "percentiles": percentile_file,
+            "complete": complete_file
+        }
+        
+    except Exception as e:
+        logging.error(f"[STRESS_TEST] Failed to save tree results: {str(e)}")
+        return None, None
+
+def save_stress_test_results(model_key, test_params, session_id, results, summary_data, percentile_data):
+    """Save stress test results to organized directory structure"""
+    try:
+        # Base directory for archived results
+        base_dir = "/home/ec2-user/SageMaker/efs/Projects/llm-performance-viz/archive_results"
+        
+        # Extract parameters
+        input_tokens_min = test_params.get('input_tokens_range', [50, 100])[0]
+        output_tokens_min = test_params.get('output_tokens_range', [100, 200])[0]
+        concurrency = test_params.get('concurrency', 1)
+        num_requests = test_params.get('num_requests', 100)
+        
+        # Determine framework and instance type based on model
+        if model_key in EMD_MODELS:
+            # For EMD models, use vllm as framework and get instance type from deployment
+            framework = "vllm-0.10.1"
+            deployed_models = get_current_models()["deployed"]
+            if model_key in deployed_models:
+                # Try to extract instance type from model deployment info
+                instance_type = "ml.g5.2xlarge"  # Default, could be enhanced to get actual type
+            else:
+                instance_type = "ml.g5.2xlarge"
+            
+            # Get model name from EMD_MODELS
+            model_name = EMD_MODELS[model_key]["model_path"]
+        else:
+            # For Bedrock models
+            framework = "bedrock-api"
+            instance_type = "serverless"
+            model_name = model_key
+        
+        # Create directory name: framework--instance_type--model_name
+        dir_name = f"{framework}--{instance_type}--{model_name}"
+        results_dir = os.path.join(base_dir, dir_name)
+        
+        # Create directory if it doesn't exist
+        os.makedirs(results_dir, exist_ok=True)
+        
+        # Create filename: test_in:X_out:Y_proc:Z_rand:W.json
+        filename = f"test_in:{input_tokens_min}_out:{output_tokens_min}_proc:{concurrency}_rand:{num_requests}.json"
+        filepath = os.path.join(results_dir, filename)
+        
+        # Convert evalscope results to match existing archive format
+        archive_data = {
+            "metadata": {
+                "processes": concurrency,
+                "requests_per_process": num_requests // concurrency,
+                "total_requests": num_requests,
+                "model_id": model_name,
+                "input_tokens": input_tokens_min,
+                "random_tokens": input_tokens_min,  # Using input_tokens as random_tokens
+                "output_tokens": output_tokens_min,
+                "output_file": filepath,
+                "total_test_duration": summary_data.get("Time taken for tests (s)", 0),
+                "requests_per_second": summary_data.get("Request throughput (req/s)", 0),
+                "session_id": session_id,
+                "framework": framework,
+                "instance_type": instance_type,
+                "timestamp": datetime.now().isoformat()
+            },
+            "statistics": {
+                "total_requests": summary_data.get("Total requests", num_requests),
+                "successful_requests": summary_data.get("Succeed requests", 0),
+                "failed_requests": summary_data.get("Failed requests", 0),
+                "success_rate": summary_data.get("Succeed requests", 0) / max(summary_data.get("Total requests", 1), 1),
+                "first_token_latency": {
+                    "min": min(percentile_data.get("TTFT (s)", [0])) if percentile_data.get("TTFT (s)") else 0,
+                    "max": max(percentile_data.get("TTFT (s)", [0])) if percentile_data.get("TTFT (s)") else 0,
+                    "mean": summary_data.get("Average time to first token (s)", 0),
+                    "p25": percentile_data.get("TTFT (s)", [0] * 10)[2] if len(percentile_data.get("TTFT (s)", [])) > 2 else 0,
+                    "p50": percentile_data.get("TTFT (s)", [0] * 10)[4] if len(percentile_data.get("TTFT (s)", [])) > 4 else 0,
+                    "p75": percentile_data.get("TTFT (s)", [0] * 10)[6] if len(percentile_data.get("TTFT (s)", [])) > 6 else 0,
+                    "p90": percentile_data.get("TTFT (s)", [0] * 10)[8] if len(percentile_data.get("TTFT (s)", [])) > 8 else 0
+                },
+                "end_to_end_latency": {
+                    "min": min(percentile_data.get("Latency (s)", [0])) if percentile_data.get("Latency (s)") else 0,
+                    "max": max(percentile_data.get("Latency (s)", [0])) if percentile_data.get("Latency (s)") else 0,
+                    "mean": summary_data.get("Average latency (s)", 0),
+                    "p25": percentile_data.get("Latency (s)", [0] * 10)[2] if len(percentile_data.get("Latency (s)", [])) > 2 else 0,
+                    "p50": percentile_data.get("Latency (s)", [0] * 10)[4] if len(percentile_data.get("Latency (s)", [])) > 4 else 0,
+                    "p75": percentile_data.get("Latency (s)", [0] * 10)[6] if len(percentile_data.get("Latency (s)", [])) > 6 else 0,
+                    "p90": percentile_data.get("Latency (s)", [0] * 10)[8] if len(percentile_data.get("Latency (s)", [])) > 8 else 0
+                },
+                "token_usage": {
+                    "prompt_tokens": {
+                        "min": min(percentile_data.get("Input tokens", [input_tokens_min])),
+                        "max": max(percentile_data.get("Input tokens", [input_tokens_min])),
+                        "mean": sum(percentile_data.get("Input tokens", [input_tokens_min])) / len(percentile_data.get("Input tokens", [1])),
+                        "p25": percentile_data.get("Input tokens", [0] * 10)[2] if len(percentile_data.get("Input tokens", [])) > 2 else input_tokens_min,
+                        "p50": percentile_data.get("Input tokens", [0] * 10)[4] if len(percentile_data.get("Input tokens", [])) > 4 else input_tokens_min,
+                        "p75": percentile_data.get("Input tokens", [0] * 10)[6] if len(percentile_data.get("Input tokens", [])) > 6 else input_tokens_min,
+                        "p90": percentile_data.get("Input tokens", [0] * 10)[8] if len(percentile_data.get("Input tokens", [])) > 8 else input_tokens_min
+                    },
+                    "completion_tokens": {
+                        "min": min(percentile_data.get("Output tokens", [output_tokens_min])),
+                        "max": max(percentile_data.get("Output tokens", [output_tokens_min])),
+                        "mean": sum(percentile_data.get("Output tokens", [output_tokens_min])) / len(percentile_data.get("Output tokens", [1])),
+                        "p25": percentile_data.get("Output tokens", [0] * 10)[2] if len(percentile_data.get("Output tokens", [])) > 2 else output_tokens_min,
+                        "p50": percentile_data.get("Output tokens", [0] * 10)[4] if len(percentile_data.get("Output tokens", [])) > 4 else output_tokens_min,
+                        "p75": percentile_data.get("Output tokens", [0] * 10)[6] if len(percentile_data.get("Output tokens", [])) > 6 else output_tokens_min,
+                        "p90": percentile_data.get("Output tokens", [0] * 10)[8] if len(percentile_data.get("Output tokens", [])) > 8 else output_tokens_min
+                    }
+                }
+            },
+            # Keep original evalscope data for reference
+            "evalscope_data": {
+                "summary": summary_data,
+                "percentiles": percentile_data,
+                "results": results
+            }
+        }
+        
+        # Save to JSON file
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(archive_data, f, indent=2, ensure_ascii=False)
+        
+        logging.info(f"[STRESS_TEST] Results saved to: {filepath}")
+        return filepath
+        
+    except Exception as e:
+        logging.error(f"[STRESS_TEST] Failed to save results: {str(e)}")
+        return None
+
 def run_stress_test_evalscope(model_key, test_params, session_id):
     """使用evalscope Python API运行压力测试"""
     global stress_test_sessions
@@ -2138,13 +2363,37 @@ except Exception as e:
                     # 如果解析失败，尝试文本解析
                     results = parse_evalscope_output(result.stdout)
                 
+                # Save results to both directory structures
+                saved_filepath = None
+                tree_dir = None
+                tree_files = None
+                
+                if isinstance(raw_results, list) and len(raw_results) >= 2:
+                    summary_data = raw_results[0]
+                    percentile_data = raw_results[1]
+                    
+                    # Save to organized archive structure
+                    saved_filepath = save_stress_test_results(
+                        model_key, test_params, session_id, 
+                        results, summary_data, percentile_data
+                    )
+                    
+                    # Save to tree structure (outputs/model_name/framework/instance/)
+                    tree_dir, tree_files = save_stress_test_results_tree(
+                        model_key, test_params, session_id,
+                        results, summary_data, percentile_data
+                    )
+                
                 stress_test_sessions[session_id].update({
                     "status": "completed",
                     "progress": 100,
                     "message": "测试完成",
                     "results": results,
                     "end_time": datetime.now().isoformat(),
-                    "raw_output": result.stdout
+                    "raw_output": result.stdout,
+                    "saved_filepath": saved_filepath,
+                    "tree_directory": tree_dir,
+                    "tree_files": tree_files
                 })
                 
             elif "EVALSCOPE_ERROR:" in result.stdout:
