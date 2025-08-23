@@ -1,0 +1,38 @@
+deployment:
+  docker_image: "vllm/vllm-openai:v0.9.2"
+  container_name: "vllm"
+  port: 8080
+  # Universal Docker parameters
+  docker_params:
+    gpus: "all"
+    shm-size: "1000g"
+    ipc: "host"
+    network: "host"
+    volume:
+      - "/opt/dlami/nvme/:/vllm-workspace/"
+  # Universal application arguments
+  app_args:
+    model: "deepseek-ai/DeepSeek-R1-0528"
+    trust-remote-code: true
+    max-model-len: 32768
+    gpu-memory-utilization: 0.90
+    tensor-parallel-size: 8
+    enable-reasoning: true
+    reasoning-parser: "deepseek_r1"
+    tool-call-parser: "deepseek_v3" 
+    enable-auto-tool-choice: true
+
+test_matrix:
+  input_tokens: [1600, 6400, 12800]
+  output_tokens: [100, 400, 1000]
+  processing_num: [1, 16, 32, 64, 128]
+  random_tokens: [100, 1600, 6400]
+  # input_tokens: [325]
+  # output_tokens: [200]
+  # processing_num: [1, 4, 16, 32, 64, 128, 256, 512]
+  # random_tokens: [325]
+
+test_config:
+  requests_per_process: 5
+  warmup_requests: 1
+  cooldown_seconds: 5

@@ -1,0 +1,30 @@
+deployment:
+  docker_image: "vllm/vllm-openai:v0.10.1+gptoss"
+  container_name: "vllm"
+  port: 8080
+  # Universal Docker parameters
+  docker_params:
+    gpus: "all"
+    shm-size: "1000g"
+    ipc: "host"
+    network: "host"
+    volume:
+      - "/opt/dlami/nvme/:/vllm-workspace/"
+  # Universal application arguments
+  app_args:
+    model: "openai/gpt-oss-120b"
+    trust-remote-code: true
+    max-model-len: 32768
+    gpu-memory-utilization: 0.90
+    tensor-parallel-size: 8
+
+test_matrix:
+  input_tokens: [1600, 6400, 12800]
+  output_tokens: [100, 400, 1000]
+  processing_num: [1, 16, 32, 64, 128]
+  random_tokens: [100, 1600, 6400]
+
+test_config:
+  requests_per_process: 5
+  warmup_requests: 1
+  cooldown_seconds: 5

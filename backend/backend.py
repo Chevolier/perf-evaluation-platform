@@ -357,51 +357,6 @@ def create_emd_openai_client(model_id, tag):
         return OpenAI(api_key="", base_url=f"{base_url}/v1")
     return None
 
-# def create_emd_sagemaker_client(model_id, model_tag=None):
-#     """Create SageMaker client for EMD endpoints - Direct approach"""
-#     if model_tag is None:
-#         model_tag = DEFAULT_EMD_TAG
-        
-#     try:
-#         logging.info(f"Creating EMD SageMaker client for {model_id} with tag {model_tag}")
-        
-#         # Create client with minimal validation to avoid AWS credential issues
-#         import boto3
-#         runtime_client = boto3.client('sagemaker-runtime', region_name='us-west-2')
-        
-#         # Create a simple wrapper that mimics SageMakerClient
-#         class SimpleEMDClient:
-#             def __init__(self, model_id, model_tag, runtime_client):
-#                 self.model_id = model_id
-#                 self.model_tag = model_tag
-#                 self.runtime_client = runtime_client
-#                 self.endpoint_name = f"EMD-Model-{model_id.lower().replace('.', '-').replace('_', '-')}-{model_tag}-endpoint"
-                
-#             def invoke(self, payload):
-#                 import json
-#                 response = self.runtime_client.invoke_endpoint(
-#                     EndpointName=self.endpoint_name,
-#                     ContentType='application/json',
-#                     Body=json.dumps(payload)
-#                 )
-#                 return json.loads(response['Body'].read().decode())
-        
-#         client = SimpleEMDClient(model_id, model_tag, runtime_client)
-#         logging.info(f"✅ Simple EMD client created: endpoint={client.endpoint_name}")
-#         return client
-        
-#     except Exception as e:
-#         logging.error(f"❌ Error creating simple EMD client: {e}")
-#         # Fallback to original SageMaker client
-#         try:
-#             from emd.sdk.clients.sagemaker_client import SageMakerClient
-#             client = SageMakerClient(model_id=model_id, model_tag=model_tag)
-#             logging.info(f"✅ Fallback EMD client created")
-#             return client
-#         except Exception as e2:
-#             logging.error(f"❌ Fallback also failed: {e2}")
-#             return None
-
 def encode_image_for_emd(image_base64):
     """Encode image for EMD inference"""
     return image_base64
@@ -546,24 +501,6 @@ def api_get_current_models():
         logging.error(f"Get Current Models Error: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
-
-# @app.route('/api/emd/deploy-if-needed', methods=['POST'])
-# def api_deploy_model_if_needed():
-#     data = request.json
-#     model_name = data['model_name']
-#     instance_type = data.get('instance_type', 'g5.4xlarge')
-#     engine_type = data.get('engine_type', 'vllm')
-
-#     def background_deploy():
-#         deploy_model_if_not_exist(model_name, instance_type, engine_type)
-
-#     if model_name not in deployment_threads or not deployment_threads[model_name].is_alive():
-#         thread = threading.Thread(target=background_deploy)
-#         thread.start()
-#         deployment_threads[model_name] = thread
-#         return jsonify({"status": "started", "model_name": model_name})
-#     else:
-#         return jsonify({"status": "already_deploying", "model_name": model_name})
     
 @app.route('/api/emd/check-deployment', methods=['GET'])
 def api_check_model_deployment():
@@ -579,7 +516,6 @@ def api_check_model_deployment():
     except Exception as e:
         logging.error(f"Check Model Deployment Error: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
-    
     
     
 @app.route('/api/multi-inference', methods=['POST'])
@@ -1567,9 +1503,20 @@ def generate_deployment_tag(model_name):
     clean_name = model_name.lower().replace('.', '').replace('-', '')
     return f"{timestamp}"
 
-def deploy_emd_model_background(model_name, tag):
-    """Deploy EMD model in background thread"""
+def deploy_emd_model_background(model_name, tag, config=None):
+    """Deploy EMD model in background thread with deployment configuration"""
     global deployment_status
+    
+    # Extract configuration parameters
+    if config is None:
+        config = {}
+    
+    framework = config.get('framework', 'vllm')
+    machine_type = config.get('machineType', 'g5.2xlarge')
+    tp_size = config.get('tpSize', 1)
+    dp_size = config.get('dpSize', 1)
+    
+    logging.info(f"EMD background deployment: {model_name}, framework={framework}, machine_type={machine_type}, tp_size={tp_size}, dp_size={dp_size}")
     
     try:
         # Step 1: Check bootstrap status
@@ -1610,30 +1557,42 @@ def deploy_emd_model_background(model_name, tag):
         if not model_id:
             raise ValueError(f"Unknown model: {model_name}")
         
-        # Determine instance type based on model
-        instance_type = "g5.2xlarge"  # Default for smaller models
-        if "vl-32b" in model_name:
-            instance_type = "g5.12xlarge"  # Larger instance for 32B model
-        elif "vl-7b" in model_name or "ui-tars" in model_name:
-            instance_type = "g5.4xlarge"  # Medium instance for 7B models
+        # Use configured instance type, with model-based fallback
+        instance_type = machine_type  # Use the configured machine type
+        if not instance_type or instance_type == 'auto':
+            # Fallback to model-based instance type selection
+            instance_type = "g5.2xlarge"  # Default for smaller models
+            if "vl-32b" in model_name:
+                instance_type = "g5.12xlarge"  # Larger instance for 32B model
+            elif "vl-7b" in model_name or "ui-tars" in model_name:
+                instance_type = "g5.4xlarge"  # Medium instance for 7B models
         
-        # Build EMD deploy command
+        logging.info(f"Using instance type: {instance_type} for model {model_name}")
+        logging.info(f"Using framework: {framework} for model {model_name}")
+        
+        # Build EMD deploy command with configured parameters
+        extra_params = {
+            'tp_size': tp_size,
+            'dp_size': dp_size
+        }
+        
         deploy_cmd = [
             'emd', 'deploy',
             '--model-id', model_id,
             '--instance-type', instance_type,
-            '--engine-type', 'vllm',
+            '--engine-type', framework,  # Use configured framework
             '--service-type', 'sagemaker_realtime',
             '--model-tag', tag,
-            '--extra-params', '{}',
+            '--extra-params', json.dumps(extra_params),
             '--skip-confirm'
         ]
 
-        logging.info(f"🚀 Starting EMD deployment: model_id={model_id}, instance_type={instance_type}, tag={tag}")
+        logging.info(f"🚀 Starting EMD deployment: model_id={model_id}, instance_type={instance_type}, engine={framework}, tag={tag}")
+        logging.info(f"📋 Extra parameters: {extra_params}")
         result = deploy(
             model_id=model_id,
             instance_type=instance_type,
-            engine_type="vllm",
+            engine_type=framework,  # Use configured framework
             service_type="sagemaker_realtime",
             model_tag=tag,
         )
@@ -1677,159 +1636,121 @@ def deploy_emd_model_background(model_name, tag):
 ### flask api  ###
 ##################
 
-@app.route('/api/deploy-model', methods=['POST'])
-def deploy_emd_models():
-    """Deploy EMD models in background"""
+@app.route('/api/deploy-models', methods=['POST'])
+def deploy_models():
+    """Deploy models with deployment configuration"""
     global deployment_threads
     
     try:
         data = request.json
-        model_name = data.get('model', "")
+        models = data.get('models', [])
+        config = data.get('config', {})
         
-        if not model_name:
+        if not models:
             return jsonify({"error": "No models specified"}), 400
         
-        deployment_info = {}
-        if model_name not in EMD_MODELS:
-            raise NotImplementedError(f"Unsupported model: [{model_name}]")
-            
-        # Generate unique tag for this deployment
-        tag = generate_deployment_tag(model_name)
-
-        print("begin deploy", model_name, tag)
+        # Extract deployment configuration
+        deployment_method = config.get('method', 'SageMaker Endpoint')
+        framework = config.get('framework', 'vllm')
+        machine_type = config.get('machineType', 'g5.2xlarge')
+        tp_size = config.get('tpSize', 1)
+        dp_size = config.get('dpSize', 1)
         
-        # Check if already deploying
-        if model_name in deployment_threads and deployment_threads[model_name].is_alive():
-            deployment_info[model_name] = {
-                "status": "already_deploying",
-                "message": f"{model_name} is already being deployed"
-            }
-        else:
-            pass
-            # Start deployment thread
-            thread = threading.Thread(
-                target=deploy_emd_model_background,
-                args=(model_name, tag),
-                daemon=True
-            )
-            thread.start()
-            deployment_threads[model_name] = thread
+        logging.info(f"Deployment request: models={models}, method={deployment_method}, framework={framework}, machine_type={machine_type}")
+        
+        # For now, only process the first model (single deployment)
+        # TODO: Support batch deployment later
+        model_name = models[0] if models else None
+        
+        if not model_name:
+            return jsonify({"error": "No valid model specified"}), 400
+        
+        deployment_info = {}
+        
+        # Check deployment method
+        if deployment_method == 'SageMaker Endpoint':
+            # Use EMD deployment for SageMaker Endpoint
+            if model_name not in EMD_MODELS:
+                return jsonify({"error": f"Model {model_name} not supported for SageMaker Endpoint deployment"}), 400
+                
+            # Generate unique tag for this deployment
+            tag = generate_deployment_tag(model_name)
+
+            logging.info(f"Starting SageMaker Endpoint deployment: {model_name} with tag {tag}")
             
+            # Check if already deploying
+            if model_name in deployment_threads and deployment_threads[model_name].is_alive():
+                deployment_info[model_name] = {
+                    "status": "already_deploying",
+                    "message": f"{model_name} is already being deployed"
+                }
+            else:
+                # Start deployment thread with configuration
+                thread = threading.Thread(
+                    target=deploy_emd_model_background,
+                    args=(model_name, tag, config),
+                    daemon=True
+                )
+                thread.start()
+                deployment_threads[model_name] = thread
+                
+                deployment_info[model_name] = {
+                    "status": "started",
+                    "tag": tag,
+                    "message": f"Started SageMaker Endpoint deployment of {model_name}",
+                    "config": {
+                        "method": deployment_method,
+                        "framework": framework,
+                        "machine_type": machine_type,
+                        "tp_size": tp_size,
+                        "dp_size": dp_size
+                    }
+                }
+                # Update global EMD tag to use the newest one
+                set_emd_tag(tag)
+                
+        elif deployment_method == 'SageMaker HyperPod':
+            # TODO: Implement SageMaker HyperPod deployment
             deployment_info[model_name] = {
-                "status": "started",
-                "tag": tag,
-                "message": f"Started deployment of {model_name}"
+                "status": "not_implemented",
+                "message": f"SageMaker HyperPod deployment for {model_name} is not yet implemented",
+                "config": config
             }
-            # Update global EMD tag to use the newest one
-            set_emd_tag(tag)
+            logging.warning(f"SageMaker HyperPod deployment not implemented for {model_name}")
+            
+        elif deployment_method == 'EKS':
+            # TODO: Implement EKS deployment
+            deployment_info[model_name] = {
+                "status": "not_implemented",
+                "message": f"EKS deployment for {model_name} is not yet implemented",
+                "config": config
+            }
+            logging.warning(f"EKS deployment not implemented for {model_name}")
+            
+        elif deployment_method == 'EC2':
+            # TODO: Implement EC2 deployment
+            deployment_info[model_name] = {
+                "status": "not_implemented",
+                "message": f"EC2 deployment for {model_name} is not yet implemented",
+                "config": config
+            }
+            logging.warning(f"EC2 deployment not implemented for {model_name}")
+            
+        else:
+            return jsonify({"error": f"Unsupported deployment method: {deployment_method}"}), 400
         
         return jsonify({
             "status": "success",
             "deployments": deployment_info,
-            "message": f"Started deployment for {len(deployment_info)} models"
+            "deployment_method": deployment_method,
+            "message": f"Started deployment for {len(deployment_info)} models using {deployment_method}"
         })
         
     except Exception as e:
-        logging.error(f"Deploy EMD models error: {e}")
+        logging.error(f"Deploy models error: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
-
-# @app.route('/api/emd/deployment-status', methods=['GET'])
-# def check_emd_deployment_status():
-#     """Check status of EMD deployments"""
-#     try:
-#         # Get specific model if requested
-#         model_name = request.args.get('model')
-        
-#         if model_name:
-#             if model_name in deployment_status:
-#                 return jsonify({
-#                     "model": model_name,
-#                     "deployment": deployment_status[model_name]
-#                 })
-#             else:
-#                 return jsonify({
-#                     "model": model_name,
-#                     "deployment": {"status": "not_found", "message": "No deployment found"}
-#                 })
-#         else:
-#             # Return status for all models
-#             return jsonify({
-#                 "deployments": deployment_status,
-#                 "active_threads": {k: v.is_alive() for k, v in deployment_threads.items()},
-#                 "bootstrap_status": bootstrap_status,
-#                 "deployed_models": get_current_models()
-#             })
-            
-#     except Exception as e:
-#         logging.error(f"Check EMD status error: {e}")
-#         return jsonify({"error": str(e)}), 500
-
-# @app.route('/api/emd/auto-deploy', methods=['POST'])
-# def auto_deploy_selected_models():
-#     """Auto-deploy selected EMD models after model selection"""
-#     global deployment_threads
-    
-#     try:
-#         data = request.json
-#         selected_models = data.get('models', [])
-#         # Keep only valid EMD model keys (simplified names)
-#         emd_models = [x for x in selected_models if x in EMD_MODELS]
-        
-#         if not emd_models:
-#             return jsonify({"error": "No valid EMD models specified"}), 400
-        
-#         deployment_info = {}
-#         bootstrap_needed = not check_emd_bootstrap_status()
-        
-#         logging.info(f"🚀 Auto-deploying selected EMD models: {emd_models}")
-#         logging.info(f"🔍 Bootstrap needed: {bootstrap_needed}")
-        
-#         for model_name in emd_models:
-#             # Check if already deployed and working
-#             deployed_models = get_current_models()
-#             if model_name in deployed_models:
-#                 logging.info(f"ℹ️ Model {model_name} is already deployed with tag {deployed_models[model_name]['tag']}")
-#                 deployment_info[model_name] = {
-#                     "status": "already_deployed",
-#                     "tag": deployed_models[model_name]['tag'],
-#                     "message": f"{model_name} is already deployed and ready"
-#                 }
-#                 continue
-            
-#             # Check if already deploying
-#             if model_name in deployment_threads and deployment_threads[model_name].is_alive():
-#                 deployment_info[model_name] = {
-#                     "status": "already_deploying",
-#                     "message": f"{model_name} is already being deployed"
-#                 }
-#                 continue
-            
-#             # Start new deployment
-#             tag = generate_deployment_tag(model_name)
-#             thread = threading.Thread(
-#                 target=deploy_emd_model_background,
-#                 args=(model_name, tag),
-#                 daemon=True
-#             )
-#             thread.start()
-#             deployment_threads[model_name] = thread
-            
-#             deployment_info[model_name] = {
-#                 "status": "started",
-#                 "tag": tag,
-#                 "message": f"Started deployment of {model_name}"
-#             }
-        
-#         return jsonify({
-#             "status": "success",
-#             "deployments": deployment_info,
-#             "bootstrap_needed": bootstrap_needed,
-#             "message": f"Auto-deployment initiated for {len(emd_models)} EMD models"
-#         })
-        
-#     except Exception as e:
-#         logging.error(f"Auto-deploy error: {e}")
-#         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/check-model-status', methods=['POST'])
 def check_model_status():
