@@ -221,74 +221,85 @@ const StressTestPage = () => {
 
   // 渲染性能指标图表
   const renderMetricsCharts = (results) => {
-    if (!results || !results.detailed_metrics) return null;
+    if (!results || !results.percentiles) return null;
 
-    const metrics = results.detailed_metrics;
+    const percentiles = results.percentiles;
+    const percentileLabels = percentiles['Percentiles'] || [];
     
-    // TTFT分布图
-    const ttftData = metrics.ttft_distribution?.map((value, index) => ({
-      request: index + 1,
-      ttft: value
-    })) || [];
+    // TTFT分布图 - 使用百分位数据，x轴为TTFT值，y轴为百分位
+    const ttftData = percentileLabels.map((label, index) => ({
+      percentile: label,
+      ttft: percentiles['TTFT (s)']?.[index] || 0
+    })).reverse(); // 反转数据顺序，让高百分位显示在上方
 
-    // 延迟分布图
-    const latencyData = metrics.latency_distribution?.map((value, index) => ({
-      request: index + 1,
-      latency: value
-    })) || [];
+    // 延迟分布图 - 使用百分位数据，x轴为延迟值，y轴为百分位
+    const latencyData = percentileLabels.map((label, index) => ({
+      percentile: label,
+      latency: percentiles['Latency (s)']?.[index] || 0
+    })).reverse(); // 反转数据顺序，让高百分位显示在上方
 
     const ttftConfig = {
       data: ttftData,
-      xField: 'request',
-      yField: 'ttft',
+      xField: 'ttft', // x轴为TTFT值
+      yField: 'percentile', // y轴为百分位
       smooth: true,
       color: '#1890ff',
       point: { size: 3 },
       tooltip: {
         formatter: (datum) => ({
-          name: 'TTFT',
-          value: `${datum.ttft?.toFixed(3)}s`
+          name: `第${datum.percentile}百分位`,
+          value: `TTFT: ${datum.ttft?.toFixed(3)}s`
         })
+      },
+      xAxis: {
+        title: {
+          text: 'TTFT (秒)'
+        }
+      },
+      yAxis: {
+        title: {
+          text: '百分位'
+        },
+        min: 0,
+        max: 100,
+        tickInterval: 10
       }
     };
 
     const latencyConfig = {
       data: latencyData,
-      xField: 'request',
-      yField: 'latency',
+      xField: 'latency', // x轴为延迟值
+      yField: 'percentile', // y轴为百分位
       smooth: true,
       color: '#52c41a',
       point: { size: 3 },
       tooltip: {
         formatter: (datum) => ({
-          name: '延迟',
-          value: `${datum.latency?.toFixed(3)}s`
+          name: `第${datum.percentile}百分位`,
+          value: `延迟: ${datum.latency?.toFixed(3)}s`
         })
+      },
+      xAxis: {
+        title: {
+          text: '端到端延迟 (秒)'
+        }
+      },
+      yAxis: {
+        title: {
+          text: '百分位'
+        },
+        min: 0,
+        max: 100,
+        tickInterval: 10
       }
     };
 
-    // 吞吐量数据
-    const throughputData = metrics.input_tokens?.map((input, index) => ({
-      request: index + 1,
-      input_tokens: input,
-      output_tokens: metrics.output_tokens?.[index] || 0
-    })) || [];
-
-    const throughputConfig = {
-      data: throughputData,
-      xField: 'request',
-      yField: 'input_tokens',
-      seriesField: 'type',
-      smooth: true,
-      color: ['#1890ff', '#52c41a'],
-      point: { size: 2 },
-      tooltip: {
-        formatter: (datum) => ({
-          name: 'Token数量',
-          value: `输入: ${datum.input_tokens}, 输出: ${datum.output_tokens}`
-        })
-      }
-    };
+    // Token使用分布数据 - 使用百分位数据
+    const tokenData = percentileLabels.map((label, index) => ({
+      percentile: label,
+      input_tokens: percentiles['Input tokens']?.[index] || 0,
+      output_tokens: percentiles['Output tokens']?.[index] || 0
+    })).reverse(); // 反转数据顺序，让高百分位显示在上方
 
     return (
       <Row gutter={[16, 16]}>
@@ -308,25 +319,49 @@ const StressTestPage = () => {
               <div style={{ width: '50%', paddingRight: 8 }}>
                 <h4 style={{ textAlign: 'center', margin: '0 0 16px 0' }}>输入Token</h4>
                 <Line
-                  data={throughputData}
-                  xField="request"
-                  yField="input_tokens"
+                  data={tokenData}
+                  xField="input_tokens"
+                  yField="percentile"
                   color="#1890ff"
                   smooth={true}
                   point={{ size: 2 }}
                   height={160}
+                  tooltip={{
+                    formatter: (datum) => ({
+                      name: `第${datum.percentile}百分位`,
+                      value: `输入Token: ${datum.input_tokens}`
+                    })
+                  }}
+                  xAxis={{
+                    title: { text: '输入Token数' }
+                  }}
+                  yAxis={{
+                    title: { text: '百分位' }
+                  }}
                 />
               </div>
               <div style={{ width: '50%', paddingLeft: 8 }}>
                 <h4 style={{ textAlign: 'center', margin: '0 0 16px 0' }}>输出Token</h4>
                 <Line
-                  data={throughputData}
-                  xField="request"
-                  yField="output_tokens"
+                  data={tokenData}
+                  xField="output_tokens"
+                  yField="percentile"
                   color="#52c41a"
                   smooth={true}
                   point={{ size: 2 }}
                   height={160}
+                  tooltip={{
+                    formatter: (datum) => ({
+                      name: `第${datum.percentile}百分位`,
+                      value: `输出Token: ${datum.output_tokens}`
+                    })
+                  }}
+                  xAxis={{
+                    title: { text: '输出Token数' }
+                  }}
+                  yAxis={{
+                    title: { text: '百分位' }
+                  }}
                 />
               </div>
             </div>
@@ -506,7 +541,7 @@ const StressTestPage = () => {
           <Title level={2} style={{ margin: 0 }}>压力测试</Title>
         </Space>
         <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
-          使用 Evalscope 对部署的模型进行性能评估，测量 TTFT、延迟和 QPS 等关键指标
+           对部署的模型进行性能评估，测量 TTFT、延迟和 QPS 等关键指标
         </Text>
       </div>
 
