@@ -58,14 +58,14 @@ A comprehensive platform for multimodal AI inference supporting both AWS Bedrock
 
 3. **Start the backend:**
    ```bash
-   python backend/backend.py
+   python run_backend.py
    ```
 
 ### Frontend Setup
 
 1. **Install dependencies:**
    ```bash
-   cd frontend
+   cd src/frontend
    npm install
    ```
 

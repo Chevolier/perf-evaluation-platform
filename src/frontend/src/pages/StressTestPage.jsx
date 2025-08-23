@@ -196,6 +196,19 @@ const StressTestPage = () => {
             clearInterval(interval);
             message.error('压力测试失败：' + (sessionData.error || '未知错误'));
           }
+        } else if (response.status === 404) {
+          // Session not found on backend - clear stale session
+          console.log(`Session ${sessionId} not found on backend, clearing local data`);
+          clearInterval(interval);
+          setTestSessions(prev => {
+            const updated = { ...prev };
+            delete updated[sessionId];
+            return updated;
+          });
+          if (currentSessionId === sessionId) {
+            setCurrentSessionId(null);
+          }
+          message.warning('测试会话已过期，已清除本地缓存');
         }
       } catch (error) {
         console.error('获取测试状态失败:', error);
@@ -263,8 +276,35 @@ const StressTestPage = () => {
     }
   }, [currentSessionId, testSessions]);
 
+  // 验证和清理过期会话
+  const validateSessions = async () => {
+    const sessionIds = Object.keys(testSessions);
+    for (const sessionId of sessionIds) {
+      try {
+        const response = await fetch(`/api/stress-test/status/${sessionId}`);
+        if (response.status === 404) {
+          console.log(`Cleaning up stale session: ${sessionId}`);
+          setTestSessions(prev => {
+            const updated = { ...prev };
+            delete updated[sessionId];
+            return updated;
+          });
+          if (currentSessionId === sessionId) {
+            setCurrentSessionId(null);
+          }
+        }
+      } catch (error) {
+        console.error(`Failed to validate session ${sessionId}:`, error);
+      }
+    }
+  };
+
   useEffect(() => {
     fetchModels();
+    // Validate existing sessions on component mount
+    if (Object.keys(testSessions).length > 0) {
+      validateSessions();
+    }
     return () => {
       if (pollingInterval) {
         clearInterval(pollingInterval);

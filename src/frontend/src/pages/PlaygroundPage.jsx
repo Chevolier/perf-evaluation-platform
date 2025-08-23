@@ -230,6 +230,8 @@ const PlaygroundPage = ({
     };
 
     try {
+      console.log('🚀 Starting inference request:', requestData);
+      
       // 使用流式接口
       const response = await fetch('/api/multi-inference', {
         method: 'POST',
@@ -239,36 +241,66 @@ const PlaygroundPage = ({
         body: JSON.stringify(requestData)
       });
 
+      console.log('📡 Response status:', response.status, response.statusText);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
+      let buffer = '';
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
-        const chunk = decoder.decode(value);
-        const lines = chunk.split('\n');
+        const chunk = decoder.decode(value, { stream: true });
+        console.log('📦 Received chunk:', JSON.stringify(chunk));
+        
+        buffer += chunk;
+        const lines = buffer.split('\n');
+        
+        // Keep the last potentially incomplete line in buffer
+        buffer = lines.pop() || '';
 
         for (const line of lines) {
+          console.log('📄 Processing line:', JSON.stringify(line));
+          
           if (line.startsWith('data: ')) {
             try {
-              const data = JSON.parse(line.slice(6));
+              const jsonStr = line.slice(6).trim();
+              console.log('🔍 Parsing JSON:', jsonStr);
               
-              if (data.type === 'complete') {
-                setIsInferring(false);
-                break;
-              } else if (data.model) {
-                setInferenceResults(prev => ({
-                  ...prev,
-                  [data.model]: data
-                }));
+              if (jsonStr) {
+                const data = JSON.parse(jsonStr);
+                console.log('✅ Parsed data:', data);
+                
+                if (data.type === 'complete') {
+                  console.log('🏁 Stream complete');
+                  setIsInferring(false);
+                  break;
+                } else if (data.model) {
+                  console.log('📊 Updating results for model:', data.model);
+                  setInferenceResults(prev => ({
+                    ...prev,
+                    [data.model]: data
+                  }));
+                } else if (data.type === 'heartbeat') {
+                  console.log('💓 Heartbeat received');
+                }
               }
             } catch (e) {
-              console.error('解析SSE数据失败:', e);
+              console.error('❌ 解析SSE数据失败:', e, 'Line:', line);
             }
+          } else if (line.trim()) {
+            console.log('⚠️ Non-SSE line received:', line);
           }
         }
       }
+      
+      console.log('🎯 Stream processing finished');
+      setIsInferring(false);
     } catch (error) {
       console.error('推理请求失败:', error);
       message.error('推理请求失败，请检查网络连接');

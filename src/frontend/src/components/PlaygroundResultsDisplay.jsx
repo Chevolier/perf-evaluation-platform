@@ -7,7 +7,7 @@ import {
   RobotOutlined
 } from '@ant-design/icons';
 
-const { Title, Text, Paragraph } = Typography;
+const { Title, Text } = Typography;
 
 const PlaygroundResultsDisplay = ({ results, loading }) => {
   const getStatusIcon = (status) => {
@@ -45,6 +45,12 @@ const PlaygroundResultsDisplay = ({ results, loading }) => {
   const formatResponse = (response) => {
     if (!response) {
       return 'N/A';
+    }
+    
+    // FIRST: Extract the content field from our backend response format
+    if (response && typeof response === 'object' && response.content) {
+      // This is our backend response format: {content: "...", usage: {...}, raw_response: {...}}
+      return response.content;
     }
     
     if (typeof response === 'string') {
@@ -92,6 +98,125 @@ const PlaygroundResultsDisplay = ({ results, loading }) => {
     return JSON.stringify(response, null, 2);
   };
 
+  const renderFormattedContent = (content) => {
+    if (!content) return 'N/A';
+    
+    // Check if content has reasoning structure (with or without response)
+    if (typeof content === 'string' && content.includes('**Reasoning:**')) {
+      let reasoningPart = '';
+      let responsePart = '';
+      let notePart = '';
+      
+      if (content.includes('**Response:**')) {
+        // Full format with reasoning and response
+        const parts = content.split('**Response:**');
+        reasoningPart = parts[0].replace('**Reasoning:**', '').trim();
+        responsePart = parts[1] ? parts[1].trim() : '';
+      } else if (content.includes('**Note:**')) {
+        // Reasoning only with note about token limits
+        const parts = content.split('**Note:**');
+        reasoningPart = parts[0].replace('**Reasoning:**', '').trim();
+        notePart = parts[1] ? parts[1].trim() : '';
+      } else {
+        // Just reasoning
+        reasoningPart = content.replace('**Reasoning:**', '').trim();
+      }
+      
+      return (
+        <div>
+          {reasoningPart && (
+            <div style={{ marginBottom: '16px' }}>
+              <div style={{ 
+                fontSize: '13px', 
+                fontWeight: 'bold', 
+                color: '#722ed1', 
+                marginBottom: '8px',
+                display: 'flex',
+                alignItems: 'center'
+              }}>
+                🧠 Reasoning Process
+              </div>
+              <div style={{
+                backgroundColor: '#f6f8fa',
+                border: '1px solid #e1e4e8',
+                borderRadius: '6px',
+                padding: '12px',
+                fontSize: '13px',
+                fontStyle: 'italic',
+                color: '#586069',
+                lineHeight: '1.5'
+              }}>
+                {reasoningPart}
+              </div>
+            </div>
+          )}
+          
+          {responsePart && (
+            <div style={{ marginBottom: '16px' }}>
+              <div style={{ 
+                fontSize: '13px', 
+                fontWeight: 'bold', 
+                color: '#28a745', 
+                marginBottom: '8px',
+                display: 'flex',
+                alignItems: 'center'
+              }}>
+                💬 Final Response
+              </div>
+              <div style={{
+                backgroundColor: '#f8fff8',
+                border: '1px solid #d1f2d1',
+                borderRadius: '6px',
+                padding: '12px',
+                fontSize: '14px',
+                lineHeight: '1.6',
+                whiteSpace: 'pre-wrap'
+              }}>
+                {responsePart}
+              </div>
+            </div>
+          )}
+          
+          {notePart && (
+            <div>
+              <div style={{ 
+                fontSize: '13px', 
+                fontWeight: 'bold', 
+                color: '#fa8c16', 
+                marginBottom: '8px',
+                display: 'flex',
+                alignItems: 'center'
+              }}>
+                ⚠️ Note
+              </div>
+              <div style={{
+                backgroundColor: '#fffbe6',
+                border: '1px solid #ffe58f',
+                borderRadius: '6px',
+                padding: '12px',
+                fontSize: '13px',
+                color: '#ad6800',
+                lineHeight: '1.5'
+              }}>
+                {notePart}
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+    
+    // Regular content without reasoning
+    return (
+      <div style={{
+        whiteSpace: 'pre-wrap',
+        lineHeight: '1.6'
+      }}>
+        {content}
+      </div>
+    );
+  };
+
   if (loading && Object.keys(results).length === 0) {
     return (
       <div style={{ textAlign: 'center', padding: '40px' }}>
@@ -135,11 +260,10 @@ const PlaygroundResultsDisplay = ({ results, loading }) => {
         >
           {result.status === 'success' && result.result ? (
             <div>
-              <Paragraph
+              <div
                 style={{
-                  whiteSpace: 'pre-wrap',
                   marginBottom: 12,
-                  maxHeight: '200px',
+                  maxHeight: '400px',
                   overflowY: 'auto',
                   backgroundColor: '#fafafa',
                   padding: '12px',
@@ -147,8 +271,8 @@ const PlaygroundResultsDisplay = ({ results, loading }) => {
                   border: '1px solid #f0f0f0'
                 }}
               >
-                {formatResponse(result.result)}
-              </Paragraph>
+                {renderFormattedContent(formatResponse(result.result))}
+              </div>
               
               {result.result.usage && (
                 <div>
