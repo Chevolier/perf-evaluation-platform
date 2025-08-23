@@ -4,38 +4,50 @@ server:
   host: "0.0.0.0"
   port: 5000
   debug: false
-  cors_origins: ["*"]
+  workers: 1
 
 logging:
   level: "INFO"
-  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-  file: "data/logs/application.log"
-  max_size: 10485760  # 10MB
+  file: "logs/app.log"
+  max_bytes: 10485760  # 10MB
   backup_count: 5
+
+aws:
+  region: "us-west-2"
+  account_id: null  # Auto-detected
 
 models:
   emd:
-    base_url: ""
-    api_key: ""
-    timeout: 120
+    base_url: "http://localhost:8000"
+    default_tag: null
+    timeout: 300
   bedrock:
-    region: "us-east-1"
-    timeout: 60
+    region: "us-west-2"
+    timeout: 300
 
-benchmarking:
-  default_params:
-    num_requests: 100
-    concurrency: 10
-    input_tokens_range: [50, 200]
-    output_tokens_range: [100, 500]
-    temperature: 0.1
-  evalscope:
-    environment_path: "/home/ec2-user/SageMaker/efs/conda_envs/evalscope"
-    timeout: 600
+database:
+  path: "data/app.db"
+  echo: false
 
 storage:
-  data_dir: "data"
-  benchmarks_dir: "data/benchmarks"
-  logs_dir: "data/logs"
-  temp_dir: "data/temp"
-  archive_dir: "/home/ec2-user/SageMaker/efs/Projects/llm-performance-viz/archive_results"
+  base_path: "outputs"
+  cleanup_days: 30
+
+benchmarking:
+  default_timeout: 1800  # 30 minutes
+  max_concurrent: 5
+  result_retention_days: 90
+
+cors:
+  origins:
+    - "http://localhost:3000"
+    - "http://localhost:3001"
+  methods:
+    - "GET"
+    - "POST" 
+    - "PUT"
+    - "DELETE"
+    - "OPTIONS"
+  allow_headers:
+    - "Content-Type"
+    - "Authorization"

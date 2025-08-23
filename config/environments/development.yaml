@@ -6,7 +6,7 @@ server:
 
 logging:
   level: "DEBUG"
-  file: "data/logs/development.log"
+  file: "logs/development.log"
 
 models:
   emd:
