@@ -100,7 +100,8 @@ class StressTestService:
                 "message": "压力测试完成",
                 "current_message": "测试结果已生成",
                 "results": results,
-                "end_time": datetime.now().isoformat()
+                "end_time": datetime.now().isoformat(),
+                "output_directory": self.test_sessions[session_id].get("output_directory")
             })
             
             logger.info(f"Stress test completed for session {session_id}")
@@ -215,9 +216,14 @@ class StressTestService:
             logger.info(f"[DEBUG] Token parameters: input_range={input_tokens_range}, output_range={output_tokens_range}")
             logger.info(f"[DEBUG] Evalscope config: min_prompt_length={min_prompt_length}, max_prompt_length={max_prompt_length}, min_tokens={min_tokens}, max_tokens={max_tokens}")
             
+            # Create simple output directory
+            # Format: outputs/model_name/session_id
+            output_dir = self._create_output_dir(model_key, session_id)
+            
             self._update_session(session_id, {
                 "progress": 40,
-                "current_message": "创建evalscope测试脚本..."
+                "current_message": "创建evalscope测试脚本...",
+                "output_directory": output_dir
             })
             
             # Create evalscope script content with EMD compatibility patch
@@ -553,6 +559,10 @@ except Exception as e:
                 logger.info(f"[DEBUG] Percentile data keys: {list(percentile_data.keys())}")
                 logger.info(f"[DEBUG] Input tokens data: {percentile_data.get('Input tokens', 'NOT_FOUND')}")
                 logger.info(f"[DEBUG] Output tokens data: {percentile_data.get('Output tokens', 'NOT_FOUND')}")
+                
+                # Save results to structured output directory
+                self._save_results_to_output_dir(output_dir, processed_results, test_params, model_key, session_id)
+                
                 return processed_results
             else:
                 raise Exception(f"Evalscope返回了意外的结果格式: {type(raw_results)}")
@@ -567,6 +577,164 @@ except Exception as e:
             logger.error(f"Evalscope stress test failed: {e}")
             raise Exception(f"Evalscope压力测试失败: {str(e)}")
     
+    def _create_output_dir(self, model_key: str, session_id: str) -> str:
+        """Create simple output directory for benchmark results.
+        
+        Args:
+            model_key: Model identifier  
+            session_id: Session ID
+            
+        Returns:
+            Path to the output directory
+        """
+        from ..core.models import model_registry
+        import os
+        
+        # Get model information
+        model_info = model_registry.get_model_info(model_key)
+        model_name = model_info.get('model_path', model_key).replace('/', '-')
+        
+        # Create simple directory path: outputs/model_name/session_id
+        project_root = Path(__file__).parent.parent.parent.parent
+        output_dir = project_root / 'outputs' / model_name / session_id
+        
+        # Create directory if it doesn't exist
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        logger.info(f"Created output directory: {output_dir}")
+        return str(output_dir)
+    
+    def _infer_tp_size(self, instance_type: str) -> int:
+        """Infer tensor parallel size from instance type.
+        
+        Args:
+            instance_type: AWS instance type
+            
+        Returns:
+            Inferred tensor parallel size
+        """
+        # Map instance types to typical TP sizes
+        tp_mapping = {
+            'ml.g5.xlarge': 1,
+            'ml.g5.2xlarge': 1,
+            'ml.g5.4xlarge': 1,
+            'ml.g5.8xlarge': 2,
+            'ml.g5.12xlarge': 4,
+            'ml.g5.16xlarge': 4,
+            'ml.g5.24xlarge': 4,
+            'ml.g5.48xlarge': 8,
+            'ml.p4d.24xlarge': 8,
+            'ml.p4de.24xlarge': 8,
+            'ml.p5.48xlarge': 8,
+        }
+        return tp_mapping.get(instance_type, 1)
+    
+    
+    def _save_results_to_output_dir(self, output_dir: str, results: Dict[str, Any], 
+                                  test_params: Dict[str, Any], model_key: str, session_id: str):
+        """Save benchmark results and configuration to the output directory.
+        
+        Args:
+            output_dir: Output directory path
+            results: Processed benchmark results
+            test_params: Test parameters
+            model_key: Model identifier
+            session_id: Session ID
+        """
+        import json
+        import os
+        from datetime import datetime
+        from ..core.models import model_registry
+        
+        try:
+            # Get model information
+            model_info = model_registry.get_model_info(model_key)
+            
+            # Create eval_config.json with all deployment and test parameters
+            eval_config = {
+                "session_id": session_id,
+                "timestamp": datetime.now().isoformat(),
+                "model": {
+                    "key": model_key,
+                    "name": model_info.get('name', model_key),
+                    "model_path": model_info.get('model_path', model_key),
+                    "supports_multimodal": model_info.get('supports_multimodal', False)
+                },
+                "deployment_config": {
+                    "framework": test_params.get('inference_framework', 'vllm'),
+                    "instance_type": test_params.get('instance_type', 'ml.g5.2xlarge'),
+                    "tp_size": test_params.get('tp_size', self._infer_tp_size(test_params.get('instance_type', 'ml.g5.2xlarge'))),
+                    "dp_size": test_params.get('dp_size', 1),
+                    "platform": "EMD",
+                    "region": "us-west-2"
+                },
+                "stress_test_config": {
+                    "concurrency": test_params.get('concurrency', 5),
+                    "total_requests": test_params.get('num_requests', 50),
+                    "dataset": test_params.get('dataset', 'random'),
+                    "input_tokens": {
+                        "min": min(test_params.get('input_tokens_range', [50, 200])),
+                        "max": max(test_params.get('input_tokens_range', [50, 200]))
+                    },
+                    "output_tokens": {
+                        "min": min(test_params.get('output_tokens_range', [100, 500])),
+                        "max": max(test_params.get('output_tokens_range', [100, 500]))
+                    },
+                    "temperature": test_params.get('temperature', 0.1),
+                    "stream": test_params.get('stream', True)
+                }
+            }
+            
+            # Save eval_config.json
+            config_file = os.path.join(output_dir, 'eval_config.json')
+            with open(config_file, 'w', encoding='utf-8') as f:
+                json.dump(eval_config, f, indent=2, ensure_ascii=False)
+            
+            # Save benchmark_results.json
+            results_file = os.path.join(output_dir, 'benchmark_results.json')
+            with open(results_file, 'w', encoding='utf-8') as f:
+                json.dump(results, f, indent=2, ensure_ascii=False)
+            
+            # Save summary.txt
+            summary_file = os.path.join(output_dir, 'summary.txt')
+            with open(summary_file, 'w', encoding='utf-8') as f:
+                f.write(f"Benchmark Summary - {session_id}\n")
+                f.write("=" * 50 + "\n\n")
+                f.write(f"Model: {model_key}\n")
+                f.write(f"Framework: {eval_config['deployment_config']['framework']}\n")
+                f.write(f"Instance: {eval_config['deployment_config']['instance_type']}\n")
+                f.write(f"TP Size: {eval_config['deployment_config']['tp_size']}\n")
+                f.write(f"DP Size: {eval_config['deployment_config']['dp_size']}\n")
+                f.write(f"Timestamp: {eval_config['timestamp']}\n\n")
+                
+                f.write("Test Configuration:\n")
+                f.write(f"- Concurrency: {eval_config['stress_test_config']['concurrency']}\n")
+                f.write(f"- Total Requests: {eval_config['stress_test_config']['total_requests']}\n")
+                f.write(f"- Dataset: {eval_config['stress_test_config']['dataset']}\n")
+                f.write(f"- Input Tokens: {eval_config['stress_test_config']['input_tokens']['min']}-{eval_config['stress_test_config']['input_tokens']['max']}\n")
+                f.write(f"- Output Tokens: {eval_config['stress_test_config']['output_tokens']['min']}-{eval_config['stress_test_config']['output_tokens']['max']}\n")
+                f.write(f"- Temperature: {eval_config['stress_test_config']['temperature']}\n\n")
+                
+                f.write("Performance Metrics:\n")
+                f.write(f"- QPS: {results.get('qps', 0):.2f} requests/sec\n")
+                f.write(f"- Average TTFT: {results.get('avg_ttft', 0):.3f}s\n")
+                f.write(f"- Average Latency: {results.get('avg_latency', 0):.3f}s\n")
+                f.write(f"- P50 TTFT: {results.get('p50_ttft', 0):.3f}s\n")
+                f.write(f"- P99 TTFT: {results.get('p99_ttft', 0):.3f}s\n")
+                f.write(f"- P50 Latency: {results.get('p50_latency', 0):.3f}s\n")
+                f.write(f"- P99 Latency: {results.get('p99_latency', 0):.3f}s\n")
+                f.write(f"- Token Throughput: {results.get('tokens_per_second', 0):.2f} tokens/sec\n")
+                f.write(f"- Total Requests: {results.get('total_requests', 0)}\n")
+                f.write(f"- Successful Requests: {results.get('successful_requests', 0)}\n")
+                f.write(f"- Failed Requests: {results.get('failed_requests', 0)}\n")
+            
+            logger.info(f"Saved benchmark results to directory: {output_dir}")
+            logger.info(f"Files created: eval_config.json, benchmark_results.json, summary.txt")
+            
+        except Exception as e:
+            logger.error(f"Failed to save results to output directory {output_dir}: {e}")
+            # Don't raise exception as this is not critical for the main benchmark flow
+
     def _update_session(self, session_id: str, updates: Dict[str, Any]):
         """Update session data.
         
