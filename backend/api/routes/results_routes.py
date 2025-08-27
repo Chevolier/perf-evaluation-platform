@@ -14,7 +14,10 @@ results_bp = Blueprint('results', __name__)
 
 @results_bp.route('/api/results/structure', methods=['GET'])
 def get_results_structure():
-    """Get the structure of all available benchmark results."""
+    """Get the hierarchical structure of all available benchmark results.
+    
+    Structure: model/instance/framework/dataset/input_tokens_output_tokens
+    """
     try:
         project_root = Path(__file__).parent.parent.parent.parent
         outputs_dir = project_root / 'outputs'
@@ -25,7 +28,9 @@ def get_results_structure():
             logger.warning(f"Outputs directory does not exist: {outputs_dir}")
             return jsonify({"structure": []})
         
-        structure = []
+        # Build hierarchical structure
+        hierarchy = {}
+        total_sessions = 0
         
         # Scan each model directory
         for model_dir in outputs_dir.iterdir():
@@ -33,7 +38,6 @@ def get_results_structure():
                 continue
                 
             model_name = model_dir.name
-            sessions = []
             
             # Scan each session directory within the model
             for session_dir in model_dir.iterdir():
@@ -64,38 +68,105 @@ def get_results_structure():
                         logger.debug(f"No benchmark data found in {session_dir}")
                         continue
                     
-                    sessions.append({
-                        "key": f"{model_name}_{session_id}",
+                    # Extract hierarchy information
+                    deployment_config = config.get('deployment_config', {})
+                    stress_config = config.get('stress_test_config', {})
+                    
+                    instance_type = deployment_config.get('instance_type', 'unknown')
+                    framework = deployment_config.get('framework', 'unknown')
+                    dataset = stress_config.get('dataset', 'unknown')
+                    
+                    # Create input/output tokens description
+                    input_tokens = stress_config.get('input_tokens', {})
+                    output_tokens = stress_config.get('output_tokens', {})
+                    tokens_desc = f"input:{input_tokens.get('min', 0)}-{input_tokens.get('max', 0)}_output:{output_tokens.get('min', 0)}-{output_tokens.get('max', 0)}"
+                    
+                    # Build hierarchy: model -> instance -> framework -> dataset -> tokens
+                    if model_name not in hierarchy:
+                        hierarchy[model_name] = {}
+                    if instance_type not in hierarchy[model_name]:
+                        hierarchy[model_name][instance_type] = {}
+                    if framework not in hierarchy[model_name][instance_type]:
+                        hierarchy[model_name][instance_type][framework] = {}
+                    if dataset not in hierarchy[model_name][instance_type][framework]:
+                        hierarchy[model_name][instance_type][framework][dataset] = {}
+                    if tokens_desc not in hierarchy[model_name][instance_type][framework][dataset]:
+                        hierarchy[model_name][instance_type][framework][dataset][tokens_desc] = []
+                    
+                    # Add session to the deepest level
+                    hierarchy[model_name][instance_type][framework][dataset][tokens_desc].append({
+                        "key": f"{model_name}_{instance_type}_{framework}_{dataset}_{tokens_desc}_{session_id}",
                         "session_id": session_id,
                         "model": model_name,
+                        "instance_type": instance_type,
+                        "framework": framework,
+                        "dataset": dataset,
+                        "tokens_desc": tokens_desc,
                         "timestamp": config.get('timestamp', ''),
                         "config": config,
-                        "path": str(session_dir)
+                        "path": str(session_dir),
+                        "concurrency": stress_config.get('concurrency', 'N/A'),
+                        "total_requests": stress_config.get('total_requests', 'N/A')
                     })
+                    total_sessions += 1
                     
                 except Exception as e:
                     logger.error(f"Error reading config from {config_path}: {e}")
                     continue
-            
-            # Only include models that have valid sessions
-            if sessions:
-                # Sort sessions by timestamp (newest first)
-                sessions.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
-                
-                structure.append({
-                    "model": model_name,
-                    "sessions": sessions
-                })
         
-        # Sort models alphabetically
-        structure.sort(key=lambda x: x['model'])
+        # Convert hierarchy to tree structure for frontend
+        def build_tree(hierarchy_dict, level=0):
+            tree = []
+            for key, value in sorted(hierarchy_dict.items()):
+                if isinstance(value, dict):
+                    # Check if this contains sessions directly (deepest level)
+                    has_direct_sessions = any(isinstance(v, list) for v in value.values())
+                    
+                    if has_direct_sessions:
+                        # This is the dataset level, need to add tokens level below it
+                        tokens_children = []
+                        for tokens_key, sessions_list in value.items():
+                            if isinstance(sessions_list, list) and sessions_list:
+                                # Sort sessions by timestamp (newest first)
+                                sessions_list.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
+                                tokens_children.append({
+                                    "key": f"{key}_{tokens_key}",
+                                    "title": tokens_key,
+                                    "level": level + 1,
+                                    "sessions": sessions_list,
+                                    "isLeaf": True
+                                })
+                        
+                        if tokens_children:
+                            tree.append({
+                                "key": key,
+                                "title": key,
+                                "level": level,
+                                "children": tokens_children,
+                                "isLeaf": False
+                            })
+                    else:
+                        # This is a parent node, recurse deeper
+                        children = build_tree(value, level + 1)
+                        if children:  # Only include if has valid children
+                            tree.append({
+                                "key": key,
+                                "title": key,
+                                "level": level,
+                                "children": children,
+                                "isLeaf": False
+                            })
+            return tree
         
-        logger.info(f"Found {len(structure)} models with {sum(len(m['sessions']) for m in structure)} total sessions")
+        structure = build_tree(hierarchy)
+        
+        logger.info(f"Found hierarchical structure with {len(structure)} top-level items and {total_sessions} total sessions")
         
         return jsonify({
             "structure": structure,
-            "total_models": len(structure),
-            "total_sessions": sum(len(model['sessions']) for model in structure)
+            "total_models": len(hierarchy),
+            "total_sessions": total_sessions,
+            "hierarchy_levels": ["model", "instance", "framework", "dataset", "input_output_tokens"]
         })
         
     except Exception as e:

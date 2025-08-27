@@ -10,7 +10,7 @@ import {
   Checkbox,
   Space,
   Tag,
-  Collapse,
+  Tree,
   Divider,
   Empty,
   message
@@ -27,7 +27,6 @@ import {
 } from '@ant-design/icons';
 
 const { Title, Text } = Typography;
-const { Panel } = Collapse;
 
 // API base URL - connect to our Flask backend
 const API_BASE = process.env.REACT_APP_API_BASE || '';
@@ -109,68 +108,128 @@ const VisualizationPage = () => {
     }
   };
 
-  // Find result by key in the tree structure
+  // Find result by key in the hierarchical tree structure
   const findResultByKey = (tree, targetKey) => {
-    for (const model of tree) {
-      for (const session of model.sessions) {
-        if (session.key === targetKey) {
-          return session;
+    const searchNode = (nodes) => {
+      for (const node of nodes) {
+        if (node.children) {
+          // This is a parent node, search its children
+          const result = searchNode(node.children);
+          if (result) return result;
+        } else if (node.sessions) {
+          // This is a leaf node with sessions
+          for (const session of node.sessions) {
+            if (session.key === targetKey) {
+              return session;
+            }
+          }
         }
       }
-    }
-    return null;
+      return null;
+    };
+    
+    return searchNode(tree);
   };
 
-  // Render tree structure with checkboxes
+  // Render hierarchical tree structure with checkboxes
   const renderResultsTree = () => {
     if (!resultsTree || resultsTree.length === 0) {
       return <Empty description="No results found" />;
     }
 
-    return (
-      <Collapse defaultActiveKey={resultsTree.map(model => model.model)} size="small">
-        {resultsTree.map(model => (
-          <Panel 
-            header={
+    // Convert hierarchical structure to tree data for Tree component
+    const convertToTreeData = (nodes) => {
+      return nodes.map(node => {
+        if (node.children) {
+          // This is a parent node (model, instance, framework, dataset)
+          return {
+            title: (
               <Space>
                 <FolderOutlined />
-                <Text strong>{model.model}</Text>
-                <Tag color="blue">{model.sessions.length} sessions</Tag>
+                <Text strong>{node.title}</Text>
+                {node.children && (
+                  <Tag color="blue">
+                    {countTotalSessions(node.children)} sessions
+                  </Tag>
+                )}
               </Space>
-            }
-            key={model.model}
-          >
-            <Space direction="vertical" style={{ width: '100%' }}>
-              {model.sessions.map(session => (
-                <Card key={session.key} size="small" style={{ marginBottom: 8 }}>
+            ),
+            key: node.key,
+            children: convertToTreeData(node.children),
+            selectable: false
+          };
+        } else if (node.sessions) {
+          // This is a leaf node (input_output_tokens level) with sessions
+          return {
+            title: (
+              <Space>
+                <FileTextOutlined />
+                <Text>{node.title}</Text>
+                <Tag color="green">{node.sessions.length} sessions</Tag>
+              </Space>
+            ),
+            key: node.key,
+            children: node.sessions.map(session => ({
+              title: (
+                <Card size="small" style={{ marginBottom: 4, width: '100%' }}>
                   <Space direction="vertical" style={{ width: '100%' }}>
                     <Space>
                       <Checkbox
                         checked={selectedResults.includes(session.key)}
                         onChange={(e) => handleResultCheck(session.key, e.target.checked)}
+                        onClick={(e) => e.stopPropagation()}
                       />
-                      <FileTextOutlined />
                       <Text strong>{session.session_id}</Text>
                       {selectedResults.includes(session.key) && (
                         <CheckCircleOutlined style={{ color: '#52c41a' }} />
                       )}
                     </Space>
-                    <Text type="secondary" style={{ fontSize: 12 }}>
+                    <Text type="secondary" style={{ fontSize: 11 }}>
                       {new Date(session.timestamp).toLocaleString()}
                     </Text>
-                    <Space wrap>
-                      <Tag>Concurrency: {session.config?.stress_test_config?.concurrency || 'N/A'}</Tag>
-                      <Tag>Requests: {session.config?.stress_test_config?.total_requests || 'N/A'}</Tag>
-                      <Tag>Framework: {session.config?.deployment_config?.framework || 'N/A'}</Tag>
-                      <Tag>Instance: {session.config?.deployment_config?.instance_type || 'N/A'}</Tag>
+                    <Space wrap size="small">
+                      <Tag size="small">Concurrency: {session.concurrency}</Tag>
+                      <Tag size="small">Requests: {session.total_requests}</Tag>
                     </Space>
                   </Space>
                 </Card>
-              ))}
-            </Space>
-          </Panel>
-        ))}
-      </Collapse>
+              ),
+              key: session.key,
+              isLeaf: true,
+              selectable: false,
+              session: session
+            })),
+            selectable: false
+          };
+        }
+        return null;
+      }).filter(Boolean);
+    };
+
+    // Helper function to count total sessions in a tree
+    const countTotalSessions = (nodes) => {
+      let count = 0;
+      for (const node of nodes) {
+        if (node.children) {
+          count += countTotalSessions(node.children);
+        } else if (node.sessions) {
+          count += node.sessions.length;
+        }
+      }
+      return count;
+    };
+
+    const treeData = convertToTreeData(resultsTree);
+
+    return (
+      <Tree
+        treeData={treeData}
+        defaultExpandAll={false}
+        showLine={true}
+        showIcon={false}
+        blockNode={true}
+        style={{ width: '100%' }}
+      />
     );
   };
 
@@ -184,7 +243,7 @@ const VisualizationPage = () => {
       
       if (summary && config) {
         const concurrency = config.stress_test_config?.concurrency || 0;
-        const modelLabel = `${result.model}_${result.session_id}`;
+        const modelLabel = `${result.model}_${result.instance_type}_${result.framework}_${result.session_id}`;
         
         // Add data points for each metric
         Object.entries(summary).forEach(([metric, value]) => {
@@ -210,7 +269,7 @@ const VisualizationPage = () => {
     
     Object.entries(resultData).forEach(([key, result]) => {
       const percentiles = result.data?.percentiles;
-      const modelLabel = `${result.model}_${result.session_id}`;
+      const modelLabel = `${result.model}_${result.instance_type}_${result.framework}_${result.session_id}`;
       
       if (percentiles && Array.isArray(percentiles)) {
         percentiles.forEach(p => {
@@ -491,15 +550,15 @@ const VisualizationPage = () => {
                         <Space direction="vertical">
                           <Text strong>{result.model}</Text>
                           <Text type="secondary">{result.session_id}</Text>
-                          <Space>
-                            <Tag>
-                              Concurrency: {result.config?.stress_test_config?.concurrency || 'N/A'}
-                            </Tag>
+                          <Space wrap size="small">
+                            <Tag size="small">Instance: {result.instance_type}</Tag>
+                            <Tag size="small">Framework: {result.framework}</Tag>
+                            <Tag size="small">Dataset: {result.dataset}</Tag>
                           </Space>
-                          <Space>
-                            <Tag>
-                              Requests: {result.config?.stress_test_config?.total_requests || 'N/A'}
-                            </Tag>
+                          <Space wrap size="small">
+                            <Tag size="small">Tokens: {result.tokens_desc}</Tag>
+                            <Tag size="small">Concurrency: {result.concurrency}</Tag>
+                            <Tag size="small">Requests: {result.total_requests}</Tag>
                           </Space>
                         </Space>
                       </Card>
