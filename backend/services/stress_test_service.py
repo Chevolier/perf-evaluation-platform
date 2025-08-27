@@ -202,10 +202,8 @@ class StressTestService:
         })
         
         try:
-            # Use subprocess to run evalscope to avoid threading issues
-            import tempfile
-            import subprocess
             import json as json_lib
+            import tempfile
             
             # Calculate token parameters
             min_tokens = min(output_tokens_range)
@@ -217,124 +215,33 @@ class StressTestService:
             logger.info(f"[DEBUG] Evalscope config: min_prompt_length={min_prompt_length}, max_prompt_length={max_prompt_length}, min_tokens={min_tokens}, max_tokens={max_tokens}")
             
             # Create simple output directory
-            # Format: outputs/model_name/session_id
             output_dir = self._create_output_dir(model_key, session_id)
             
             self._update_session(session_id, {
-                "progress": 40,
-                "current_message": "创建evalscope测试脚本...",
+                "progress": 50,
+                "current_message": f"执行evalscope基准测试 ({num_requests} 请求, {concurrency} 并发)...",
                 "output_directory": output_dir
             })
             
-            # Create evalscope script content with EMD compatibility patch
+            logger.info(f"EVALSCOPE_LOG: Starting benchmark...")
+            logger.info(f"EVALSCOPE_LOG: Config - parallel={concurrency}, number={num_requests}, model={model_name}")
+            logger.info(f"EVALSCOPE_LOG: Token config - min_prompt_length={min_prompt_length}, max_prompt_length={max_prompt_length}")
+            logger.info(f"EVALSCOPE_LOG: Token config - min_tokens={min_tokens}, max_tokens={max_tokens}")
+            logger.info(f"EVALSCOPE_LOG: Tokenizer path - {tokenizer_path}")
+            
+            # Create a simple Python script that uses evalscope SDK directly
             script_content = f'''#!/usr/bin/env python
 import sys
 import json
-import traceback
-import asyncio
-import os
-
-# Set event loop policy for thread safety
-if sys.platform.startswith('linux'):
-    asyncio.set_event_loop_policy(asyncio.DefaultEventLoopPolicy())
 
 # Add evalscope to path
 sys.path.insert(0, '/home/ec2-user/SageMaker/efs/conda_envs/evalscope/lib/python3.10/site-packages')
 
-# Apply EMD API compatibility patch (from original backend)
-def patch_openai_api():
-    from evalscope.perf.plugin.api.openai_api import OpenaiPlugin
-    
-    # Save original method
-    original_calculate_tokens = OpenaiPlugin._OpenaiPlugin__calculate_tokens_from_content
-    
-    def patched_calculate_tokens(self, request, delta_contents):
-        try:
-            # Strong data cleaning and type conversion
-            normalized_contents = []
-            
-            # Check delta_contents type
-            if delta_contents is None:
-                return 0, 0
-            
-            # Ensure delta_contents is iterable
-            if not hasattr(delta_contents, '__iter__') or isinstance(delta_contents, (str, bytes)):
-                delta_contents = [delta_contents] if delta_contents is not None else []
-            
-            for i, choice_contents in enumerate(delta_contents):
-                try:
-                    if choice_contents is None:
-                        normalized_contents.append([])
-                    elif isinstance(choice_contents, (list, tuple)):
-                        # Handle list/tuple: recursively clean all elements
-                        clean_list = []
-                        for item in choice_contents:
-                            if item is not None:
-                                if isinstance(item, (str, int, float, bool)):
-                                    clean_list.append(str(item))
-                                else:
-                                    clean_list.append(str(item) if hasattr(item, '__str__') else '')
-                        normalized_contents.append(clean_list)
-                    elif isinstance(choice_contents, (str, int, float, bool)):
-                        # Basic types: convert to string list
-                        normalized_contents.append([str(choice_contents)])
-                    elif isinstance(choice_contents, dict):
-                        # Dict type: extract text content
-                        text_content = choice_contents.get('text', choice_contents.get('content', str(choice_contents)))
-                        normalized_contents.append([str(text_content)])
-                    else:
-                        # Other types: force convert to string
-                        try:
-                            str_content = str(choice_contents) if choice_contents is not None else ''
-                            normalized_contents.append([str_content])
-                        except:
-                            normalized_contents.append([''])
-                except Exception as item_error:
-                    print(f"Error processing item {{i}}: {{item_error}}, type: {{type(choice_contents)}}")
-                    normalized_contents.append([''])
-            
-            # Ensure we have valid data structure
-            if not normalized_contents:
-                return 0, 0
-            
-            return original_calculate_tokens(self, request, normalized_contents)
-            
-        except Exception as e:
-            print(f"Primary patch failed: {{e}}, delta_contents type: {{type(delta_contents)}}")
-            # Super safe fallback strategy
-            try:
-                if delta_contents is None:
-                    return 0, 0
-                
-                # Force create safe string list structure
-                safe_structure = []
-                
-                if isinstance(delta_contents, (list, tuple)):
-                    for item in delta_contents:
-                        if item is None:
-                            safe_structure.append([])
-                        else:
-                            safe_structure.append([str(item)[:1000]])  # Limit length
-                else:
-                    safe_structure.append([str(delta_contents)[:1000]] if delta_contents is not None else [''])
-                
-                return original_calculate_tokens(self, request, safe_structure)
-                
-            except Exception as fallback_error:
-                print(f"All fallback attempts failed: {{fallback_error}}")
-                return 10, 10  # Conservative default
-    
-    # Apply patch
-    OpenaiPlugin._OpenaiPlugin__calculate_tokens_from_content = patched_calculate_tokens
-
 try:
-    # Apply the patch before importing evalscope
-    patch_openai_api()
-    
     from evalscope.perf.main import run_perf_benchmark
     from evalscope.perf.arguments import Arguments
     
-    # Create evalscope configuration - keep streaming for accurate TTFT metrics
+    # Create evalscope configuration
     task_cfg = Arguments(
         parallel=[{concurrency}],
         number=[{num_requests}],
@@ -343,23 +250,16 @@ try:
         api='openai',
         dataset='random',
         min_tokens={min_tokens},
-        max_tokens={max_tokens},  
+        max_tokens={max_tokens},
         prefix_length=0,
         min_prompt_length={min_prompt_length},
         max_prompt_length={max_prompt_length},
         tokenizer_path='{tokenizer_path}',
         temperature={temperature},
-        outputs_dir={output_dir},
-        stream=True,  # Keep streaming for accurate TTFT and latency metrics
-        # Add explicit random seed for reproducible but varied results
+        outputs_dir='{output_dir}',
+        stream=True,
         seed=42
     )
-    
-    print("EVALSCOPE_LOG: Starting benchmark with EMD compatibility patch...")
-    print("EVALSCOPE_LOG: Config - parallel={concurrency}, number={num_requests}, model={model_name}")
-    print("EVALSCOPE_LOG: Token config - min_prompt_length={min_prompt_length}, max_prompt_length={max_prompt_length}")
-    print("EVALSCOPE_LOG: Token config - min_tokens={min_tokens}, max_tokens={max_tokens}")
-    print("EVALSCOPE_LOG: Tokenizer path - {tokenizer_path}")
     
     # Run the benchmark
     results = run_perf_benchmark(task_cfg)
@@ -371,11 +271,11 @@ try:
     
 except Exception as e:
     print("EVALSCOPE_ERROR:", str(e))
+    import traceback
     traceback.print_exc()
     sys.exit(1)
 '''
             
-            logger.info(f"script_content: {script_content}")
             # Write script to temporary file
             with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as script_file:
                 script_file.write(script_content)
@@ -384,13 +284,12 @@ except Exception as e:
             logger.info(f"Created evalscope script: {script_path}")
             
             self._update_session(session_id, {
-                "progress": 50,
-                "current_message": f"执行evalscope基准测试 ({num_requests} 请求, {concurrency} 并发)..."
+                "progress": 60,
+                "current_message": "正在执行evalscope基准测试..."
             })
             
             # Run evalscope in subprocess with conda environment
             env = os.environ.copy()
-            # Use explicit bash -c command with proper conda activation
             cmd = [
                 '/bin/bash', '-c',
                 f'source /opt/conda/etc/profile.d/conda.sh && conda activate evalscope && python {script_path}'
@@ -398,17 +297,11 @@ except Exception as e:
             
             logger.info(f"Executing evalscope command in subprocess...")
             
-            # Update progress before running subprocess
-            self._update_session(session_id, {
-                "progress": 60,
-                "current_message": "正在执行evalscope子进程..."
-            })
-            
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=120,  # Reduced to 2 minutes for debugging
+                timeout=300,  # 5 minutes
                 env=env
             )
             
@@ -438,21 +331,14 @@ except Exception as e:
             output = result.stdout
             logger.info(f"Evalscope output length: {len(output)} characters")
             
-            # Extract JSON results (try both new format and EVALSCOPE_SUCCESS format from original)
+            # Extract JSON results
             start_marker = "EVALSCOPE_RESULTS_START"
             end_marker = "EVALSCOPE_RESULTS_END"
-            success_marker = "EVALSCOPE_SUCCESS:"
-            
-            results_json_str = None
             
             if start_marker in output and end_marker in output:
                 start_idx = output.find(start_marker) + len(start_marker)
                 end_idx = output.find(end_marker)
                 results_json_str = output[start_idx:end_idx].strip()
-            elif success_marker in output:
-                # Handle original backend format
-                success_line = [line for line in output.split('\n') if success_marker in line][0]
-                results_json_str = success_line.replace(success_marker, '').strip()
             else:
                 logger.error(f"No results markers found in output")
                 logger.error(f"Output: {output}")
@@ -470,6 +356,9 @@ except Exception as e:
                 logger.error(f"Failed to parse JSON results: {e}")
                 logger.error(f"JSON string was: {results_json_str[:500]}...")
                 raise Exception(f"无法解析evalscope结果: {str(e)}")
+            
+            logger.info(f"Successfully completed evalscope benchmark")
+            logger.info(f"Raw results type: {type(raw_results)}, length: {len(raw_results) if isinstance(raw_results, list) else 'N/A'}")
             
             self._update_session(session_id, {
                 "progress": 90,
@@ -570,8 +459,8 @@ except Exception as e:
                 raise Exception(f"Evalscope返回了意外的结果格式: {type(raw_results)}")
                 
         except subprocess.TimeoutExpired as e:
-            logger.error(f"Evalscope subprocess timed out after 120 seconds: {e}")
-            raise Exception(f"Evalscope执行超时 (120秒)，可能是模型连接问题或tokenizer加载缓慢")
+            logger.error(f"Evalscope subprocess timed out after 300 seconds: {e}")
+            raise Exception(f"Evalscope执行超时 (300秒)，可能是模型连接问题或tokenizer加载缓慢")
         except ImportError as e:
             logger.error(f"Failed to import evalscope: {e}")
             raise Exception(f"无法导入evalscope模块: {str(e)}。请确保evalscope已正确安装。")
