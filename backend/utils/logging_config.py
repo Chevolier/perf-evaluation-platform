@@ -36,9 +36,15 @@ def setup_logging(
     logger = logging.getLogger()
     logger.setLevel(numeric_level)
     
-    # Remove existing handlers
-    for handler in logger.handlers[:]:
-        logger.removeHandler(handler)
+    # Check if we already have handlers setup to avoid duplicates in Flask auto-reload
+    existing_file_handlers = [h for h in logger.handlers if isinstance(h, logging.handlers.RotatingFileHandler)]
+    existing_console_handlers = [h for h in logger.handlers if isinstance(h, logging.StreamHandler) and not isinstance(h, logging.handlers.RotatingFileHandler)]
+    
+    # Only remove handlers if we're setting up fresh (no existing file handlers with same log file)
+    if not existing_file_handlers or (log_file and not any(h.baseFilename == os.path.abspath(log_file) for h in existing_file_handlers)):
+        # Remove existing handlers to avoid duplicates
+        for handler in logger.handlers[:]:
+            logger.removeHandler(handler)
     
     # Create formatter
     formatter = logging.Formatter(log_format)
@@ -55,16 +61,55 @@ def setup_logging(
         log_path = Path(log_file)
         log_path.parent.mkdir(parents=True, exist_ok=True)
         
-        # Rotating file handler
-        file_handler = logging.handlers.RotatingFileHandler(
-            log_file,
-            maxBytes=max_bytes,
-            backupCount=backup_count,
-            encoding='utf-8'
-        )
-        file_handler.setLevel(numeric_level)
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
+        # Print debug info to help troubleshoot
+        print(f"📝 Setting up file logging: {log_file}")
+        print(f"📝 Log level: {log_level}")
+        print(f"📝 Log directory exists: {log_path.parent.exists()}")
+        
+        try:
+            # Rotating file handler with immediate flush
+            file_handler = logging.handlers.RotatingFileHandler(
+                log_file,
+                maxBytes=max_bytes,
+                backupCount=backup_count,
+                encoding='utf-8'
+            )
+            file_handler.setLevel(numeric_level)
+            file_handler.setFormatter(formatter)
+            
+            # Force immediate flushing for debugging
+            class FlushingRotatingFileHandler(logging.handlers.RotatingFileHandler):
+                def emit(self, record):
+                    super().emit(record)
+                    self.flush()
+            
+            # Replace with flushing handler
+            file_handler = FlushingRotatingFileHandler(
+                log_file,
+                maxBytes=max_bytes,
+                backupCount=backup_count,
+                encoding='utf-8'
+            )
+            file_handler.setLevel(numeric_level)
+            file_handler.setFormatter(formatter)
+            logger.addHandler(file_handler)
+            
+            # Test the file logging immediately with forced flush
+            test_logger = logging.getLogger('setup_logging_test')
+            test_logger.info("✅ File logging setup complete and tested")
+            
+            # Force flush all handlers
+            for handler in logger.handlers:
+                if hasattr(handler, 'flush'):
+                    handler.flush()
+            
+            print(f"✅ File handler added successfully to: {log_file}")
+            
+        except Exception as e:
+            print(f"❌ Failed to setup file logging: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
 
 
 def get_logger(name: str) -> logging.Logger:

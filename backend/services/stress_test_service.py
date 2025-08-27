@@ -15,6 +15,9 @@ from ..utils import get_logger
 
 logger = get_logger(__name__)
 
+# Test logging immediately when module loads
+logger.info("🔧 StressTestService module loaded - testing logger functionality")
+
 class StressTestService:
     """Service for managing stress tests."""
     
@@ -486,7 +489,7 @@ except Exception as e:
         model_name = model_info.get('model_path', model_key).replace('/', '-')
         
         # Create simple directory path: outputs/model_name/session_id
-        project_root = Path(__file__).parent.parent.parent.parent
+        project_root = Path(__file__).parent.parent.parent  # Go up 3 levels to inference-platform directory
         output_dir = project_root / 'outputs' / model_name / session_id
         
         # Create directory if it doesn't exist
