@@ -300,26 +300,40 @@ const VisualizationPage = () => {
       return <Empty description="No summary data available" />;
     }
 
-    // Group by metric type
+    // Define allowed metrics for Performance Metrics vs Concurrency (in display order)
+    const allowedMetrics = [
+      'Average time to first token (s)', 
+      'Average time per output token (s)',
+      'Average latency (s)',
+      'Output token throughput (tok/s)',
+      'Total token throughput (tok/s)',
+      'Request throughput (req/s)'
+    ];
+
+    // Group by metric type and filter to only allowed metrics
     const metricGroups = chartData.reduce((acc, item) => {
-      if (!acc[item.metric]) {
-        acc[item.metric] = [];
+      if (allowedMetrics.includes(item.metric)) {
+        if (!acc[item.metric]) {
+          acc[item.metric] = [];
+        }
+        acc[item.metric].push(item);
       }
-      acc[item.metric].push(item);
       return acc;
     }, {});
 
     return (
       <Row gutter={[16, 16]}>
-        {Object.entries(metricGroups).map(([metric, data]) => (
-          <Col span={12} key={metric}>
-            <Card title={metric} size="small">
-              <div style={{ height: 250 }}>
-                <Line
-                  data={data}
-                  xField="concurrency"
-                  yField="value"
-                  seriesField="modelLabel"
+        {allowedMetrics.filter(metric => metricGroups[metric]).map((metric) => {
+          const data = metricGroups[metric];
+          return (
+            <Col span={12} key={metric}>
+              <Card title={metric} size="small">
+                <div style={{ height: 250 }}>
+                  <Line
+                    data={data}
+                    xField="concurrency"
+                    yField="value"
+                    seriesField="modelLabel"
                   smooth={true}
                   point={{
                     size: 4,
@@ -345,7 +359,8 @@ const VisualizationPage = () => {
               </div>
             </Card>
           </Col>
-        ))}
+        );
+        })}
       </Row>
     );
   };
@@ -358,26 +373,39 @@ const VisualizationPage = () => {
       return <Empty description="No percentile data available" />;
     }
 
-    // Group by metric type
+    // Define allowed metrics for Percentile Analysis (in display order)
+    const allowedPercentileMetrics = [
+      'TTFT (s)', 
+      'TPOT (s)',
+      'Latency (s)',
+      'Output (tok/s)',
+      'Total (tok/s)'
+    ];
+
+    // Group by metric type and filter to only allowed percentile metrics
     const metricGroups = chartData.reduce((acc, item) => {
-      if (!acc[item.metric]) {
-        acc[item.metric] = [];
+      if (allowedPercentileMetrics.includes(item.metric)) {
+        if (!acc[item.metric]) {
+          acc[item.metric] = [];
+        }
+        acc[item.metric].push(item);
       }
-      acc[item.metric].push(item);
       return acc;
     }, {});
 
     return (
       <Row gutter={[16, 16]}>
-        {Object.entries(metricGroups).map(([metric, data]) => (
-          <Col span={12} key={metric}>
-            <Card title={`${metric} Percentiles`} size="small">
-              <div style={{ height: 250 }}>
-                <Line
-                  data={data}
-                  xField="percentile"
-                  yField="value"
-                  seriesField="modelLabel"
+        {allowedPercentileMetrics.filter(metric => metricGroups[metric]).map((metric) => {
+          const data = metricGroups[metric];
+          return (
+            <Col span={12} key={metric}>
+              <Card title={`${metric} Percentiles`} size="small">
+                <div style={{ height: 250 }}>
+                  <Line
+                    data={data}
+                    xField="percentile"
+                    yField="value"
+                    seriesField="modelLabel"
                   smooth={true}
                   point={{
                     size: 3,
@@ -403,7 +431,8 @@ const VisualizationPage = () => {
               </div>
             </Card>
           </Col>
-        ))}
+        );
+        })}
       </Row>
     );
   };
