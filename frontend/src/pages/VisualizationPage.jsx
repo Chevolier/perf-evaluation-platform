@@ -5,29 +5,29 @@ import {
   Col,
   Spin,
   Alert,
-  Select,
   Button,
-  Tree,
   Typography,
-  Statistic,
-  Table,
-  Tabs,
+  Checkbox,
   Space,
   Tag,
-  Tooltip
+  Collapse,
+  Divider,
+  Empty,
+  message
 } from 'antd';
-import { Line, Column, Scatter } from '@ant-design/plots';
+import { Line } from '@ant-design/plots';
 import {
   ReloadOutlined,
   BarChartOutlined,
   LineChartOutlined,
   DashboardOutlined,
-  DollarOutlined
+  FolderOutlined,
+  FileTextOutlined,
+  CheckCircleOutlined
 } from '@ant-design/icons';
 
 const { Title, Text } = Typography;
-const { Option } = Select;
-const { TabPane } = Tabs;
+const { Panel } = Collapse;
 
 // API base URL - connect to our Flask backend
 const API_BASE = process.env.REACT_APP_API_BASE || '';
@@ -35,541 +35,478 @@ const API_BASE = process.env.REACT_APP_API_BASE || '';
 const VisualizationPage = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [treeData, setTreeData] = useState([]);
-  const [selectedModels, setSelectedModels] = useState([]);
-  const [comparisonData, setComparisonData] = useState([]);
-  const [stats, setStats] = useState(null);
-  const [instancePrices, setInstancePrices] = useState({});
-  const [activeTab, setActiveTab] = useState('overview');
+  const [resultsTree, setResultsTree] = useState([]);
+  const [selectedResults, setSelectedResults] = useState([]);
+  const [resultData, setResultData] = useState({});
 
-  // Fetch tree structure
-  const fetchTreeStructure = async (reload = false) => {
+  // Fetch all results from outputs directory
+  const fetchResultsStructure = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`${API_BASE}/api/viz/tree-structure?reload=${reload}`);
+      const response = await fetch(`${API_BASE}/api/results/structure`);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
       const data = await response.json();
-      setTreeData(data.tree || []);
+      setResultsTree(data.structure || []);
     } catch (err) {
-      setError(`Failed to fetch tree structure: ${err.message}`);
+      setError(`Failed to fetch results structure: ${err.message}`);
+      message.error(`Failed to fetch results: ${err.message}`);
     } finally {
       setLoading(false);
     }
   };
 
-  // Fetch stats
-  const fetchStats = async () => {
+  // Fetch specific result data
+  const fetchResultData = async (resultPath) => {
     try {
-      const response = await fetch(`${API_BASE}/api/viz/stats`);
-      const data = await response.json();
-      setStats(data);
-    } catch (err) {
-      setError(`Failed to fetch stats: ${err.message}`);
-    }
-  };
-
-  // Fetch instance prices
-  const fetchInstancePrices = async () => {
-    try {
-      const response = await fetch(`${API_BASE}/api/viz/instance-prices`);
-      const data = await response.json();
-      setInstancePrices(data.prices || {});
-    } catch (err) {
-      console.warn('Failed to fetch instance prices:', err.message);
-    }
-  };
-
-  // Fetch comparison data
-  const fetchComparisonData = async (combinations) => {
-    if (!combinations || combinations.length === 0) return;
-    
-    try {
-      setLoading(true);
-      const response = await fetch(`${API_BASE}/api/viz/comparison-data`, {
+      const response = await fetch(`${API_BASE}/api/results/data`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ combinations }),
+        body: JSON.stringify({ result_path: resultPath }),
       });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
       const data = await response.json();
-      setComparisonData(data);
+      return data;
     } catch (err) {
-      setError(`Failed to fetch comparison data: ${err.message}`);
-    } finally {
-      setLoading(false);
+      message.error(`Failed to fetch result data: ${err.message}`);
+      return null;
     }
   };
 
-  // Handle model selection from tree
-  const handleTreeSelect = (selectedKeys, info) => {
-    const selectedNodes = info.selectedNodes?.filter(node => node.type === 'model') || [];
-    const combinations = selectedNodes.map(node => ({
-      runtime: node.runtime,
-      instance_type: node.instance_type,
-      model_name: node.model_name,
-      id: node.id,
-      result_path: node.result_path  // Pass the result path for loading data
-    }));
-    
-    setSelectedModels(combinations);
-    if (combinations.length > 0) {
-      fetchComparisonData(combinations);
-    }
-  };
-
-  // Prepare chart data
-  const prepareChartData = () => {
-    if (!comparisonData || comparisonData.length === 0) return [];
-    
-    const chartData = [];
-    comparisonData.forEach(item => {
-      const { combination, data } = item;
-      const label = `${combination.runtime}-${combination.instance_type}-${combination.model_name}`;
-      
-      data.forEach(record => {
-        chartData.push({
-          ...record,
-          combination_label: label,
-          processes: record.processes || 0,
-          first_token_latency: record.first_token_latency_mean || 0,
-          end_to_end_latency: record.end_to_end_latency_mean || 0,
-          throughput: record.output_tokens_per_second_mean || 0,
-          cost_per_million_tokens: record.cost_per_million_tokens || 0,
-          success_rate: (record.success_rate || 0) * 100
-        });
+  // Handle result selection/deselection
+  const handleResultCheck = async (resultKey, checked) => {
+    if (checked) {
+      // Add to selected results
+      const resultInfo = findResultByKey(resultsTree, resultKey);
+      if (resultInfo) {
+        setSelectedResults(prev => [...prev, resultKey]);
+        
+        // Fetch data for this result
+        const data = await fetchResultData(resultInfo.path);
+        if (data) {
+          setResultData(prev => ({
+            ...prev,
+            [resultKey]: {
+              ...resultInfo,
+              data: data
+            }
+          }));
+        }
+      }
+    } else {
+      // Remove from selected results
+      setSelectedResults(prev => prev.filter(key => key !== resultKey));
+      setResultData(prev => {
+        const newData = { ...prev };
+        delete newData[resultKey];
+        return newData;
       });
+    }
+  };
+
+  // Find result by key in the tree structure
+  const findResultByKey = (tree, targetKey) => {
+    for (const model of tree) {
+      for (const session of model.sessions) {
+        if (session.key === targetKey) {
+          return session;
+        }
+      }
+    }
+    return null;
+  };
+
+  // Render tree structure with checkboxes
+  const renderResultsTree = () => {
+    if (!resultsTree || resultsTree.length === 0) {
+      return <Empty description="No results found" />;
+    }
+
+    return (
+      <Collapse defaultActiveKey={resultsTree.map(model => model.model)} size="small">
+        {resultsTree.map(model => (
+          <Panel 
+            header={
+              <Space>
+                <FolderOutlined />
+                <Text strong>{model.model}</Text>
+                <Tag color="blue">{model.sessions.length} sessions</Tag>
+              </Space>
+            }
+            key={model.model}
+          >
+            <Space direction="vertical" style={{ width: '100%' }}>
+              {model.sessions.map(session => (
+                <Card key={session.key} size="small" style={{ marginBottom: 8 }}>
+                  <Space direction="vertical" style={{ width: '100%' }}>
+                    <Space>
+                      <Checkbox
+                        checked={selectedResults.includes(session.key)}
+                        onChange={(e) => handleResultCheck(session.key, e.target.checked)}
+                      />
+                      <FileTextOutlined />
+                      <Text strong>{session.session_id}</Text>
+                      {selectedResults.includes(session.key) && (
+                        <CheckCircleOutlined style={{ color: '#52c41a' }} />
+                      )}
+                    </Space>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      {new Date(session.timestamp).toLocaleString()}
+                    </Text>
+                    <Space wrap>
+                      <Tag>Concurrency: {session.config?.stress_test_config?.concurrency || 'N/A'}</Tag>
+                      <Tag>Requests: {session.config?.stress_test_config?.total_requests || 'N/A'}</Tag>
+                      <Tag>Framework: {session.config?.deployment_config?.framework || 'N/A'}</Tag>
+                      <Tag>Instance: {session.config?.deployment_config?.instance_type || 'N/A'}</Tag>
+                    </Space>
+                  </Space>
+                </Card>
+              ))}
+            </Space>
+          </Panel>
+        ))}
+      </Collapse>
+    );
+  };
+
+  // Prepare summary chart data (metrics vs concurrency)
+  const prepareSummaryChartData = () => {
+    const chartData = [];
+    
+    Object.entries(resultData).forEach(([key, result]) => {
+      const summary = result.data?.summary;
+      const config = result.config;
+      
+      if (summary && config) {
+        const concurrency = config.stress_test_config?.concurrency || 0;
+        const modelLabel = `${result.model}_${result.session_id}`;
+        
+        // Add data points for each metric
+        Object.entries(summary).forEach(([metric, value]) => {
+          if (typeof value === 'number') {
+            chartData.push({
+              concurrency,
+              metric,
+              value,
+              modelLabel,
+              session: result.session_id
+            });
+          }
+        });
+      }
     });
     
     return chartData;
   };
 
-  // Prepare table data
-  const prepareTableData = () => {
-    const chartData = prepareChartData();
-    return chartData.map((item, index) => ({
-      key: index,
-      ...item
-    }));
+  // Prepare percentile chart data
+  const preparePercentileChartData = () => {
+    const chartData = [];
+    
+    Object.entries(resultData).forEach(([key, result]) => {
+      const percentiles = result.data?.percentiles;
+      const modelLabel = `${result.model}_${result.session_id}`;
+      
+      if (percentiles && Array.isArray(percentiles)) {
+        percentiles.forEach(p => {
+          // Add data for each metric in percentiles
+          Object.entries(p).forEach(([metric, value]) => {
+            if (metric !== 'Percentiles' && typeof value === 'number') {
+              chartData.push({
+                percentile: p.Percentiles,
+                metric,
+                value,
+                modelLabel,
+                session: result.session_id
+              });
+            }
+          });
+        });
+      }
+    });
+    
+    return chartData;
+  };
+
+  // Render summary charts (metrics vs concurrency)
+  const renderSummaryCharts = () => {
+    const chartData = prepareSummaryChartData();
+    
+    if (chartData.length === 0) {
+      return <Empty description="No summary data available" />;
+    }
+
+    // Group by metric type
+    const metricGroups = chartData.reduce((acc, item) => {
+      if (!acc[item.metric]) {
+        acc[item.metric] = [];
+      }
+      acc[item.metric].push(item);
+      return acc;
+    }, {});
+
+    return (
+      <Row gutter={[16, 16]}>
+        {Object.entries(metricGroups).map(([metric, data]) => (
+          <Col span={12} key={metric}>
+            <Card title={metric} size="small">
+              <div style={{ height: 250 }}>
+                <Line
+                  data={data}
+                  xField="concurrency"
+                  yField="value"
+                  seriesField="modelLabel"
+                  smooth={true}
+                  point={{
+                    size: 4,
+                    shape: 'circle',
+                  }}
+                  tooltip={{
+                    formatter: (datum) => ({
+                      name: datum.modelLabel,
+                      value: `${datum.value?.toFixed(4)} ${getMetricUnit(metric)}`
+                    })
+                  }}
+                  yAxis={{
+                    label: {
+                      text: `${metric} ${getMetricUnit(metric)}`,
+                    },
+                  }}
+                  xAxis={{
+                    label: {
+                      text: 'Concurrency',
+                    },
+                  }}
+                />
+              </div>
+            </Card>
+          </Col>
+        ))}
+      </Row>
+    );
+  };
+
+  // Render percentile charts
+  const renderPercentileCharts = () => {
+    const chartData = preparePercentileChartData();
+    
+    if (chartData.length === 0) {
+      return <Empty description="No percentile data available" />;
+    }
+
+    // Group by metric type
+    const metricGroups = chartData.reduce((acc, item) => {
+      if (!acc[item.metric]) {
+        acc[item.metric] = [];
+      }
+      acc[item.metric].push(item);
+      return acc;
+    }, {});
+
+    return (
+      <Row gutter={[16, 16]}>
+        {Object.entries(metricGroups).map(([metric, data]) => (
+          <Col span={12} key={metric}>
+            <Card title={`${metric} Percentiles`} size="small">
+              <div style={{ height: 250 }}>
+                <Line
+                  data={data}
+                  xField="percentile"
+                  yField="value"
+                  seriesField="modelLabel"
+                  smooth={true}
+                  point={{
+                    size: 3,
+                    shape: 'circle',
+                  }}
+                  tooltip={{
+                    formatter: (datum) => ({
+                      name: datum.modelLabel,
+                      value: `${datum.value?.toFixed(4)} ${getMetricUnit(metric)}`
+                    })
+                  }}
+                  yAxis={{
+                    label: {
+                      text: `${metric} ${getMetricUnit(metric)}`,
+                    },
+                  }}
+                  xAxis={{
+                    label: {
+                      text: 'Percentile',
+                    },
+                  }}
+                />
+              </div>
+            </Card>
+          </Col>
+        ))}
+      </Row>
+    );
+  };
+
+  // Get metric unit for display
+  const getMetricUnit = (metric) => {
+    const lowerMetric = metric.toLowerCase();
+    if (lowerMetric.includes('time') || lowerMetric.includes('latency') || lowerMetric.includes('ttft') || lowerMetric.includes('tpot') || lowerMetric.includes('itl')) {
+      return '(s)';
+    }
+    if (lowerMetric.includes('throughput') || lowerMetric.includes('tok/s')) {
+      return '(tok/s)';
+    }
+    if (lowerMetric.includes('req/s')) {
+      return '(req/s)';
+    }
+    if (lowerMetric.includes('tokens')) {
+      return '(tokens)';
+    }
+    return '';
   };
 
   useEffect(() => {
-    fetchTreeStructure();
-    fetchStats();
-    fetchInstancePrices();
+    fetchResultsStructure();
   }, []);
-
-  const tableColumns = [
-    {
-      title: 'Configuration',
-      dataIndex: 'combination_label',
-      key: 'combination_label',
-      width: 200,
-      render: (text) => <Text strong>{text}</Text>
-    },
-    {
-      title: 'Processes',
-      dataIndex: 'processes',
-      key: 'processes',
-      width: 100,
-      sorter: (a, b) => a.processes - b.processes
-    },
-    {
-      title: 'Input Tokens',
-      dataIndex: 'input_tokens',
-      key: 'input_tokens',
-      width: 120,
-      sorter: (a, b) => a.input_tokens - b.input_tokens
-    },
-    {
-      title: 'Output Tokens',
-      dataIndex: 'output_tokens',
-      key: 'output_tokens',
-      width: 120,
-      sorter: (a, b) => a.output_tokens - b.output_tokens
-    },
-    {
-      title: 'First Token Latency (ms)',
-      dataIndex: 'first_token_latency',
-      key: 'first_token_latency',
-      width: 180,
-      render: (value) => value?.toFixed(2) || 'N/A',
-      sorter: (a, b) => a.first_token_latency - b.first_token_latency
-    },
-    {
-      title: 'End-to-End Latency (ms)',
-      dataIndex: 'end_to_end_latency',
-      key: 'end_to_end_latency',
-      width: 180,
-      render: (value) => value?.toFixed(2) || 'N/A',
-      sorter: (a, b) => a.end_to_end_latency - b.end_to_end_latency
-    },
-    {
-      title: 'Throughput (tokens/s)',
-      dataIndex: 'throughput',
-      key: 'throughput',
-      width: 160,
-      render: (value) => value?.toFixed(2) || 'N/A',
-      sorter: (a, b) => a.throughput - b.throughput
-    },
-    {
-      title: 'Success Rate (%)',
-      dataIndex: 'success_rate',
-      key: 'success_rate',
-      width: 140,
-      render: (value) => (
-        <Tag color={value >= 95 ? 'green' : value >= 80 ? 'orange' : 'red'}>
-          {value?.toFixed(1) || 'N/A'}%
-        </Tag>
-      ),
-      sorter: (a, b) => a.success_rate - b.success_rate
-    },
-    {
-      title: 'Cost ($/M tokens)',
-      dataIndex: 'cost_per_million_tokens',
-      key: 'cost_per_million_tokens',
-      width: 160,
-      render: (value) => value > 0 ? `$${value.toFixed(2)}` : 'N/A',
-      sorter: (a, b) => a.cost_per_million_tokens - b.cost_per_million_tokens
-    }
-  ];
-
-  const chartData = prepareChartData();
-  const tableData = prepareTableData();
 
   return (
     <div style={{ padding: '24px', background: '#f0f2f5', minHeight: '100vh' }}>
       <Row gutter={[16, 16]}>
+        {/* Header */}
         <Col span={24}>
           <Card>
             <Row justify="space-between" align="middle">
               <Col>
                 <Title level={2} style={{ margin: 0 }}>
-                  <BarChartOutlined /> 基准测试可视化
+                  <BarChartOutlined /> Benchmark Results Visualization
                 </Title>
+                <Text type="secondary">
+                  Select benchmark results from the left panel to visualize performance metrics
+                </Text>
               </Col>
               <Col>
                 <Button 
                   icon={<ReloadOutlined />} 
-                  onClick={() => fetchTreeStructure(true)}
+                  onClick={fetchResultsStructure}
                   loading={loading}
                 >
-                  Refresh Data
+                  Refresh Results
                 </Button>
               </Col>
             </Row>
           </Card>
         </Col>
 
-        {/* Overview Stats */}
-        {stats && (
-          <Col span={24}>
-            <Card title={<><DashboardOutlined /> Overview Statistics</>}>
-              <Row gutter={16}>
-                <Col span={6}>
-                  <Statistic 
-                    title="Total Tests" 
-                    value={stats.total_tests} 
-                    formatter={(value) => value.toLocaleString()}
-                  />
-                </Col>
-                <Col span={6}>
-                  <Statistic 
-                    title="Unique Combinations" 
-                    value={stats.unique_combinations}
-                    formatter={(value) => value.toLocaleString()}
-                  />
-                </Col>
-                <Col span={6}>
-                  <Statistic 
-                    title="Average Throughput" 
-                    value={stats.performance_summary?.avg_throughput || 0}
-                    formatter={(value) => `${value.toFixed(1)} tokens/s`}
-                  />
-                </Col>
-                <Col span={6}>
-                  <Statistic 
-                    title="Average Success Rate" 
-                    value={(stats.performance_summary?.avg_success_rate || 0) * 100}
-                    formatter={(value) => `${value.toFixed(1)}%`}
-                    suffix="%"
-                  />
-                </Col>
-              </Row>
-            </Card>
-          </Col>
-        )}
-
+        {/* Results Tree (Left Panel) */}
         <Col span={8}>
           <Card 
-            title="Model Selection" 
-            style={{ height: '600px' }}
-            bodyStyle={{ height: '520px', overflow: 'auto' }}
+            title={
+              <Space>
+                <FolderOutlined />
+                Available Results
+                {selectedResults.length > 0 && (
+                  <Tag color="green">{selectedResults.length} selected</Tag>
+                )}
+              </Space>
+            }
+            style={{ height: 'calc(100vh - 200px)' }}
+            bodyStyle={{ height: 'calc(100vh - 280px)', overflow: 'auto' }}
           >
             {loading ? (
-              <Spin size="large" style={{ display: 'block', textAlign: 'center', marginTop: '200px' }} />
+              <Spin size="large" style={{ display: 'block', textAlign: 'center', marginTop: '100px' }} />
             ) : error ? (
               <Alert message="Error" description={error} type="error" showIcon />
             ) : (
-              <Tree
-                checkable
-                multiple
-                onSelect={handleTreeSelect}
-                treeData={treeData.map(runtime => ({
-                  title: `${runtime.label} (${runtime.count})`,
-                  key: runtime.id,
-                  children: runtime.children?.map(instance => ({
-                    title: `${instance.label} (${instance.count})`,
-                    key: instance.id,
-                    children: instance.children?.map(model => ({
-                      title: `${model.label} (${model.count})`,
-                      key: model.id,
-                      type: model.type,
-                      runtime: model.runtime,
-                      instance_type: model.instance_type,
-                      model_name: model.model_name,
-                      result_path: model.result_path
-                    }))
-                  }))
-                }))}
-              />
+              renderResultsTree()
             )}
           </Card>
         </Col>
 
+        {/* Visualization Panel (Right Panel) */}
         <Col span={16}>
-          <Card style={{ height: '600px' }}>
-            <Tabs activeKey={activeTab} onChange={setActiveTab}>
-              <TabPane tab={<><LineChartOutlined /> Performance Charts</> } key="charts">
-                {chartData.length > 0 ? (
-                  <div style={{ height: '500px', overflow: 'auto' }}>
-                    <Row gutter={[16, 16]}>
-                      <Col span={24}>
-                        <Title level={4}>Throughput vs Processes</Title>
-                        <div style={{ height: '200px' }}>
-                          <Line
-                            data={chartData}
-                            xField="processes"
-                            yField="throughput"
-                            seriesField="combination_label"
-                            smooth={true}
-                            animation={{
-                              appear: {
-                                animation: 'path-in',
-                                duration: 1000,
-                              },
-                            }}
-                            point={{
-                              size: 4,
-                              shape: 'circle',
-                            }}
-                            tooltip={{
-                              formatter: (datum) => {
-                                return {
-                                  name: 'Throughput',
-                                  value: `${datum.throughput?.toFixed(2)} tokens/s`
-                                };
-                              }
-                            }}
-                            yAxis={{
-                              label: {
-                                text: 'Throughput (tokens/s)',
-                              },
-                            }}
-                            xAxis={{
-                              label: {
-                                text: 'Processes',
-                              },
-                            }}
-                          />
-                        </div>
-                      </Col>
-                      
-                      <Col span={24}>
-                        <Title level={4}>Latency Comparison</Title>
-                        <div style={{ height: '200px' }}>
-                          <Column
-                            data={[
-                              ...chartData.map(d => ({
-                                ...d,
-                                latency_type: 'First Token',
-                                latency_value: d.first_token_latency
-                              })),
-                              ...chartData.map(d => ({
-                                ...d,
-                                latency_type: 'End-to-End',
-                                latency_value: d.end_to_end_latency
-                              }))
-                            ]}
-                            xField="processes"
-                            yField="latency_value"
-                            seriesField="latency_type"
-                            isGroup={true}
-                            columnStyle={{
-                              radius: [2, 2, 0, 0],
-                            }}
-                            tooltip={{
-                              formatter: (datum) => {
-                                return {
-                                  name: datum.latency_type,
-                                  value: `${datum.latency_value?.toFixed(2)} ms`
-                                };
-                              }
-                            }}
-                            yAxis={{
-                              label: {
-                                text: 'Latency (ms)',
-                              },
-                            }}
-                            xAxis={{
-                              label: {
-                                text: 'Processes',
-                              },
-                            }}
-                          />
-                        </div>
-                      </Col>
-                    </Row>
-                  </div>
-                ) : (
-                  <div style={{ textAlign: 'center', padding: '50px' }}>
-                    <Text type="secondary">Select models from the tree to view performance charts</Text>
-                  </div>
+          <Card 
+            title={
+              <Space>
+                <LineChartOutlined />
+                Performance Visualization
+                {selectedResults.length > 0 && (
+                  <Tag color="blue">{selectedResults.length} results selected</Tag>
                 )}
-              </TabPane>
-              
-              <TabPane tab={<><DollarOutlined /> Cost Analysis</> } key="cost">
-                {chartData.length > 0 && chartData.some(d => d.cost_per_million_tokens > 0) ? (
-                  <div style={{ height: '500px', overflow: 'auto' }}>
-                    <Title level={4}>Cost per Million Tokens vs Throughput</Title>
-                    <div style={{ height: '300px' }}>
-                      <Scatter
-                        data={chartData.filter(d => d.cost_per_million_tokens > 0)}
-                        xField="throughput"
-                        yField="cost_per_million_tokens"
-                        colorField="combination_label"
-                        size={6}
-                        pointStyle={{
-                          fillOpacity: 0.8,
-                          stroke: '#bbb',
-                          lineWidth: 1,
-                        }}
-                        tooltip={{
-                          formatter: (datum) => [
-                            { name: 'Throughput', value: `${datum.throughput?.toFixed(2)} tokens/s` },
-                            { name: 'Cost', value: `$${datum.cost_per_million_tokens?.toFixed(2)}/M tokens` },
-                            { name: 'Configuration', value: datum.combination_label }
-                          ]
-                        }}
-                        yAxis={{
-                          label: {
-                            text: 'Cost per Million Tokens ($)',
-                          },
-                        }}
-                        xAxis={{
-                          label: {
-                            text: 'Throughput (tokens/s)',
-                          },
-                        }}
-                        legend={{
-                          position: 'bottom',
-                        }}
-                      />
-                    </div>
-                  </div>
-                ) : (
-                  <div style={{ textAlign: 'center', padding: '50px' }}>
-                    <Text type="secondary">
-                      {chartData.length === 0 
-                        ? 'Select models to view cost analysis' 
-                        : 'No pricing data available for selected models'
-                      }
-                    </Text>
-                  </div>
-                )}
-              </TabPane>
+              </Space>
+            }
+            style={{ height: 'calc(100vh - 200px)' }}
+            bodyStyle={{ height: 'calc(100vh - 280px)', overflow: 'auto' }}
+          >
+            {selectedResults.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '100px 0' }}>
+                <Empty 
+                  description="Select benchmark results from the left panel to view visualizations"
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                />
+              </div>
+            ) : (
+              <Space direction="vertical" style={{ width: '100%' }} size="large">
+                {/* Summary Charts Section */}
+                <div>
+                  <Title level={4}>
+                    <DashboardOutlined /> Performance Metrics vs Concurrency
+                  </Title>
+                  <Text type="secondary">
+                    Shows how different metrics change with concurrency levels
+                  </Text>
+                  <Divider />
+                  {renderSummaryCharts()}
+                </div>
 
-              <TabPane tab={<><LineChartOutlined /> Percentile Data</> } key="percentiles">
-                {comparisonData.length > 0 ? (
-                  <div style={{ height: '500px', overflow: 'auto' }}>
-                    <Title level={4}>Performance Percentiles</Title>
-                    {comparisonData.map((item, index) => {
-                      const { combination, data } = item;
-                      const performanceData = data[0];
-                      const percentileData = performanceData?.percentile_data;
-                      
-                      if (!percentileData || percentileData.length === 0) {
-                        return null;
-                      }
-                      
-                      return (
-                        <div key={index} style={{ marginBottom: '20px' }}>
-                          <Text strong>{combination.runtime} - {combination.instance_type} - {combination.model_name}</Text>
-                          <div style={{ height: '200px', marginTop: '10px' }}>
-                            <Line
-                              data={percentileData.map(p => ({
-                                percentile: p.Percentiles,
-                                ttft: p['TTFT (s)'] * 1000, // Convert to ms
-                                latency: p['Latency (s)'] * 1000, // Convert to ms
-                                throughput: p['Output (tok/s)']
-                              }))}
-                              xField="percentile"
-                              yField="ttft"
-                              smooth={true}
-                              point={{ size: 4 }}
-                              tooltip={{
-                                formatter: (datum) => ({
-                                  name: 'TTFT (ms)',
-                                  value: `${datum.ttft?.toFixed(2)} ms`
-                                })
-                              }}
-                              yAxis={{
-                                label: { text: 'Time to First Token (ms)' }
-                              }}
-                              xAxis={{
-                                label: { text: 'Percentile' }
-                              }}
-                            />
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div style={{ textAlign: 'center', padding: '50px' }}>
-                    <Text type="secondary">Select models to view percentile data</Text>
-                  </div>
-                )}
-              </TabPane>
-            </Tabs>
+                {/* Percentile Charts Section */}
+                <div>
+                  <Title level={4}>
+                    <LineChartOutlined /> Percentile Analysis
+                  </Title>
+                  <Text type="secondary">
+                    Distribution of performance metrics across percentiles
+                  </Text>
+                  <Divider />
+                  {renderPercentileCharts()}
+                </div>
+              </Space>
+            )}
           </Card>
         </Col>
 
-        {/* Data Table */}
-        {tableData.length > 0 && (
+        {/* Selected Results Summary */}
+        {selectedResults.length > 0 && (
           <Col span={24}>
-            <Card title="Detailed Performance Data">
-              <Table
-                columns={tableColumns}
-                dataSource={tableData}
-                scroll={{ x: 1500 }}
-                pagination={{ pageSize: 10 }}
-                size="small"
-              />
-            </Card>
-          </Col>
-        )}
-
-        {/* Selected Models Summary */}
-        {selectedModels.length > 0 && (
-          <Col span={24}>
-            <Card title="Selected Models">
-              <Space wrap>
-                {selectedModels.map((model, index) => (
-                  <Tag key={index} color="blue" style={{ marginBottom: '4px' }}>
-                    {model.runtime} - {model.instance_type} - {model.model_name}
-                  </Tag>
-                ))}
-              </Space>
+            <Card title="Selected Results Summary">
+              <Row gutter={[16, 16]}>
+                {selectedResults.map(resultKey => {
+                  const result = resultData[resultKey];
+                  if (!result) return null;
+                  
+                  return (
+                    <Col span={6} key={resultKey}>
+                      <Card size="small" style={{ textAlign: 'center' }}>
+                        <Space direction="vertical">
+                          <Text strong>{result.model}</Text>
+                          <Text type="secondary">{result.session_id}</Text>
+                          <Space>
+                            <Tag>
+                              Concurrency: {result.config?.stress_test_config?.concurrency || 'N/A'}
+                            </Tag>
+                          </Space>
+                          <Space>
+                            <Tag>
+                              Requests: {result.config?.stress_test_config?.total_requests || 'N/A'}
+                            </Tag>
+                          </Space>
+                        </Space>
+                      </Card>
+                    </Col>
+                  );
+                })}
+              </Row>
             </Card>
           </Col>
         )}
