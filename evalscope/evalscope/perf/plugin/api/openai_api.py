@@ -135,8 +135,17 @@ class OpenaiPlugin(DefaultApiPlugin):
                 if 'delta' in choice and 'index' in choice:
                     delta = choice['delta']
                     idx = choice['index']
-                    if 'content' in delta:
-                        delta_content = delta['content']
+                    # if 'content' in delta:
+                    #     delta_content = delta['content']
+                    #     delta_contents.setdefault(idx, []).append(delta_content)
+                    
+                    # For handling None content 
+                    delta_content = None
+                    for k, v in delta.items():
+                        if v is not None:
+                            delta_content = v # delta['content']
+
+                    if delta_content is not None:  # For handling None content and with reasoning tokens
                         delta_contents.setdefault(idx, []).append(delta_content)
 
     def __process_no_object(self, js, delta_contents):
