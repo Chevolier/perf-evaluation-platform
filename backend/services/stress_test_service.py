@@ -349,6 +349,7 @@ try:
         max_prompt_length={max_prompt_length},
         tokenizer_path='{tokenizer_path}',
         temperature={temperature},
+        outputs_dir={output_dir},
         stream=True,  # Keep streaming for accurate TTFT and latency metrics
         # Add explicit random seed for reproducible but varied results
         seed=42
@@ -374,6 +375,7 @@ except Exception as e:
     sys.exit(1)
 '''
             
+            logger.info(f"script_content: {script_content}")
             # Write script to temporary file
             with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as script_file:
                 script_file.write(script_content)
