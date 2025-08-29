@@ -248,13 +248,15 @@ const VisualizationPage = () => {
         // Add data points for each metric
         Object.entries(summary).forEach(([metric, value]) => {
           if (typeof value === 'number') {
-            chartData.push({
+            const dataPoint = {
               concurrency,
               metric,
-              value,
+              yValue: value,
               modelLabel,
               session: result.session_id
-            });
+            };
+            console.log('Adding summary data point:', dataPoint);
+            chartData.push(dataPoint);
           }
         });
       }
@@ -276,13 +278,15 @@ const VisualizationPage = () => {
           // Add data for each metric in percentiles
           Object.entries(p).forEach(([metric, value]) => {
             if (metric !== 'Percentiles' && typeof value === 'number') {
-              chartData.push({
+              const dataPoint = {
                 percentile: p.Percentiles,
                 metric,
-                value,
+                yValue: value,
                 modelLabel,
                 session: result.session_id
-              });
+              };
+              console.log('Adding percentile data point:', dataPoint);
+              chartData.push(dataPoint);
             }
           });
         });
@@ -325,6 +329,7 @@ const VisualizationPage = () => {
       <Row gutter={[16, 16]}>
         {allowedMetrics.filter(metric => metricGroups[metric]).map((metric) => {
           const data = metricGroups[metric];
+          console.log(`Rendering chart for metric ${metric}:`, data);
           return (
             <Col span={12} key={metric}>
               <Card title={metric} size="small">
@@ -332,30 +337,23 @@ const VisualizationPage = () => {
                   <Line
                     data={data}
                     xField="concurrency"
-                    yField="value"
+                    yField="yValue"
                     seriesField="modelLabel"
-                  smooth={true}
-                  point={{
-                    size: 4,
-                    shape: 'circle',
-                  }}
-                  tooltip={{
-                    formatter: (datum) => ({
-                      name: datum.modelLabel,
-                      value: `${datum.value?.toFixed(4)} ${getMetricUnit(metric)}`
-                    })
-                  }}
-                  yAxis={{
-                    label: {
-                      text: `${metric} ${getMetricUnit(metric)}`,
-                    },
-                  }}
-                  xAxis={{
-                    label: {
-                      text: 'Concurrency',
-                    },
-                  }}
-                />
+                    point={{
+                      size: 6,
+                      shape: 'circle',
+                    }}
+                    yAxis={{
+                      label: {
+                        text: `${metric} ${getMetricUnit(metric)}`,
+                      },
+                    }}
+                    xAxis={{
+                      label: {
+                        text: 'Concurrency',
+                      },
+                    }}
+                  />
               </div>
             </Card>
           </Col>
@@ -397,6 +395,7 @@ const VisualizationPage = () => {
       <Row gutter={[16, 16]}>
         {allowedPercentileMetrics.filter(metric => metricGroups[metric]).map((metric) => {
           const data = metricGroups[metric];
+          console.log(`Rendering percentile chart for metric ${metric}:`, data);
           return (
             <Col span={12} key={metric}>
               <Card title={`${metric} Percentiles`} size="small">
@@ -404,30 +403,23 @@ const VisualizationPage = () => {
                   <Line
                     data={data}
                     xField="percentile"
-                    yField="value"
+                    yField="yValue"
                     seriesField="modelLabel"
-                  smooth={true}
-                  point={{
-                    size: 3,
-                    shape: 'circle',
-                  }}
-                  tooltip={{
-                    formatter: (datum) => ({
-                      name: datum.modelLabel,
-                      value: `${datum.value?.toFixed(4)} ${getMetricUnit(metric)}`
-                    })
-                  }}
-                  yAxis={{
-                    label: {
-                      text: `${metric} ${getMetricUnit(metric)}`,
-                    },
-                  }}
-                  xAxis={{
-                    label: {
-                      text: 'Percentile',
-                    },
-                  }}
-                />
+                    point={{
+                      size: 6,
+                      shape: 'circle',
+                    }}
+                    yAxis={{
+                      label: {
+                        text: `${metric} ${getMetricUnit(metric)}`,
+                      },
+                    }}
+                    xAxis={{
+                      label: {
+                        text: 'Percentile',
+                      },
+                    }}
+                  />
               </div>
             </Card>
           </Col>
