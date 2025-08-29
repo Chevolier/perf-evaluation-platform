@@ -339,6 +339,9 @@ const VisualizationPage = () => {
                     xField="concurrency"
                     yField="yValue"
                     seriesField="modelLabel"
+                    theme={{
+                      colors10: ['#1890ff', '#52c41a', '#faad14', '#f5222d', '#722ed1', '#13c2c2', '#eb2f96', '#fa8c16', '#a0d911', '#2f54eb']
+                    }}
                     point={{
                       size: 6,
                       shape: 'circle',
@@ -405,6 +408,9 @@ const VisualizationPage = () => {
                     xField="percentile"
                     yField="yValue"
                     seriesField="modelLabel"
+                    theme={{
+                      colors10: ['#1890ff', '#52c41a', '#faad14', '#f5222d', '#722ed1', '#13c2c2', '#eb2f96', '#fa8c16', '#a0d911', '#2f54eb']
+                    }}
                     point={{
                       size: 6,
                       shape: 'circle',
