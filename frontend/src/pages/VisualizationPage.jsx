@@ -243,7 +243,8 @@ const VisualizationPage = () => {
       
       if (summary && config) {
         const concurrency = config.stress_test_config?.concurrency || 0;
-        const modelLabel = `${result.model}_${result.instance_type}_${result.framework}_${result.session_id}`;
+        const modelLabel = `${result.model}_${result.instance_type}_${result.framework}`;
+        const fullModelLabel = `${result.model}_${result.instance_type}_${result.framework}_${result.session_id}`;
         
         // Add data points for each metric
         Object.entries(summary).forEach(([metric, value]) => {
@@ -253,6 +254,7 @@ const VisualizationPage = () => {
               metric,
               yValue: value,
               modelLabel,
+              fullModelLabel,
               session: result.session_id
             };
             console.log('Adding summary data point:', dataPoint);
@@ -339,12 +341,16 @@ const VisualizationPage = () => {
                     xField="concurrency"
                     yField="yValue"
                     seriesField="modelLabel"
+                    smooth={true}
                     theme={{
                       colors10: ['#1890ff', '#52c41a', '#faad14', '#f5222d', '#722ed1', '#13c2c2', '#eb2f96', '#fa8c16', '#a0d911', '#2f54eb']
                     }}
                     point={{
                       size: 6,
                       shape: 'circle',
+                    }}
+                    legend={{
+                      position: 'right-top'
                     }}
                     yAxis={{
                       label: {
