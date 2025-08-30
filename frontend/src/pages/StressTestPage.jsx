@@ -331,7 +331,176 @@ const StressTestPage = () => {
     };
   }, []);
 
-  // 渲染性能指标图表
+  // 渲染综合性能摘要表格
+  const renderComprehensiveSummary = (results) => {
+    if (!results || !results.is_comprehensive) return null;
+    
+    const summary = results.comprehensive_summary;
+    const tableData = results.performance_table || [];
+    
+    // Performance table columns
+    const columns = [
+      {
+        title: 'Conc.',
+        dataIndex: 'concurrency',
+        key: 'concurrency',
+        width: 60,
+        align: 'center'
+      },
+      {
+        title: 'RPS',
+        dataIndex: 'rps',
+        key: 'rps',
+        width: 80,
+        align: 'center',
+        render: (value) => value?.toFixed(2) || 'N/A'
+      },
+      {
+        title: 'Avg Lat.(s)',
+        dataIndex: 'avg_latency',
+        key: 'avg_latency',
+        width: 100,
+        align: 'center',
+        render: (value) => value?.toFixed(3) || 'N/A'
+      },
+      {
+        title: 'P99 Lat.(s)',
+        dataIndex: 'p99_latency',
+        key: 'p99_latency',
+        width: 100,
+        align: 'center',
+        render: (value) => value?.toFixed(3) || 'N/A'
+      },
+      {
+        title: 'Gen. toks/s',
+        dataIndex: 'gen_toks_per_sec',
+        key: 'gen_toks_per_sec',
+        width: 100,
+        align: 'center',
+        render: (value) => value?.toFixed(0) || 'N/A'
+      },
+      {
+        title: 'Avg TTFT(s)',
+        dataIndex: 'avg_ttft',
+        key: 'avg_ttft',
+        width: 100,
+        align: 'center',
+        render: (value) => value?.toFixed(3) || 'N/A'
+      },
+      {
+        title: 'P99 TTFT(s)',
+        dataIndex: 'p99_ttft',
+        key: 'p99_ttft',
+        width: 100,
+        align: 'center',
+        render: (value) => value?.toFixed(3) || 'N/A'
+      },
+      {
+        title: 'Avg TPOT(s)',
+        dataIndex: 'avg_tpot',
+        key: 'avg_tpot',
+        width: 100,
+        align: 'center',
+        render: (value) => value?.toFixed(3) || 'N/A'
+      },
+      {
+        title: 'P99 TPOT(s)',
+        dataIndex: 'p99_tpot',
+        key: 'p99_tpot',
+        width: 100,
+        align: 'center',
+        render: (value) => value?.toFixed(3) || 'N/A'
+      },
+      {
+        title: 'Success Rate',
+        dataIndex: 'success_rate',
+        key: 'success_rate',
+        width: 100,
+        align: 'center',
+        render: (value) => `${value?.toFixed(1) || 0}%`
+      }
+    ];
+
+    return (
+      <div>
+        {/* Summary Header */}
+        <Card title="Performance Test Summary Report" size="small" style={{ marginBottom: 16 }}>
+          <Row gutter={[16, 16]}>
+            <Col span={6}>
+              <Statistic
+                title="Model"
+                value={summary?.model || 'N/A'}
+                valueStyle={{ fontSize: '16px' }}
+              />
+            </Col>
+            <Col span={6}>
+              <Statistic
+                title="Total Generated"
+                value={summary?.total_generated_tokens || 0}
+                suffix="tokens"
+                valueStyle={{ color: '#3f8600' }}
+              />
+            </Col>
+            <Col span={6}>
+              <Statistic
+                title="Total Test Time"
+                value={summary?.total_test_time || 0}
+                precision={2}
+                suffix="seconds"
+                valueStyle={{ color: '#1890ff' }}
+              />
+            </Col>
+            <Col span={6}>
+              <Statistic
+                title="Avg Output Rate"
+                value={summary?.avg_output_rate || 0}
+                precision={2}
+                suffix="tokens/sec"
+                valueStyle={{ color: '#722ed1' }}
+              />
+            </Col>
+          </Row>
+        </Card>
+
+        {/* Detailed Performance Metrics Table */}
+        <Card title="Detailed Performance Metrics" size="small" style={{ marginBottom: 16 }}>
+          <Table
+            columns={columns}
+            dataSource={tableData.map((row, index) => ({ ...row, key: index }))}
+            pagination={false}
+            size="small"
+            bordered
+            scroll={{ x: 900 }}
+            style={{ marginBottom: 16 }}
+          />
+        </Card>
+
+        {/* Best Performance Configuration */}
+        <Card title="Best Performance Configuration" size="small">
+          <Row gutter={[16, 16]}>
+            <Col span={12}>
+              <div style={{ textAlign: 'center', padding: '16px', background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: '6px' }}>
+                <Text strong style={{ color: '#52c41a', fontSize: '16px' }}>Highest RPS</Text>
+                <div style={{ fontSize: '14px', marginTop: '8px' }}>
+                  {summary?.best_rps?.config || 'N/A'}
+                </div>
+              </div>
+            </Col>
+            <Col span={12}>
+              <div style={{ textAlign: 'center', padding: '16px', background: '#f0f5ff', border: '1px solid #91d5ff', borderRadius: '6px' }}>
+                <Text strong style={{ color: '#1890ff', fontSize: '16px' }}>Lowest Latency</Text>
+                <div style={{ fontSize: '14px', marginTop: '8px' }}>
+                  {summary?.best_latency?.config || 'N/A'}
+                </div>
+              </div>
+            </Col>
+          </Row>
+        </Card>
+      </div>
+    );
+  };
+
+  // 渲染性能指标图表 (fallback for old format)
   const renderMetricsCharts = (results) => {
     if (!results || !results.percentiles) return null;
 
@@ -964,56 +1133,64 @@ const StressTestPage = () => {
             {/* 测试结果 */}
             {currentSession && currentSession.status === 'completed' && currentSession.results && (
               <>
-                <Card title="性能指标概览" size="small">
-                  <Row gutter={[16, 16]}>
-                    <Col span={6}>
-                      <Statistic
-                        title="QPS"
-                        value={currentSession.results.qps || 0}
-                        precision={2}
-                        suffix="req/s"
-                        valueStyle={{ color: '#3f8600' }}
-                      />
-                    </Col>
-                    <Col span={6}>
-                      <Statistic
-                        title="平均TTFT"
-                        value={currentSession.results.avg_ttft || 0}
-                        precision={3}
-                        suffix="s"
-                        valueStyle={{ color: '#cf1322' }}
-                      />
-                    </Col>
-                    <Col span={6}>
-                      <Statistic
-                        title="平均延迟"
-                        value={currentSession.results.avg_latency || 0}
-                        precision={3}
-                        suffix="s"
-                        valueStyle={{ color: '#1890ff' }}
-                      />
-                    </Col>
-                    <Col span={6}>
-                      <Statistic
-                        title="吞吐量"
-                        value={currentSession.results.tokens_per_second || 0}
-                        precision={2}
-                        suffix="tok/s"
-                        valueStyle={{ color: '#722ed1' }}
-                      />
-                    </Col>
-                  </Row>
-                </Card>
+                {/* Show comprehensive summary if available */}
+                {currentSession.results.is_comprehensive ? (
+                  renderComprehensiveSummary(currentSession.results)
+                ) : (
+                  /* Fallback to old format for backward compatibility */
+                  <>
+                    <Card title="性能指标概览" size="small">
+                      <Row gutter={[16, 16]}>
+                        <Col span={6}>
+                          <Statistic
+                            title="QPS"
+                            value={currentSession.results.qps || 0}
+                            precision={2}
+                            suffix="req/s"
+                            valueStyle={{ color: '#3f8600' }}
+                          />
+                        </Col>
+                        <Col span={6}>
+                          <Statistic
+                            title="平均TTFT"
+                            value={currentSession.results.avg_ttft || 0}
+                            precision={3}
+                            suffix="s"
+                            valueStyle={{ color: '#cf1322' }}
+                          />
+                        </Col>
+                        <Col span={6}>
+                          <Statistic
+                            title="平均延迟"
+                            value={currentSession.results.avg_latency || 0}
+                            precision={3}
+                            suffix="s"
+                            valueStyle={{ color: '#1890ff' }}
+                          />
+                        </Col>
+                        <Col span={6}>
+                          <Statistic
+                            title="吞吐量"
+                            value={currentSession.results.tokens_per_second || 0}
+                            precision={2}
+                            suffix="tok/s"
+                            valueStyle={{ color: '#722ed1' }}
+                          />
+                        </Col>
+                      </Row>
+                    </Card>
 
-                <Card title="详细指标" size="small">
-                  {renderResultsTable(currentSession.results)}
-                </Card>
+                    <Card title="详细指标" size="small">
+                      {renderResultsTable(currentSession.results)}
+                    </Card>
 
-                {renderMetricsCharts(currentSession.results)}
-                
-                <Card title="百分位数据" size="small">
-                  {renderPercentilesTable(currentSession.results)}
-                </Card>
+                    {renderMetricsCharts(currentSession.results)}
+                    
+                    <Card title="百分位数据" size="small">
+                      {renderPercentilesTable(currentSession.results)}
+                    </Card>
+                  </>
+                )}
               </>
             )}
           </Space>

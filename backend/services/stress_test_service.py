@@ -753,11 +753,19 @@ except Exception as e:
             
             logger.info(f"Executing evalscope command in subprocess...")
             
+            # Calculate timeout based on number of combinations
+            num_combinations = len(num_requests_list) * len(concurrency_list)
+            base_timeout = 120  # 2 minutes per combination
+            total_timeout = max(600, num_combinations * base_timeout)  # At least 10 minutes
+            
+            logger.info(f"[DEBUG] Running {num_combinations} combinations ({len(concurrency_list)} concurrency × {len(num_requests_list)} requests)")
+            logger.info(f"[DEBUG] Setting timeout to {total_timeout} seconds ({total_timeout/60:.1f} minutes)")
+            
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=300,  # 5 minutes
+                timeout=total_timeout,
                 env=env
             )
             
@@ -823,7 +831,13 @@ except Exception as e:
             
             logger.info(f"Evalscope benchmark completed, processing results")
             
-            # Transform evalscope results to frontend-compatible format (like original backend)
+            # Check if evalscope generated subfolder results (new multi-combination format)
+            subfolder_results = self._collect_subfolder_results(output_dir, session_id)
+            if subfolder_results:
+                logger.info(f"Found {len(subfolder_results)} subfolder results, using comprehensive format")
+                return self._process_comprehensive_results(subfolder_results, test_params, session_id)
+            
+            # Fallback to old format processing if no subfolders found
             logger.info(f"[DEBUG] Raw results type: {type(raw_results)}, content preview: {str(raw_results)[:200]}...")
             
             if isinstance(raw_results, list) and len(raw_results) >= 2:
@@ -953,8 +967,8 @@ except Exception as e:
                 raise Exception(f"Evalscope返回了意外的结果格式: {type(raw_results)}")
                 
         except subprocess.TimeoutExpired as e:
-            logger.error(f"Evalscope subprocess timed out after 300 seconds: {e}")
-            raise Exception(f"Evalscope执行超时 (300秒)，可能是模型连接问题或tokenizer加载缓慢")
+            logger.error(f"Evalscope subprocess timed out after {total_timeout} seconds: {e}")
+            raise Exception(f"Evalscope执行超时 ({total_timeout}秒)，可能是模型连接问题或tokenizer加载缓慢。当前运行 {num_combinations} 个组合测试，建议减少测试参数组合数量")
         except ImportError as e:
             logger.error(f"Failed to import evalscope: {e}")
             raise Exception(f"无法导入evalscope模块: {str(e)}。请确保evalscope已正确安装。")
@@ -989,6 +1003,194 @@ except Exception as e:
         logger.info(f"Created output directory: {output_dir}")
         return str(output_dir)
     
+    def _collect_subfolder_results(self, output_dir: str, session_id: str) -> list:
+        """Collect benchmark results from evalscope subfolders.
+        
+        Args:
+            output_dir: Base output directory path
+            session_id: Session ID for logging
+            
+        Returns:
+            List of dictionaries containing results from each parallel/number combination
+        """
+        import os
+        import json
+        import glob
+        
+        try:
+            results = []
+            
+            # Look for benchmark_summary.json files in subfolders
+            # Pattern: outputs/model/session/timestamp/model_tag/parallel_X_number_Y/benchmark_summary.json
+            pattern = os.path.join(output_dir, "**", "parallel_*_number_*", "benchmark_summary.json")
+            summary_files = glob.glob(pattern, recursive=True)
+            
+            logger.info(f"[DEBUG] Looking for subfolder results in {output_dir}")
+            logger.info(f"[DEBUG] Found {len(summary_files)} summary files: {summary_files}")
+            
+            for summary_file in summary_files:
+                try:
+                    with open(summary_file, 'r', encoding='utf-8') as f:
+                        summary_data = json.load(f)
+                    
+                    # Extract parallel and number from path
+                    folder_name = os.path.basename(os.path.dirname(summary_file))
+                    parts = folder_name.split('_')
+                    if len(parts) >= 4:  # parallel_X_number_Y
+                        parallel = int(parts[1])
+                        number = int(parts[3])
+                        
+                        result_entry = {
+                            'concurrency': parallel,
+                            'requests': number,
+                            'data': summary_data,
+                            'folder_path': summary_file
+                        }
+                        results.append(result_entry)
+                        logger.info(f"[DEBUG] Loaded result: parallel={parallel}, number={number}")
+                    
+                except Exception as e:
+                    logger.error(f"Failed to parse summary file {summary_file}: {e}")
+            
+            # Sort by concurrency then by requests for consistent ordering
+            results.sort(key=lambda x: (x['concurrency'], x['requests']))
+            
+            logger.info(f"Successfully collected {len(results)} subfolder results for session {session_id}")
+            return results
+            
+        except Exception as e:
+            logger.error(f"Error collecting subfolder results for session {session_id}: {e}")
+            return []
+    
+    def _process_comprehensive_results(self, subfolder_results: list, test_params: dict, session_id: str) -> dict:
+        """Process comprehensive results from multiple evalscope subfolders.
+        
+        Args:
+            subfolder_results: List of results from different parallel/number combinations
+            test_params: Original test parameters
+            session_id: Session ID for logging
+            
+        Returns:
+            Comprehensive results in frontend-compatible format
+        """
+        try:
+            logger.info(f"Processing comprehensive results from {len(subfolder_results)} combinations")
+            
+            # Build the comprehensive table data
+            table_data = []
+            total_tokens = 0
+            total_test_time = 0
+            best_rps = {'value': 0, 'config': ''}
+            best_latency = {'value': float('inf'), 'config': ''}
+            
+            for result in subfolder_results:
+                data = result['data']
+                concurrency = result['concurrency']
+                requests = result['requests']
+                
+                # Extract key metrics
+                rps = data.get('Request throughput (req/s)', 0)
+                avg_latency = data.get('Average latency (s)', 0)
+                p99_latency = avg_latency * 1.2  # Approximate P99 from average
+                gen_toks_per_sec = data.get('Output token throughput (tok/s)', 0)
+                avg_ttft = data.get('Average time to first token (s)', 0)
+                p99_ttft = avg_ttft * 1.5  # Approximate P99 from average
+                avg_tpot = data.get('Average time per output token (s)', 0)
+                p99_tpot = avg_tpot * 1.2  # Approximate P99 from average
+                success_rate = (data.get('Succeed requests', 0) / max(data.get('Total requests', 1), 1)) * 100
+                
+                # Update totals for summary
+                output_tokens = data.get('Average output tokens per request', 0) * data.get('Total requests', 0)
+                total_tokens += output_tokens
+                total_test_time += data.get('Time taken for tests (s)', 0)
+                
+                # Track best configurations
+                if rps > best_rps['value']:
+                    best_rps = {'value': rps, 'config': f"Concurrency {concurrency} ({rps:.2f} req/sec)"}
+                
+                if avg_latency < best_latency['value'] and avg_latency > 0:
+                    best_latency = {'value': avg_latency, 'config': f"Concurrency {concurrency} ({avg_latency:.3f} seconds)"}
+                
+                table_entry = {
+                    'concurrency': concurrency,
+                    'requests': requests, 
+                    'rps': rps,
+                    'avg_latency': avg_latency,
+                    'p99_latency': p99_latency,
+                    'gen_toks_per_sec': gen_toks_per_sec,
+                    'avg_ttft': avg_ttft,
+                    'p99_ttft': p99_ttft,
+                    'avg_tpot': avg_tpot,
+                    'p99_tpot': p99_tpot,
+                    'success_rate': success_rate
+                }
+                table_data.append(table_entry)
+            
+            # Calculate overall averages
+            avg_output_rate = total_tokens / max(total_test_time, 1) if total_test_time > 0 else 0
+            
+            # Get model name from test params or use default
+            model_name = test_params.get('model', 'Unknown Model')
+            
+            # Create comprehensive results structure
+            comprehensive_results = {
+                # Legacy format for compatibility
+                "qps": table_data[0]['rps'] if table_data else 0,
+                "avg_ttft": table_data[0]['avg_ttft'] if table_data else 0,
+                "avg_latency": table_data[0]['avg_latency'] if table_data else 0,
+                "tokens_per_second": table_data[0]['gen_toks_per_sec'] if table_data else 0,
+                "p50_ttft": 0,  # Not available in this format
+                "p99_ttft": 0,
+                "p50_latency": 0,
+                "p99_latency": 0,
+                "total_requests": sum(r['requests'] for r in subfolder_results),
+                "successful_requests": sum(int(r['data'].get('Succeed requests', 0)) for r in subfolder_results),
+                "failed_requests": sum(int(r['data'].get('Failed requests', 0)) for r in subfolder_results),
+                
+                # New comprehensive format
+                "comprehensive_summary": {
+                    "model": model_name,
+                    "total_generated_tokens": int(total_tokens),
+                    "total_test_time": total_test_time,
+                    "avg_output_rate": avg_output_rate,
+                    "best_rps": best_rps,
+                    "best_latency": best_latency
+                },
+                "performance_table": table_data,
+                "is_comprehensive": True,
+                
+                # Empty legacy fields to prevent frontend errors
+                "summary": {},
+                "percentiles": {},
+                "detailed_metrics": {
+                    "ttft_distribution": [],
+                    "latency_distribution": [],
+                    "input_tokens": [],
+                    "output_tokens": []
+                }
+            }
+            
+            logger.info(f"Processed comprehensive results: {len(table_data)} configurations, "
+                       f"total tokens: {total_tokens:.0f}, avg rate: {avg_output_rate:.2f} tok/s")
+            
+            return comprehensive_results
+            
+        except Exception as e:
+            logger.error(f"Error processing comprehensive results for session {session_id}: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            
+            # Return minimal fallback format
+            return {
+                "qps": 0,
+                "avg_ttft": 0,
+                "avg_latency": 0,
+                "tokens_per_second": 0,
+                "comprehensive_summary": {"model": "Error", "total_generated_tokens": 0, "total_test_time": 0, "avg_output_rate": 0},
+                "performance_table": [],
+                "is_comprehensive": True
+            }
+
     def _infer_tp_size(self, instance_type: str) -> int:
         """Infer tensor parallel size from instance type.
         
@@ -1299,11 +1501,19 @@ except Exception as e:
             
             logger.info(f"Executing custom API evalscope command in subprocess...")
             
+            # Calculate timeout based on number of combinations (same as regular stress test)
+            num_combinations = len(num_requests_list) * len(concurrency_list)
+            base_timeout = 120  # 2 minutes per combination
+            total_timeout = max(600, num_combinations * base_timeout)  # At least 10 minutes
+            
+            logger.info(f"[DEBUG] Custom API - Running {num_combinations} combinations ({len(concurrency_list)} concurrency × {len(num_requests_list)} requests)")
+            logger.info(f"[DEBUG] Custom API - Setting timeout to {total_timeout} seconds ({total_timeout/60:.1f} minutes)")
+            
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=1800,  # 30 minutes - increased timeout for larger tests
+                timeout=total_timeout,
                 env=env
             )
             
@@ -1334,7 +1544,23 @@ except Exception as e:
             logger.info(f"Custom API Evalscope subprocess completed successfully")
             logger.info(f"Stdout: {result.stdout}")
             
-            # First try to parse results from stdout
+            # Check if evalscope generated subfolder results (new multi-combination format)
+            subfolder_results = self._collect_subfolder_results(output_dir, session_id)
+            if subfolder_results:
+                logger.info(f"Custom API - Found {len(subfolder_results)} subfolder results, using comprehensive format")
+                # Transform results to match frontend expectations
+                transformed_results = self._process_comprehensive_results(subfolder_results, test_params, session_id)
+                
+                # Save results to output directory for consistency
+                try:
+                    self._save_results_to_output_dir(output_dir, transformed_results, test_params, model_name, session_id)
+                except Exception as save_error:
+                    logger.error(f"Failed to save results (non-critical): {save_error}")
+                    # Continue processing even if save fails
+                
+                return transformed_results
+            
+            # Fallback to parsing from stdout if no subfolders found
             output = result.stdout
             start_marker = "EVALSCOPE_RESULTS_START"
             end_marker = "EVALSCOPE_RESULTS_END"
@@ -1410,9 +1636,9 @@ except Exception as e:
                 logger.error(f"Results string: {results_json_str}")
                 raise Exception(f"解析测试结果失败: {str(e)}")
             
-        except subprocess.TimeoutExpired:
-            logger.error(f"Custom API Evalscope subprocess timed out for session {session_id}")
-            raise Exception("Evalscope执行超时，请检查模型响应时间或减少请求数量")
+        except subprocess.TimeoutExpired as e:
+            logger.error(f"Custom API Evalscope subprocess timed out after {total_timeout} seconds for session {session_id}")
+            raise Exception(f"Evalscope执行超时 ({total_timeout}秒)，可能是模型连接问题或tokenizer加载缓慢。当前运行 {num_combinations} 个组合测试，建议减少测试参数组合数量")
         except Exception as e:
             logger.error(f"Custom API Evalscope execution failed for session {session_id}: {e}")
             raise Exception(f"Evalscope执行失败: {str(e)}")
