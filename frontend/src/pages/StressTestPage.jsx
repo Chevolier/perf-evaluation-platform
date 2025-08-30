@@ -130,8 +130,8 @@ const StressTestPage = () => {
         params: {
           num_requests: values.num_requests,
           concurrency: values.concurrency,
-          input_tokens_range: values.input_tokens_range,
-          output_tokens_range: values.output_tokens_range,
+          input_tokens: values.input_tokens,
+          output_tokens: values.output_tokens,
           temperature: 0.1
         }
       };
@@ -697,10 +697,10 @@ const StressTestPage = () => {
               layout="vertical"
               onFinish={startStressTest}
               initialValues={{
-                num_requests: 50,
-                concurrency: 5,
-                input_tokens_range: [50, 200],
-                output_tokens_range: [100, 500]
+                num_requests: [50, 100, 200],
+                concurrency: [1, 5, 10],
+                input_tokens: 200,
+                output_tokens: 500
               }}
             >
               <Form.Item label="模型选择方式">
@@ -778,86 +778,72 @@ const StressTestPage = () => {
               <Form.Item
                 name="num_requests"
                 label="请求总数"
-                rules={[{ required: true, message: '请输入请求总数' }]}
+                rules={[{ required: true, message: '请选择请求总数' }]}
               >
-                <InputNumber
-                  min={1}
-                  max={1000}
+                <Select
+                  mode="multiple"
+                  placeholder="选择请求总数"
                   style={{ width: '100%' }}
-                  placeholder="请求总数"
+                  options={[
+                    { label: '10', value: 10 },
+                    { label: '20', value: 20 },
+                    { label: '50', value: 50 },
+                    { label: '100', value: 100 },
+                    { label: '200', value: 200 },
+                    { label: '400', value: 400 },
+                    { label: '500', value: 500 },
+                    { label: '1000', value: 1000 }
+                  ]}
                 />
               </Form.Item>
 
               <Form.Item
                 name="concurrency"
                 label="并发数"
-                rules={[{ required: true, message: '请输入并发数' }]}
+                rules={[{ required: true, message: '请选择并发数' }]}
               >
-                <InputNumber
-                  min={1}
-                  max={50}
+                <Select
+                  mode="multiple"
+                  placeholder="选择并发数"
                   style={{ width: '100%' }}
-                  placeholder="并发请求数"
+                  options={[
+                    { label: '1', value: 1 },
+                    { label: '5', value: 5 },
+                    { label: '10', value: 10 },
+                    { label: '20', value: 20 },
+                    { label: '50', value: 50 },
+                    { label: '100', value: 100 },
+                    { label: '200', value: 200 }
+                  ]}
                 />
               </Form.Item>
 
               <Row gutter={8}>
                 <Col span={12}>
                   <Form.Item
-                    name={['input_tokens_range', 0]}
-                    label="输入Token最小值"
-                    rules={[{ required: true, message: '请输入最小值' }]}
+                    name="input_tokens"
+                    label="输入Token"
+                    rules={[{ required: true, message: '请输入Token数量' }]}
                   >
                     <InputNumber
                       style={{ width: '100%' }}
-                      placeholder="最小值"
+                      placeholder="输入Token数量"
                       min={1}
-                      max={2000}
+                      max={4000}
                     />
                   </Form.Item>
                 </Col>
                 <Col span={12}>
                   <Form.Item
-                    name={['input_tokens_range', 1]}
-                    label="输入Token最大值"
-                    rules={[{ required: true, message: '请输入最大值' }]}
+                    name="output_tokens"
+                    label="输出Token"
+                    rules={[{ required: true, message: '请输入Token数量' }]}
                   >
                     <InputNumber
                       style={{ width: '100%' }}
-                      placeholder="最大值"
+                      placeholder="输出Token数量"
                       min={1}
-                      max={2000}
-                    />
-                  </Form.Item>
-                </Col>
-              </Row>
-
-              <Row gutter={8}>
-                <Col span={12}>
-                  <Form.Item
-                    name={['output_tokens_range', 0]}
-                    label="输出Token最小值"
-                    rules={[{ required: true, message: '请输入最小值' }]}
-                  >
-                    <InputNumber
-                      style={{ width: '100%' }}
-                      placeholder="最小值"
-                      min={1}
-                      max={2000}
-                    />
-                  </Form.Item>
-                </Col>
-                <Col span={12}>
-                  <Form.Item
-                    name={['output_tokens_range', 1]}
-                    label="输出Token最大值"
-                    rules={[{ required: true, message: '请输入最大值' }]}
-                  >
-                    <InputNumber
-                      style={{ width: '100%' }}
-                      placeholder="最大值"
-                      min={1}
-                      max={2000}
+                      max={4000}
                     />
                   </Form.Item>
                 </Col>

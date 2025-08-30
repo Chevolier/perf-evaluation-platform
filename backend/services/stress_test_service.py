@@ -327,9 +327,12 @@ class StressTestService:
                 percentile_data = raw_results[1] if isinstance(raw_results, list) and len(raw_results) > 1 else {}
             
             # Get test parameters
-            input_tokens_range = test_params.get('input_tokens_range', [50, 200])
-            output_tokens_range = test_params.get('output_tokens_range', [100, 500])
-            num_requests = test_params.get('num_requests', 20)
+            input_tokens = test_params.get('input_tokens', 200)
+            output_tokens = test_params.get('output_tokens', 500)
+            num_requests_list = test_params.get('num_requests', [20])
+            if not isinstance(num_requests_list, list):
+                num_requests_list = [num_requests_list]
+            num_requests = max(num_requests_list)  # Use max for generating distributions
             
             # Generate realistic percentile distributions based on actual results
             import random
@@ -355,9 +358,9 @@ class StressTestService:
                 latency_value = avg_latency * multiplier * (1 + random.uniform(-0.05, 0.05))  # Add 5% variance
                 latency_dist.append(max(0.1, latency_value))  # Minimum 0.1s
             
-            # Generate token distributions
-            input_min, input_max = min(input_tokens_range), max(input_tokens_range)
-            output_min, output_max = min(output_tokens_range), max(output_tokens_range)
+            # Generate token distributions around the specified values
+            input_min, input_max = max(1, input_tokens - 50), input_tokens + 50
+            output_min, output_max = max(1, output_tokens - 100), output_tokens + 100
             
             input_token_dist = []
             output_token_dist = []
@@ -529,13 +532,19 @@ class StressTestService:
         from ..core.models import model_registry
         from ..services.model_service import ModelService
         
-        num_requests = test_params.get('num_requests', 50)
-        concurrency = test_params.get('concurrency', 5)
-        input_tokens_range = test_params.get('input_tokens_range', [50, 200])
-        output_tokens_range = test_params.get('output_tokens_range', [100, 500])
+        num_requests_list = test_params.get('num_requests', [50])
+        concurrency_list = test_params.get('concurrency', [5])
+        input_tokens = test_params.get('input_tokens', 200)
+        output_tokens = test_params.get('output_tokens', 500)
         temperature = test_params.get('temperature', 0.1)
         
-        logger.info(f"Starting evalscope stress test: {num_requests} requests, {concurrency} concurrent")
+        # Convert to lists if single values were provided for backward compatibility
+        if not isinstance(num_requests_list, list):
+            num_requests_list = [num_requests_list]
+        if not isinstance(concurrency_list, list):
+            concurrency_list = [concurrency_list]
+        
+        logger.info(f"Starting evalscope stress test: {num_requests_list} requests, {concurrency_list} concurrent")
         
         # Check if model is available and get endpoint info
         model_service = ModelService()
@@ -605,13 +614,13 @@ class StressTestService:
             import json as json_lib
             import tempfile
             
-            # Calculate token parameters
-            min_tokens = min(output_tokens_range)
-            max_tokens = max(output_tokens_range)
-            min_prompt_length = min(input_tokens_range)
-            max_prompt_length = max(input_tokens_range)
+            # Use single token values instead of ranges
+            min_tokens = output_tokens
+            max_tokens = output_tokens
+            min_prompt_length = input_tokens
+            max_prompt_length = input_tokens
             
-            logger.info(f"[DEBUG] Token parameters: input_range={input_tokens_range}, output_range={output_tokens_range}")
+            logger.info(f"[DEBUG] Token parameters: input_tokens={input_tokens}, output_tokens={output_tokens}")
             logger.info(f"[DEBUG] Evalscope config: min_prompt_length={min_prompt_length}, max_prompt_length={max_prompt_length}, min_tokens={min_tokens}, max_tokens={max_tokens}")
             
             # Create simple output directory
@@ -619,12 +628,12 @@ class StressTestService:
             
             self._update_session(session_id, {
                 "progress": 50,
-                "current_message": f"执行evalscope基准测试 ({num_requests} 请求, {concurrency} 并发)...",
+                "current_message": f"执行evalscope基准测试 ({num_requests_list} 请求, {concurrency_list} 并发)...",
                 "output_directory": output_dir
             })
             
             logger.info(f"EVALSCOPE_LOG: Starting benchmark...")
-            logger.info(f"EVALSCOPE_LOG: Config - parallel={concurrency}, number={num_requests}, model={model_name}")
+            logger.info(f"EVALSCOPE_LOG: Config - parallel={concurrency_list}, number={num_requests_list}, model={model_name}")
             logger.info(f"EVALSCOPE_LOG: Token config - min_prompt_length={min_prompt_length}, max_prompt_length={max_prompt_length}")
             logger.info(f"EVALSCOPE_LOG: Token config - min_tokens={min_tokens}, max_tokens={max_tokens}")
             logger.info(f"EVALSCOPE_LOG: Tokenizer path - {tokenizer_path}")
@@ -643,8 +652,8 @@ try:
     
     # Create evalscope configuration
     task_cfg = Arguments(
-        parallel=[{concurrency}],
-        number=[{num_requests}],
+        parallel={concurrency_list},
+        number={num_requests_list},
         model='{model_name}',
         url='{api_url}',
         api='openai',
@@ -960,17 +969,11 @@ except Exception as e:
                     "region": "us-west-2"
                 },
                 "stress_test_config": {
-                    "concurrency": test_params.get('concurrency', 5),
-                    "total_requests": test_params.get('num_requests', 50),
+                    "concurrency": test_params.get('concurrency', [5]),
+                    "total_requests": test_params.get('num_requests', [50]),
                     "dataset": test_params.get('dataset', 'random'),
-                    "input_tokens": {
-                        "min": min(test_params.get('input_tokens_range', [50, 200])),
-                        "max": max(test_params.get('input_tokens_range', [50, 200]))
-                    },
-                    "output_tokens": {
-                        "min": min(test_params.get('output_tokens_range', [100, 500])),
-                        "max": max(test_params.get('output_tokens_range', [100, 500]))
-                    },
+                    "input_tokens": test_params.get('input_tokens', 200),
+                    "output_tokens": test_params.get('output_tokens', 500),
                     "temperature": test_params.get('temperature', 0.1),
                     "stream": test_params.get('stream', True)
                 }
@@ -1002,8 +1005,8 @@ except Exception as e:
                 f.write(f"- Concurrency: {eval_config['stress_test_config']['concurrency']}\n")
                 f.write(f"- Total Requests: {eval_config['stress_test_config']['total_requests']}\n")
                 f.write(f"- Dataset: {eval_config['stress_test_config']['dataset']}\n")
-                f.write(f"- Input Tokens: {eval_config['stress_test_config']['input_tokens']['min']}-{eval_config['stress_test_config']['input_tokens']['max']}\n")
-                f.write(f"- Output Tokens: {eval_config['stress_test_config']['output_tokens']['min']}-{eval_config['stress_test_config']['output_tokens']['max']}\n")
+                f.write(f"- Input Tokens: {eval_config['stress_test_config']['input_tokens']}\n")
+                f.write(f"- Output Tokens: {eval_config['stress_test_config']['output_tokens']}\n")
                 f.write(f"- Temperature: {eval_config['stress_test_config']['temperature']}\n\n")
                 
                 f.write("Performance Metrics:\n")
@@ -1038,13 +1041,19 @@ except Exception as e:
         Returns:
             Test results from evalscope
         """
-        num_requests = test_params.get('num_requests', 50)
-        concurrency = test_params.get('concurrency', 5)
-        input_tokens_range = test_params.get('input_tokens_range', [50, 200])
-        output_tokens_range = test_params.get('output_tokens_range', [100, 500])
+        num_requests_list = test_params.get('num_requests', [50])
+        concurrency_list = test_params.get('concurrency', [5])
+        input_tokens = test_params.get('input_tokens', 200)
+        output_tokens = test_params.get('output_tokens', 500)
         temperature = test_params.get('temperature', 0.1)
         
-        logger.info(f"Starting evalscope stress test with custom API: {num_requests} requests, {concurrency} concurrent")
+        # Convert to lists if single values were provided for backward compatibility
+        if not isinstance(num_requests_list, list):
+            num_requests_list = [num_requests_list]
+        if not isinstance(concurrency_list, list):
+            concurrency_list = [concurrency_list]
+        
+        logger.info(f"Starting evalscope stress test with custom API: {num_requests_list} requests, {concurrency_list} concurrent")
         
         self._update_session(session_id, {
             "progress": 20,
@@ -1106,13 +1115,13 @@ except Exception as e:
         })
         
         try:
-            # Calculate token parameters
-            min_tokens = min(output_tokens_range)
-            max_tokens = max(output_tokens_range)
-            min_prompt_length = min(input_tokens_range)
-            max_prompt_length = max(input_tokens_range)
+            # Use single token values instead of ranges
+            min_tokens = output_tokens
+            max_tokens = output_tokens
+            min_prompt_length = input_tokens
+            max_prompt_length = input_tokens
             
-            logger.info(f"[DEBUG] Custom API Token parameters: input_range={input_tokens_range}, output_range={output_tokens_range}")
+            logger.info(f"[DEBUG] Custom API Token parameters: input_tokens={input_tokens}, output_tokens={output_tokens}")
             logger.info(f"[DEBUG] Custom API Evalscope config: min_prompt_length={min_prompt_length}, max_prompt_length={max_prompt_length}, min_tokens={min_tokens}, max_tokens={max_tokens}")
             
             # Get appropriate tokenizer path based on model name
@@ -1128,7 +1137,7 @@ except Exception as e:
             
             self._update_session(session_id, {
                 "progress": 60,
-                "current_message": "正在执行evalscope基准测试..."
+                "current_message": f"正在执行evalscope基准测试 ({num_requests_list} 请求, {concurrency_list} 并发)..."
             })
             
             # Create Python script to run evalscope programmatically using the same approach as original implementation
@@ -1145,8 +1154,8 @@ try:
     
     # Create evalscope configuration
     task_cfg = Arguments(
-        parallel=[{concurrency}],
-        number=[{num_requests}],
+        parallel={concurrency_list},
+        number={num_requests_list},
         model='{model_name}',
         url='{api_url}',
         api='openai',
