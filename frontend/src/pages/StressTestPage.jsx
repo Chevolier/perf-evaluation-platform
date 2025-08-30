@@ -15,7 +15,9 @@ import {
   message,
   Divider,
   Statistic,
-  Spin
+  Spin,
+  Radio,
+  Input
 } from 'antd';
 import { 
   ThunderboltOutlined,
@@ -26,7 +28,9 @@ import {
   FireOutlined,
   RocketOutlined,
   DashboardOutlined,
-  CloudOutlined
+  CloudOutlined,
+  LinkOutlined,
+  SettingOutlined
 } from '@ant-design/icons';
 import { Line } from '@ant-design/plots';
 
@@ -37,6 +41,7 @@ const StressTestPage = () => {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [models, setModels] = useState([]);
+  const [inputMode, setInputMode] = useState('dropdown'); // 'dropdown' or 'manual'
   
   // 从localStorage恢复测试会话状态
   const [testSessions, setTestSessions] = useState(() => {
@@ -121,19 +126,28 @@ const StressTestPage = () => {
   const startStressTest = async (values) => {
     setLoading(true);
     try {
+      const requestBody = {
+        params: {
+          num_requests: values.num_requests,
+          concurrency: values.concurrency,
+          input_tokens_range: values.input_tokens_range,
+          output_tokens_range: values.output_tokens_range,
+          temperature: 0.1
+        }
+      };
+
+      // Handle different input modes
+      if (inputMode === 'manual') {
+        requestBody.api_url = values.api_url;
+        requestBody.model_name = values.model_name;
+      } else {
+        requestBody.model = values.model;
+      }
+
       const response = await fetch('/api/stress-test/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: values.model,
-          params: {
-            num_requests: values.num_requests,
-            concurrency: values.concurrency,
-            input_tokens_range: values.input_tokens_range,
-            output_tokens_range: values.output_tokens_range,
-            temperature: 0.1
-          }
-        })
+        body: JSON.stringify(requestBody)
       });
 
       if (response.ok) {
@@ -145,7 +159,7 @@ const StressTestPage = () => {
             ...prev,
             [sessionId]: {
               status: 'running',
-              model: values.model,
+              model: inputMode === 'manual' ? values.model_name : values.model,
               params: values,
               startTime: new Date().toISOString()
             }
@@ -689,23 +703,77 @@ const StressTestPage = () => {
                 output_tokens_range: [100, 500]
               }}
             >
-              <Form.Item
-                name="model"
-                label="选择模型"
-                rules={[{ required: true, message: '请选择要测试的模型' }]}
-              >
-                <Select placeholder="选择模型">
-                  {models.map(model => (
-                    <Option key={model.key} value={model.key}>
-                      <Space>
-                        {model.type === 'bedrock' ? <CloudOutlined /> : <RocketOutlined />}
-                        {model.name}
-                        {model.tag && <Text type="secondary">({model.tag})</Text>}
-                      </Space>
-                    </Option>
-                  ))}
-                </Select>
+              <Form.Item label="模型选择方式">
+                <Radio.Group 
+                  value={inputMode} 
+                  onChange={(e) => {
+                    setInputMode(e.target.value);
+                    // Clear form fields when switching modes
+                    form.resetFields(['model', 'api_url', 'model_name']);
+                  }}
+                >
+                  <Radio value="dropdown">
+                    <Space>
+                      <SettingOutlined />
+                      从列表选择
+                    </Space>
+                  </Radio>
+                  <Radio value="manual">
+                    <Space>
+                      <LinkOutlined />
+                      手动输入
+                    </Space>
+                  </Radio>
+                </Radio.Group>
               </Form.Item>
+
+              {inputMode === 'dropdown' ? (
+                <Form.Item
+                  name="model"
+                  label="选择模型"
+                  rules={[{ required: true, message: '请选择要测试的模型' }]}
+                >
+                  <Select placeholder="选择模型">
+                    {models.map(model => (
+                      <Option key={model.key} value={model.key}>
+                        <Space>
+                          {model.type === 'bedrock' ? <CloudOutlined /> : <RocketOutlined />}
+                          {model.name}
+                          {model.tag && <Text type="secondary">({model.tag})</Text>}
+                        </Space>
+                      </Option>
+                    ))}
+                  </Select>
+                </Form.Item>
+              ) : (
+                <>
+                  <Form.Item
+                    name="api_url"
+                    label="API URL"
+                    rules={[
+                      { required: true, message: '请输入API URL' },
+                      { type: 'url', message: '请输入有效的URL' }
+                    ]}
+                    extra="请输入完整的chat completions端点URL，必须包含 /v1/chat/completions 路径"
+                  >
+                    <Input 
+                      placeholder="http://your-api-host.com/v1/chat/completions"
+                      prefix={<LinkOutlined />}
+                    />
+                  </Form.Item>
+                  <Form.Item
+                    name="model_name"
+                    label="模型名称"
+                    rules={[{ required: true, message: '请输入模型名称' }]}
+                    extra="请输入准确的模型名称，如: gpt-3.5-turbo, claude-3-sonnet-20240229"
+                  >
+                    <Input 
+                      placeholder="gpt-3.5-turbo"
+                      prefix={<RocketOutlined />}
+                    />
+                  </Form.Item>
+                </>
+              )}
 
               <Form.Item
                 name="num_requests"

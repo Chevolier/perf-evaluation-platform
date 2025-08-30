@@ -22,14 +22,25 @@ def start_stress_test():
             return jsonify({"status": "error", "message": "No JSON data provided"}), 400
         
         model_key = data.get('model')
+        api_url = data.get('api_url')
+        model_name = data.get('model_name')
         test_params = data.get('params', {})
         
-        if not model_key:
-            logger.error("No model specified in stress test request")
-            return jsonify({"status": "error", "message": "Model is required"}), 400
-        
-        # Start the stress test
-        session_id = stress_test_service.start_stress_test(model_key, test_params)
+        # Handle both dropdown selection and manual input
+        if model_key:
+            # Traditional dropdown selection
+            session_id = stress_test_service.start_stress_test(model_key, test_params)
+        elif api_url and model_name:
+            # Manual API URL and model name input
+            session_id = stress_test_service.start_stress_test_with_custom_api(
+                api_url, model_name, test_params
+            )
+        else:
+            logger.error("No model specified in stress test request - need either 'model' or both 'api_url' and 'model_name'")
+            return jsonify({
+                "status": "error", 
+                "message": "Either 'model' or both 'api_url' and 'model_name' are required"
+            }), 400
         
         logger.info(f"Stress test started with session ID: {session_id}")
         return jsonify({
@@ -51,8 +62,14 @@ def get_stress_test_status(session_id):
         session_data = stress_test_service.get_test_status(session_id)
         
         if not session_data:
-            logger.warning(f"Stress test session {session_id} not found")
-            return jsonify({"status": "error", "message": "Test session not found"}), 404
+            # Try to reconstruct session from results files (for cases when backend was restarted)
+            reconstructed_session = stress_test_service.reconstruct_session_from_files(session_id)
+            if reconstructed_session:
+                logger.info(f"Reconstructed session {session_id} from results files")
+                session_data = reconstructed_session
+            else:
+                logger.warning(f"Stress test session {session_id} not found and no results files available")
+                return jsonify({"status": "error", "message": "Test session not found"}), 404
         
         logger.info(f"Session {session_id} status: {session_data.get('status')}, progress: {session_data.get('progress')}")
         
@@ -98,4 +115,27 @@ def download_stress_test_report(session_id):
         
     except Exception as e:
         logger.error(f"Error downloading stress test report: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@stress_test_bp.route('/stress-test/recover/<session_id>', methods=['POST'])
+def recover_stress_test_session(session_id):
+    """Manually recover a stuck stress test session."""
+    try:
+        logger.info(f"Manual recovery request for session: {session_id}")
+        
+        success = stress_test_service.recover_stuck_session(session_id)
+        
+        if success:
+            return jsonify({
+                "status": "success", 
+                "message": f"Session {session_id} recovered successfully"
+            })
+        else:
+            return jsonify({
+                "status": "error", 
+                "message": f"Failed to recover session {session_id}"
+            }), 400
+        
+    except Exception as e:
+        logger.error(f"Error recovering stress test session: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
