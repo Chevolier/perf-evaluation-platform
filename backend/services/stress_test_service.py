@@ -295,7 +295,7 @@ except Exception as e:
             env = os.environ.copy()
             cmd = [
                 '/bin/bash', '-c',
-                f'source /opt/conda/etc/profile.d/conda.sh && conda activate evalscope && python {script_path}'
+                f'source /home/ubuntu/anaconda3/etc/profile.d/conda.sh && conda activate evalscope && python {script_path}'
             ]
             
             logger.info(f"Executing evalscope command in subprocess...")
