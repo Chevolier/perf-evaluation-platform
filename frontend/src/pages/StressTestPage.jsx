@@ -126,10 +126,15 @@ const StressTestPage = () => {
   const startStressTest = async (values) => {
     setLoading(true);
     try {
+      // Parse comma-separated values into arrays of numbers
+      const parseCommaSeparatedNumbers = (str) => {
+        return str.split(',').map(v => parseInt(v.trim())).filter(n => !isNaN(n) && n > 0);
+      };
+
       const requestBody = {
         params: {
-          num_requests: values.num_requests,
-          concurrency: values.concurrency,
+          num_requests: parseCommaSeparatedNumbers(values.num_requests),
+          concurrency: parseCommaSeparatedNumbers(values.concurrency),
           input_tokens: values.input_tokens,
           output_tokens: values.output_tokens,
           temperature: 0.1
@@ -697,8 +702,8 @@ const StressTestPage = () => {
               layout="vertical"
               onFinish={startStressTest}
               initialValues={{
-                num_requests: [50, 100, 200],
-                concurrency: [1, 5, 10],
+                num_requests: "50, 100, 200",
+                concurrency: "1, 5, 10",
                 input_tokens: 200,
                 output_tokens: 500
               }}
@@ -778,43 +783,58 @@ const StressTestPage = () => {
               <Form.Item
                 name="num_requests"
                 label="请求总数"
-                rules={[{ required: true, message: '请选择请求总数' }]}
+                rules={[
+                  { required: true, message: '请输入请求总数' },
+                  {
+                    validator: (_, value) => {
+                      if (!value) return Promise.reject(new Error('请输入请求总数'));
+                      
+                      // Parse comma-separated values
+                      const numbers = value.split(',').map(v => v.trim()).filter(v => v);
+                      const invalidNumbers = numbers.filter(n => isNaN(n) || parseInt(n) <= 0);
+                      
+                      if (invalidNumbers.length > 0) {
+                        return Promise.reject(new Error('请输入有效的正整数，用逗号分隔'));
+                      }
+                      
+                      return Promise.resolve();
+                    }
+                  }
+                ]}
+                extra="输入多个值用逗号分隔，如: 10, 20, 50, 100"
               >
-                <Select
-                  mode="multiple"
-                  placeholder="选择请求总数"
+                <Input
+                  placeholder="10, 20, 50, 100"
                   style={{ width: '100%' }}
-                  options={[
-                    { label: '10', value: 10 },
-                    { label: '20', value: 20 },
-                    { label: '50', value: 50 },
-                    { label: '100', value: 100 },
-                    { label: '200', value: 200 },
-                    { label: '400', value: 400 },
-                    { label: '500', value: 500 },
-                    { label: '1000', value: 1000 }
-                  ]}
                 />
               </Form.Item>
 
               <Form.Item
                 name="concurrency"
                 label="并发数"
-                rules={[{ required: true, message: '请选择并发数' }]}
+                rules={[
+                  { required: true, message: '请输入并发数' },
+                  {
+                    validator: (_, value) => {
+                      if (!value) return Promise.reject(new Error('请输入并发数'));
+                      
+                      // Parse comma-separated values
+                      const numbers = value.split(',').map(v => v.trim()).filter(v => v);
+                      const invalidNumbers = numbers.filter(n => isNaN(n) || parseInt(n) <= 0);
+                      
+                      if (invalidNumbers.length > 0) {
+                        return Promise.reject(new Error('请输入有效的正整数，用逗号分隔'));
+                      }
+                      
+                      return Promise.resolve();
+                    }
+                  }
+                ]}
+                extra="输入多个值用逗号分隔，如: 1, 5, 10, 20"
               >
-                <Select
-                  mode="multiple"
-                  placeholder="选择并发数"
+                <Input
+                  placeholder="1, 5, 10, 20"
                   style={{ width: '100%' }}
-                  options={[
-                    { label: '1', value: 1 },
-                    { label: '5', value: 5 },
-                    { label: '10', value: 10 },
-                    { label: '20', value: 20 },
-                    { label: '50', value: 50 },
-                    { label: '100', value: 100 },
-                    { label: '200', value: 200 }
-                  ]}
                 />
               </Form.Item>
 
