@@ -1093,6 +1093,7 @@ except Exception as e:
                 avg_latency = data.get('Average latency (s)', 0)
                 p99_latency = avg_latency * 1.2  # Approximate P99 from average
                 gen_toks_per_sec = data.get('Output token throughput (tok/s)', 0)
+                total_toks_per_sec = data.get('Total token throughput (tok/s)', 0)
                 avg_ttft = data.get('Average time to first token (s)', 0)
                 p99_ttft = avg_ttft * 1.5  # Approximate P99 from average
                 avg_tpot = data.get('Average time per output token (s)', 0)
@@ -1118,6 +1119,7 @@ except Exception as e:
                     'avg_latency': avg_latency,
                     'p99_latency': p99_latency,
                     'gen_toks_per_sec': gen_toks_per_sec,
+                    'total_toks_per_sec': total_toks_per_sec,
                     'avg_ttft': avg_ttft,
                     'p99_ttft': p99_ttft,
                     'avg_tpot': avg_tpot,

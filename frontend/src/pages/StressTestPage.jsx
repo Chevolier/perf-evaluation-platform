@@ -380,6 +380,14 @@ const StressTestPage = () => {
         render: (value) => value?.toFixed(0) || 'N/A'
       },
       {
+        title: 'Tot. toks/s',
+        dataIndex: 'total_toks_per_sec',
+        key: 'total_toks_per_sec',
+        width: 100,
+        align: 'center',
+        render: (value) => value?.toFixed(0) || 'N/A'
+      },
+      {
         title: 'Avg TTFT(s)',
         dataIndex: 'avg_ttft',
         key: 'avg_ttft',
@@ -470,13 +478,13 @@ const StressTestPage = () => {
             pagination={false}
             size="small"
             bordered
-            scroll={{ x: 900 }}
+            scroll={{ x: 1000 }}
             style={{ marginBottom: 16 }}
           />
         </Card>
 
         {/* Best Performance Configuration */}
-        <Card title="Best Performance Configuration" size="small">
+        <Card title="Best Performance Configuration" size="small" style={{ marginBottom: 16 }}>
           <Row gutter={[16, 16]}>
             <Col span={12}>
               <div style={{ textAlign: 'center', padding: '16px', background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: '6px' }}>
@@ -496,7 +504,265 @@ const StressTestPage = () => {
             </Col>
           </Row>
         </Card>
+
+        {/* Performance Charts */}
+        {renderPerformanceCharts(tableData)}
       </div>
+    );
+  };
+
+  // 渲染性能指标图表 (for comprehensive results)
+  const renderPerformanceCharts = (tableData) => {
+    if (!tableData || tableData.length === 0) return null;
+
+    // Prepare data for charts - sort by concurrency for better visualization
+    const chartData = [...tableData].sort((a, b) => a.concurrency - b.concurrency);
+
+    const rpsConfig = {
+      data: chartData,
+      xField: 'concurrency',
+      yField: 'rps',
+      smooth: true,
+      color: '#1890ff',
+      point: { 
+        size: 4,
+        shape: 'circle'
+      },
+      tooltip: {
+        formatter: (datum) => [
+          {
+            name: 'Concurrency',
+            value: datum.concurrency
+          },
+          {
+            name: 'RPS',
+            value: `${datum.rps?.toFixed(2)} req/s`
+          }
+        ]
+      },
+      xAxis: {
+        title: {
+          text: 'Concurrency'
+        }
+      },
+      yAxis: {
+        title: {
+          text: 'RPS (req/s)'
+        }
+      }
+    };
+
+    const genThroughputConfig = {
+      data: chartData,
+      xField: 'concurrency',
+      yField: 'gen_toks_per_sec',
+      smooth: true,
+      color: '#52c41a',
+      point: { 
+        size: 4,
+        shape: 'circle'
+      },
+      tooltip: {
+        formatter: (datum) => [
+          {
+            name: 'Concurrency',
+            value: datum.concurrency
+          },
+          {
+            name: 'Gen. Throughput',
+            value: `${datum.gen_toks_per_sec?.toFixed(0)} tok/s`
+          }
+        ]
+      },
+      xAxis: {
+        title: {
+          text: 'Concurrency'
+        }
+      },
+      yAxis: {
+        title: {
+          text: 'Gen. Throughput (tok/s)'
+        }
+      }
+    };
+
+    const totalThroughputConfig = {
+      data: chartData,
+      xField: 'concurrency',
+      yField: 'total_toks_per_sec',
+      smooth: true,
+      color: '#389e0d',
+      point: { 
+        size: 4,
+        shape: 'circle'
+      },
+      tooltip: {
+        formatter: (datum) => [
+          {
+            name: 'Concurrency',
+            value: datum.concurrency
+          },
+          {
+            name: 'Total Throughput',
+            value: `${datum.total_toks_per_sec?.toFixed(0)} tok/s`
+          }
+        ]
+      },
+      xAxis: {
+        title: {
+          text: 'Concurrency'
+        }
+      },
+      yAxis: {
+        title: {
+          text: 'Total Throughput (tok/s)'
+        }
+      }
+    };
+
+    const latencyConfig = {
+      data: chartData,
+      xField: 'concurrency',
+      yField: 'avg_latency',
+      smooth: true,
+      color: '#fa541c',
+      point: { 
+        size: 4,
+        shape: 'circle'
+      },
+      tooltip: {
+        formatter: (datum) => [
+          {
+            name: 'Concurrency',
+            value: datum.concurrency
+          },
+          {
+            name: 'Average Latency',
+            value: `${datum.avg_latency?.toFixed(3)}s`
+          }
+        ]
+      },
+      xAxis: {
+        title: {
+          text: 'Concurrency'
+        }
+      },
+      yAxis: {
+        title: {
+          text: 'Average Latency (s)'
+        }
+      }
+    };
+
+    const ttftConfig = {
+      data: chartData,
+      xField: 'concurrency',
+      yField: 'avg_ttft',
+      smooth: true,
+      color: '#722ed1',
+      point: { 
+        size: 4,
+        shape: 'circle'
+      },
+      tooltip: {
+        formatter: (datum) => [
+          {
+            name: 'Concurrency',
+            value: datum.concurrency
+          },
+          {
+            name: 'Average TTFT',
+            value: `${datum.avg_ttft?.toFixed(3)}s`
+          }
+        ]
+      },
+      xAxis: {
+        title: {
+          text: 'Concurrency'
+        }
+      },
+      yAxis: {
+        title: {
+          text: 'Average TTFT (s)'
+        }
+      }
+    };
+
+    const tpotConfig = {
+      data: chartData,
+      xField: 'concurrency',
+      yField: 'avg_tpot',
+      smooth: true,
+      color: '#13c2c2',
+      point: { 
+        size: 4,
+        shape: 'circle'
+      },
+      tooltip: {
+        formatter: (datum) => [
+          {
+            name: 'Concurrency',
+            value: datum.concurrency
+          },
+          {
+            name: 'Average TPOT',
+            value: `${datum.avg_tpot?.toFixed(3)}s`
+          }
+        ]
+      },
+      xAxis: {
+        title: {
+          text: 'Concurrency'
+        }
+      },
+      yAxis: {
+        title: {
+          text: 'Average TPOT (s)'
+        }
+      }
+    };
+
+    return (
+      <Card title="Performance Metrics vs Concurrency" size="small">
+        <Row gutter={[16, 16]}>
+          <Col span={12}>
+            <div style={{ textAlign: 'center', marginBottom: '16px' }}>
+              <Text strong>RPS vs Concurrency</Text>
+            </div>
+            <Line {...rpsConfig} height={200} />
+          </Col>
+          <Col span={12}>
+            <div style={{ textAlign: 'center', marginBottom: '16px' }}>
+              <Text strong>Gen. Throughput vs Concurrency</Text>
+            </div>
+            <Line {...genThroughputConfig} height={200} />
+          </Col>
+          <Col span={12}>
+            <div style={{ textAlign: 'center', marginBottom: '16px' }}>
+              <Text strong>Total Throughput vs Concurrency</Text>
+            </div>
+            <Line {...totalThroughputConfig} height={200} />
+          </Col>
+          <Col span={12}>
+            <div style={{ textAlign: 'center', marginBottom: '16px' }}>
+              <Text strong>Average Latency vs Concurrency</Text>
+            </div>
+            <Line {...latencyConfig} height={200} />
+          </Col>
+          <Col span={12}>
+            <div style={{ textAlign: 'center', marginBottom: '16px' }}>
+              <Text strong>Average TTFT vs Concurrency</Text>
+            </div>
+            <Line {...ttftConfig} height={200} />
+          </Col>
+          <Col span={12}>
+            <div style={{ textAlign: 'center', marginBottom: '16px' }}>
+              <Text strong>Average TPOT vs Concurrency</Text>
+            </div>
+            <Line {...tpotConfig} height={200} />
+          </Col>
+        </Row>
+      </Card>
     );
   };
 
