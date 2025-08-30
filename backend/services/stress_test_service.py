@@ -313,6 +313,17 @@ class StressTestService:
             Transformed results matching frontend expectations
         """
         try:
+            logger.info(f"[DEBUG] Transform function called with:")
+            logger.info(f"[DEBUG]   raw_results type: {type(raw_results)}")
+            logger.info(f"[DEBUG]   test_params type: {type(test_params)}")
+            logger.info(f"[DEBUG]   session_id: {session_id}")
+            logger.info(f"[DEBUG]   test_params content: {test_params}")
+            
+            # Validate that test_params is a dictionary
+            if not isinstance(test_params, dict):
+                logger.error(f"[DEBUG] ERROR: test_params is not a dict! Type: {type(test_params)}, Content: {test_params}")
+                raise TypeError(f"test_params must be a dictionary, got {type(test_params)}")
+            
             logger.info(f"Transforming raw results for session {session_id}: {raw_results}")
             
             # Handle both direct benchmark results and list format
