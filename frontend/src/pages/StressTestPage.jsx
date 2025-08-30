@@ -345,83 +345,83 @@ const StressTestPage = () => {
       return parseFloat(label) || 0;
     };
 
-    // TTFT分布图 - 使用百分位数据，x轴为TTFT值，y轴为百分位
+    // TTFT分布图 - 使用百分位数据，x轴为百分位，y轴为TTFT值
     const ttftData = percentileLabels.map((label, index) => ({
       percentile: convertPercentileToNumber(label),
       ttft: percentiles['TTFT (s)']?.[index] || 0
-    })).reverse(); // 反转数据顺序，让高百分位显示在上方
+    })); // 不需要反转数据顺序
 
-    // 延迟分布图 - 使用百分位数据，x轴为延迟值，y轴为百分位
+    // 延迟分布图 - 使用百分位数据，x轴为百分位，y轴为延迟值
     const latencyData = percentileLabels.map((label, index) => ({
       percentile: convertPercentileToNumber(label),
       latency: percentiles['Latency (s)']?.[index] || 0
-    })).reverse(); // 反转数据顺序，让高百分位显示在上方
+    })); // 不需要反转数据顺序
 
     const ttftConfig = {
       data: ttftData,
-      xField: 'ttft', // x轴为TTFT值
-      yField: 'percentile', // y轴为百分位
+      xField: 'percentile', // x轴为百分位
+      yField: 'ttft', // y轴为TTFT值
       smooth: true,
       color: '#1890ff',
       point: { size: 3 },
       tooltip: {
         formatter: (datum) => [
           {
-            name: 'TTFT',
-            value: `${datum.ttft?.toFixed(3)}s`
-          },
-          {
             name: '百分位',
             value: `P${datum.percentile}`
+          },
+          {
+            name: 'TTFT',
+            value: `${datum.ttft?.toFixed(3)}s`
           }
         ]
       },
       xAxis: {
-        title: {
-          text: 'TTFT (秒)'
-        }
-      },
-      yAxis: {
         title: {
           text: '百分位'
         },
         min: 0,
         max: 100,
         tickInterval: 10
+      },
+      yAxis: {
+        title: {
+          text: 'TTFT (秒)'
+        }
       }
     };
 
     const latencyConfig = {
       data: latencyData,
-      xField: 'latency', // x轴为延迟值
-      yField: 'percentile', // y轴为百分位
+      xField: 'percentile', // x轴为百分位
+      yField: 'latency', // y轴为延迟值
       smooth: true,
       color: '#52c41a',
       point: { size: 3 },
       tooltip: {
         formatter: (datum) => [
           {
-            name: '端到端延迟',
-            value: `${datum.latency?.toFixed(3)}s`
-          },
-          {
             name: '百分位',
             value: `P${datum.percentile}`
+          },
+          {
+            name: '端到端延迟',
+            value: `${datum.latency?.toFixed(3)}s`
           }
         ]
       },
       xAxis: {
-        title: {
-          text: '端到端延迟 (秒)'
-        }
-      },
-      yAxis: {
         title: {
           text: '百分位'
         },
         min: 0,
         max: 100,
         tickInterval: 10
+      },
+      yAxis: {
+        title: {
+          text: '端到端延迟 (秒)'
+        }
       }
     };
 
@@ -430,7 +430,7 @@ const StressTestPage = () => {
       percentile: convertPercentileToNumber(label),
       input_tokens: percentiles['Input tokens']?.[index] || 0,
       output_tokens: percentiles['Output tokens']?.[index] || 0
-    })).reverse(); // 反转数据顺序，让高百分位显示在上方
+    })); // 不需要反转数据顺序
 
     return (
       <Row gutter={[16, 16]}>
@@ -451,8 +451,8 @@ const StressTestPage = () => {
                 <h4 style={{ textAlign: 'center', margin: '0 0 16px 0' }}>输入Token</h4>
                 <Line
                   data={tokenData}
-                  xField="input_tokens"
-                  yField="percentile"
+                  xField="percentile"
+                  yField="input_tokens"
                   color="#1890ff"
                   smooth={true}
                   point={{ size: 2 }}
@@ -460,20 +460,20 @@ const StressTestPage = () => {
                   tooltip={{
                     formatter: (datum) => [
                       {
-                        name: '输入Token',
-                        value: `${datum.input_tokens}`
-                      },
-                      {
                         name: '百分位',
                         value: `P${datum.percentile}`
+                      },
+                      {
+                        name: '输入Token',
+                        value: `${datum.input_tokens}`
                       }
                     ]
                   }}
                   xAxis={{
-                    title: { text: '输入Token数' }
+                    title: { text: '百分位' }
                   }}
                   yAxis={{
-                    title: { text: '百分位' }
+                    title: { text: '输入Token数' }
                   }}
                 />
               </div>
@@ -481,8 +481,8 @@ const StressTestPage = () => {
                 <h4 style={{ textAlign: 'center', margin: '0 0 16px 0' }}>输出Token</h4>
                 <Line
                   data={tokenData}
-                  xField="output_tokens"
-                  yField="percentile"
+                  xField="percentile"
+                  yField="output_tokens"
                   color="#52c41a"
                   smooth={true}
                   point={{ size: 2 }}
@@ -490,20 +490,20 @@ const StressTestPage = () => {
                   tooltip={{
                     formatter: (datum) => [
                       {
-                        name: '输出Token',
-                        value: `${datum.output_tokens}`
-                      },
-                      {
                         name: '百分位',
                         value: `P${datum.percentile}`
+                      },
+                      {
+                        name: '输出Token',
+                        value: `${datum.output_tokens}`
                       }
                     ]
                   }}
                   xAxis={{
-                    title: { text: '输出Token数' }
+                    title: { text: '百分位' }
                   }}
                   yAxis={{
-                    title: { text: '百分位' }
+                    title: { text: '输出Token数' }
                   }}
                 />
               </div>
