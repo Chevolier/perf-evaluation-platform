@@ -811,8 +811,8 @@ except Exception as e:
                     # Generate realistic token distributions based on the configured ranges
                     num_percentiles = 10  # Standard percentile count (P10, P20, ..., P100)
                     
-                    # Generate input token distribution (should vary within the specified range)
-                    input_min, input_max = min(input_tokens_range), max(input_tokens_range)
+                    # Generate input token distribution around the specified value
+                    input_min, input_max = max(1, input_tokens - 50), input_tokens + 50
                     input_token_dist = []
                     for i in range(num_percentiles):
                         # Create a realistic distribution - lower percentiles get values closer to min, higher to max
@@ -822,8 +822,8 @@ except Exception as e:
                         token_value = max(input_min, min(input_max, token_value))  # Clamp to range
                         input_token_dist.append(token_value)
                     
-                    # Generate output token distribution
-                    output_min, output_max = min(output_tokens_range), max(output_tokens_range)
+                    # Generate output token distribution around the specified value
+                    output_min, output_max = max(1, output_tokens - 100), output_tokens + 100
                     output_token_dist = []
                     for i in range(num_percentiles):
                         ratio = (i + 1) / num_percentiles
