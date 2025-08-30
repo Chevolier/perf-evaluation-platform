@@ -777,6 +777,8 @@ except Exception as e:
             logger.info(f"Evalscope benchmark completed, processing results")
             
             # Transform evalscope results to frontend-compatible format (like original backend)
+            logger.info(f"[DEBUG] Raw results type: {type(raw_results)}, content preview: {str(raw_results)[:200]}...")
+            
             if isinstance(raw_results, list) and len(raw_results) >= 2:
                 summary_data = raw_results[0] if raw_results else {}
                 percentile_data = raw_results[1] if len(raw_results) > 1 else {}
@@ -841,8 +843,8 @@ except Exception as e:
                     "p99_ttft": percentile_data.get("TTFT (s)", [])[9] if "TTFT (s)" in percentile_data and len(percentile_data.get("TTFT (s)", [])) > 9 else 0,
                     "p50_latency": percentile_data.get("Latency (s)", [])[4] if "Latency (s)" in percentile_data and len(percentile_data.get("Latency (s)", [])) > 4 else 0,
                     "p99_latency": percentile_data.get("Latency (s)", [])[9] if "Latency (s)" in percentile_data and len(percentile_data.get("Latency (s)", [])) > 9 else 0,
-                    "total_requests": num_requests,
-                    "successful_requests": summary_data.get("Successful requests", num_requests),
+                    "total_requests": max(num_requests_list) if num_requests_list else 0,
+                    "successful_requests": summary_data.get("Successful requests", max(num_requests_list) if num_requests_list else 0),
                     "failed_requests": summary_data.get("Failed requests", 0),
                     "summary": summary_data,
                     "percentiles": percentile_data,
@@ -864,7 +866,43 @@ except Exception as e:
                 self._save_results_to_output_dir(output_dir, processed_results, test_params, model_key, session_id)
                 
                 return processed_results
+            elif isinstance(raw_results, dict):
+                # Handle single dictionary format (evalscope might return this format)
+                logger.info(f"[DEBUG] Processing single dictionary format from evalscope")
+                summary_data = raw_results
+                percentile_data = {}
+                
+                # Generate basic results structure
+                processed_results = {
+                    "qps": summary_data.get("Request throughput (req/s)", 0),
+                    "avg_ttft": summary_data.get("Average time to first token (s)", 0),
+                    "avg_latency": summary_data.get("Average latency (s)", 0),
+                    "tokens_per_second": summary_data.get("Output token throughput (tok/s)", 0),
+                    "p50_ttft": 0,  # Not available in single dict format
+                    "p99_ttft": 0,
+                    "p50_latency": 0,
+                    "p99_latency": 0,
+                    "total_requests": max(num_requests_list) if num_requests_list else 0,
+                    "successful_requests": summary_data.get("Succeed requests", max(num_requests_list) if num_requests_list else 0),
+                    "failed_requests": summary_data.get("Failed requests", 0),
+                    "summary": summary_data,
+                    "percentiles": {},  # Empty for single dict format
+                    "detailed_metrics": {
+                        "ttft_distribution": [],
+                        "latency_distribution": [],
+                        "input_tokens": [],
+                        "output_tokens": []
+                    }
+                }
+                
+                logger.info(f"Processed single dict results: QPS={processed_results['qps']:.2f}, Avg TTFT={processed_results['avg_ttft']:.3f}s")
+                
+                # Save results to structured output directory
+                self._save_results_to_output_dir(output_dir, processed_results, test_params, model_key, session_id)
+                
+                return processed_results
             else:
+                logger.error(f"[DEBUG] Unexpected raw_results format: type={type(raw_results)}, content={raw_results}")
                 raise Exception(f"Evalscope返回了意外的结果格式: {type(raw_results)}")
                 
         except subprocess.TimeoutExpired as e:
