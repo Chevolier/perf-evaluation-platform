@@ -449,6 +449,8 @@ class StressTestService:
             session_id: Session ID
         """
         try:
+            logger.info(f"[DEBUG] _run_stress_test called with test_params type: {type(test_params)}")
+            logger.info(f"[DEBUG] test_params content: {test_params}")
             logger.info(f"Running stress test for session {session_id}")
             
             # Update status
@@ -460,7 +462,15 @@ class StressTestService:
             })
             
             # Use evalscope Python SDK for real stress testing
-            results = self._run_evalscope_stress_test(model_key, test_params, session_id)
+            try:
+                results = self._run_evalscope_stress_test(model_key, test_params, session_id)
+            except AttributeError as attr_error:
+                if "'list' object has no attribute 'get'" in str(attr_error):
+                    logger.error(f"[DEBUG] FOUND THE ERROR! AttributeError in _run_evalscope_stress_test:")
+                    logger.error(f"[DEBUG] Error message: {attr_error}")
+                    import traceback
+                    logger.error(f"[DEBUG] Full traceback: {traceback.format_exc()}")
+                raise attr_error
             
             # Update with completed results
             self._update_session(session_id, {
@@ -505,7 +515,15 @@ class StressTestService:
             })
             
             # Use evalscope with custom API
-            results = self._run_evalscope_with_custom_api(api_url, model_name, test_params, session_id)
+            try:
+                results = self._run_evalscope_with_custom_api(api_url, model_name, test_params, session_id)
+            except AttributeError as attr_error:
+                if "'list' object has no attribute 'get'" in str(attr_error):
+                    logger.error(f"[DEBUG] FOUND THE ERROR! AttributeError in _run_evalscope_with_custom_api:")
+                    logger.error(f"[DEBUG] Error message: {attr_error}")
+                    import traceback
+                    logger.error(f"[DEBUG] Full traceback: {traceback.format_exc()}")
+                raise attr_error
             
             # Update with completed results
             self._update_session(session_id, {
