@@ -567,11 +567,29 @@ class StressTestService:
         output_tokens = test_params.get('output_tokens', 500)
         temperature = test_params.get('temperature', 0.1)
         
+        logger.info(f"[DEBUG] Raw parameters from frontend:")
+        logger.info(f"[DEBUG]   num_requests: {num_requests_list} (type: {type(num_requests_list)})")
+        logger.info(f"[DEBUG]   concurrency: {concurrency_list} (type: {type(concurrency_list)})")
+        logger.info(f"[DEBUG]   input_tokens: {input_tokens} (type: {type(input_tokens)})")
+        logger.info(f"[DEBUG]   output_tokens: {output_tokens} (type: {type(output_tokens)})")
+        
         # Convert to lists if single values were provided for backward compatibility
         if not isinstance(num_requests_list, list):
             num_requests_list = [num_requests_list]
         if not isinstance(concurrency_list, list):
             concurrency_list = [concurrency_list]
+        
+        # Ensure lists are not empty
+        if not num_requests_list:
+            logger.warning("[DEBUG] num_requests_list is empty, using default [50]")
+            num_requests_list = [50]
+        if not concurrency_list:
+            logger.warning("[DEBUG] concurrency_list is empty, using default [5]")
+            concurrency_list = [5]
+        
+        logger.info(f"[DEBUG] Final processed parameters:")
+        logger.info(f"[DEBUG]   num_requests_list: {num_requests_list}")
+        logger.info(f"[DEBUG]   concurrency_list: {concurrency_list}")
         
         logger.info(f"Starting evalscope stress test: {num_requests_list} requests, {concurrency_list} concurrent")
         
@@ -1114,11 +1132,23 @@ except Exception as e:
         output_tokens = test_params.get('output_tokens', 500)
         temperature = test_params.get('temperature', 0.1)
         
+        logger.info(f"[DEBUG] Custom API - Raw parameters from frontend:")
+        logger.info(f"[DEBUG]   num_requests: {num_requests_list} (type: {type(num_requests_list)})")
+        logger.info(f"[DEBUG]   concurrency: {concurrency_list} (type: {type(concurrency_list)})")
+        
         # Convert to lists if single values were provided for backward compatibility
         if not isinstance(num_requests_list, list):
             num_requests_list = [num_requests_list]
         if not isinstance(concurrency_list, list):
             concurrency_list = [concurrency_list]
+        
+        # Ensure lists are not empty
+        if not num_requests_list:
+            logger.warning("[DEBUG] Custom API - num_requests_list is empty, using default [50]")
+            num_requests_list = [50]
+        if not concurrency_list:
+            logger.warning("[DEBUG] Custom API - concurrency_list is empty, using default [5]")
+            concurrency_list = [5]
         
         logger.info(f"Starting evalscope stress test with custom API: {num_requests_list} requests, {concurrency_list} concurrent")
         
