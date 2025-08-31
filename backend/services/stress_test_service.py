@@ -154,6 +154,10 @@ class StressTestService:
                 except Exception as e:
                     logger.error(f"Error checking results file: {e}")
         
+        # If session not found in memory, try to reconstruct from files
+        if not session:
+            session = self.reconstruct_session_from_files(session_id)
+        
         return session
     
     def recover_stuck_session(self, session_id: str) -> bool:
@@ -226,11 +230,121 @@ class StressTestService:
         Returns:
             Reconstructed session data or None if no files found
         """
+        # Look in the outputs directory structure first (new comprehensive format)
+        project_root = Path(__file__).parent.parent.parent
+        
+        # Find the session directory by searching through model directories
+        outputs_dir = project_root / 'outputs'
+        session_dir = None
+        
+        if outputs_dir.exists():
+            for model_dir in outputs_dir.iterdir():
+                if model_dir.is_dir():
+                    potential_session_dir = model_dir / session_id
+                    if potential_session_dir.exists():
+                        session_dir = potential_session_dir
+                        break
+        
+        if session_dir:
+            # Try new comprehensive format first
+            config_file = session_dir / 'config.json'
+            csv_file = session_dir / 'performance_metrics.csv'
+            
+            logger.info(f"Found session directory: {session_dir}")
+            logger.info(f"Looking for config: {config_file}")
+            logger.info(f"Looking for CSV: {csv_file}")
+            
+            if config_file.exists() and csv_file.exists():
+                try:
+                    import json
+                    import csv
+                    
+                    # Load config
+                    with open(config_file, 'r', encoding='utf-8') as f:
+                        config = json.load(f)
+                    
+                    # Parse CSV data into comprehensive results format
+                    performance_table = []
+                    with open(csv_file, 'r', encoding='utf-8') as f:
+                        reader = csv.DictReader(f)
+                        for row in reader:
+                            performance_table.append({
+                                'concurrency': int(row['Concurrency']),
+                                'requests': int(row['Total_Requests']),
+                                'rps': float(row['RPS_req_s']),
+                                'avg_latency': float(row['Avg_Latency_s']),
+                                'p99_latency': float(row['P99_Latency_s']),
+                                'gen_toks_per_sec': float(row['Gen_Throughput_tok_s']),
+                                'total_toks_per_sec': float(row['Total_Throughput_tok_s']),
+                                'avg_ttft': float(row['Avg_TTFT_s']),
+                                'p99_ttft': float(row['P99_TTFT_s']),
+                                'avg_tpot': float(row['Avg_TPOT_s']),
+                                'p99_tpot': float(row['P99_TPOT_s']),
+                                'success_rate': float(row['Success_Rate_%'])
+                            })
+                    
+                    # Build comprehensive results from config and CSV data
+                    comprehensive_summary = config.get('test_results_summary', {})
+                    
+                    results = {
+                        'qps': performance_table[0]['rps'] if performance_table else 0,
+                        'avg_ttft': performance_table[0]['avg_ttft'] if performance_table else 0,
+                        'avg_latency': performance_table[0]['avg_latency'] if performance_table else 0,
+                        'tokens_per_second': performance_table[0]['gen_toks_per_sec'] if performance_table else 0,
+                        'total_requests': sum(r['requests'] for r in performance_table),
+                        'successful_requests': sum(int(r['requests'] * r['success_rate'] / 100) for r in performance_table),
+                        'failed_requests': sum(r['requests'] - int(r['requests'] * r['success_rate'] / 100) for r in performance_table),
+                        'comprehensive_summary': comprehensive_summary,
+                        'performance_table': performance_table,
+                        'is_comprehensive': True,
+                        'summary': {},
+                        'percentiles': {},
+                        'detailed_metrics': {
+                            'ttft_distribution': [],
+                            'latency_distribution': [],
+                            'input_tokens': [],
+                            'output_tokens': []
+                        }
+                    }
+                    
+                    # Extract model and params info from config
+                    model_info = config.get('model', {})
+                    stress_config = config.get('stress_test_config', {})
+                    
+                    reconstructed_session = {
+                        "status": "completed",
+                        "progress": 100,
+                        "message": "压力测试完成",
+                        "current_message": "测试结果已生成 (从文件恢复)",
+                        "results": results,
+                        "model": model_info.get('model_name', 'Unknown'),
+                        "params": {
+                            'concurrency': stress_config.get('concurrency', []),
+                            'num_requests': stress_config.get('total_requests', []),
+                            'input_tokens': stress_config.get('input_tokens', {}).get('average', 0),
+                            'output_tokens': stress_config.get('output_tokens', {}).get('average', 0),
+                            'temperature': stress_config.get('temperature', 0.1)
+                        },
+                        "start_time": config.get('timestamp', ''),
+                        "end_time": config.get('timestamp', ''),
+                        "output_directory": str(session_dir)
+                    }
+                    
+                    # Store the reconstructed session in memory for future requests
+                    self.test_sessions[session_id] = reconstructed_session
+                    
+                    logger.info(f"Successfully reconstructed session {session_id} from comprehensive format")
+                    return reconstructed_session
+                    
+                except Exception as e:
+                    logger.error(f"Error parsing comprehensive format for session {session_id}: {e}")
+                    
+        # Fallback to legacy tmp directory approach
         output_dir = f"/tmp/stress_test_{session_id}"
         results_file = f"{output_dir}/benchmark_results.json"
         config_file = f"{output_dir}/eval_config.json"
         
-        logger.info(f"Attempting to reconstruct session {session_id} from files")
+        logger.info(f"Attempting legacy reconstruction for session {session_id}")
         logger.info(f"Looking for results: {results_file}")
         logger.info(f"Looking for config: {config_file}")
         
@@ -239,7 +353,7 @@ class StressTestService:
             import json
             
             if os.path.exists(results_file):
-                logger.info(f"Found results file for session {session_id}")
+                logger.info(f"Found legacy results file for session {session_id}")
                 
                 # Load results
                 with open(results_file, 'r') as f:
@@ -2103,7 +2217,7 @@ except Exception as e:
             self.test_sessions[session_id].update(updates)
     
     def generate_pdf_report(self, session_id: str) -> Optional[bytes]:
-        """Generate PDF report for a completed test session.
+        """Generate comprehensive PDF report for a completed test session.
         
         Args:
             session_id: Session ID
@@ -2111,34 +2225,307 @@ except Exception as e:
         Returns:
             PDF content as bytes or None if not found/not completed
         """
-        session = self.test_sessions.get(session_id)
-        if not session or session.get('status') != 'completed':
+        try:
+            # First try to get session from memory
+            session = self.test_sessions.get(session_id)
+            
+            # If not in memory, try to reconstruct from files
+            if not session or session.get('status') != 'completed':
+                session = self.reconstruct_session_from_files(session_id)
+                if not session:
+                    logger.error(f"Cannot find completed session {session_id} for PDF generation")
+                    return None
+            
+            # Generate comprehensive PDF using reportlab
+            return self._generate_comprehensive_pdf(session, session_id)
+            
+        except Exception as e:
+            logger.error(f"Error generating PDF report for session {session_id}: {e}")
             return None
+    
+    def _generate_comprehensive_pdf(self, session: dict, session_id: str) -> bytes:
+        """Generate a comprehensive PDF report with tables and charts.
         
-        # For now, return a simple text-based "PDF" (in production, use reportlab or similar)
-        report_content = f"""
-Stress Test Report - Session {session_id}
-========================================
-
-Model: {session.get('model')}
-Start Time: {session.get('start_time')}
-End Time: {session.get('end_time')}
-
-Test Parameters:
-- Requests: {session.get('params', {}).get('num_requests', 'N/A')}
-- Concurrency: {session.get('params', {}).get('concurrency', 'N/A')}
-- Input Token Range: {session.get('params', {}).get('input_tokens_range', 'N/A')}
-- Output Token Range: {session.get('params', {}).get('output_tokens_range', 'N/A')}
-
-Results:
-- QPS: {session.get('results', {}).get('qps', 'N/A'):.2f}
-- Average TTFT: {session.get('results', {}).get('avg_ttft', 'N/A'):.3f}s
-- Average Latency: {session.get('results', {}).get('avg_latency', 'N/A'):.3f}s
-- P99 TTFT: {session.get('results', {}).get('p99_ttft', 'N/A'):.3f}s
-- P99 Latency: {session.get('results', {}).get('p99_latency', 'N/A'):.3f}s
-- Throughput: {session.get('results', {}).get('tokens_per_second', 'N/A'):.2f} tokens/s
-
-Generated on: {datetime.now().isoformat()}
-        """.strip()
+        Args:
+            session: Session data dictionary
+            session_id: Session ID
+            
+        Returns:
+            PDF content as bytes
+        """
+        try:
+            from reportlab.lib.pagesizes import letter, A4
+            from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+            from reportlab.lib.units import inch
+            from reportlab.lib import colors
+            from reportlab.graphics.shapes import Drawing
+            from reportlab.graphics.charts.linecharts import HorizontalLineChart
+            from reportlab.graphics.charts.legends import Legend
+            import io
+            
+            # Create PDF buffer
+            buffer = io.BytesIO()
+            doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=72, leftMargin=72,
+                                  topMargin=72, bottomMargin=18)
+            
+            # Build story (content)
+            story = []
+            styles = getSampleStyleSheet()
+            
+            # Title
+            title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'],
+                                       fontSize=18, spaceAfter=30, alignment=1)
+            story.append(Paragraph(f"Stress Test Report", title_style))
+            story.append(Paragraph(f"Session ID: {session_id}", styles['Heading2']))
+            story.append(Spacer(1, 20))
+            
+            # Session Information
+            story.append(Paragraph("Test Session Information", styles['Heading2']))
+            
+            session_info = [
+                ['Model', session.get('model', 'N/A')],
+                ['Start Time', session.get('start_time', 'N/A')],
+                ['End Time', session.get('end_time', 'N/A')],
+                ['Status', session.get('status', 'N/A')],
+            ]
+            
+            session_table = Table(session_info, colWidths=[2*inch, 4*inch])
+            session_table.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (0,-1), colors.grey),
+                ('TEXTCOLOR', (0,0), (0,-1), colors.whitesmoke),
+                ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+                ('FONTNAME', (0,0), (-1,-1), 'Helvetica'),
+                ('FONTSIZE', (0,0), (-1,-1), 10),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 12),
+                ('BACKGROUND', (1,0), (1,-1), colors.beige),
+                ('GRID', (0,0), (-1,-1), 1, colors.black)
+            ]))
+            story.append(session_table)
+            story.append(Spacer(1, 20))
+            
+            # Test Configuration
+            story.append(Paragraph("Test Configuration", styles['Heading2']))
+            
+            params = session.get('params', {})
+            config_info = [
+                ['Concurrency', str(params.get('concurrency', 'N/A'))],
+                ['Total Requests', str(params.get('num_requests', 'N/A'))],
+                ['Input Tokens', str(params.get('input_tokens', 'N/A'))],
+                ['Output Tokens', str(params.get('output_tokens', 'N/A'))],
+                ['Temperature', str(params.get('temperature', 'N/A'))],
+            ]
+            
+            config_table = Table(config_info, colWidths=[2*inch, 4*inch])
+            config_table.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (0,-1), colors.grey),
+                ('TEXTCOLOR', (0,0), (0,-1), colors.whitesmoke),
+                ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+                ('FONTNAME', (0,0), (-1,-1), 'Helvetica'),
+                ('FONTSIZE', (0,0), (-1,-1), 10),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 12),
+                ('BACKGROUND', (1,0), (1,-1), colors.beige),
+                ('GRID', (0,0), (-1,-1), 1, colors.black)
+            ]))
+            story.append(config_table)
+            story.append(Spacer(1, 20))
+            
+            # Results section
+            results = session.get('results', {})
+            
+            if results.get('is_comprehensive') and results.get('performance_table'):
+                # Comprehensive results format
+                story.append(Paragraph("Performance Test Results", styles['Heading2']))
+                
+                # Summary statistics
+                summary = results.get('comprehensive_summary', {})
+                if summary:
+                    summary_info = [
+                        ['Total Generated Tokens', f"{summary.get('total_generated_tokens', 0):,}"],
+                        ['Total Test Time', f"{summary.get('total_test_time', 0):.2f} seconds"],
+                        ['Average Output Rate', f"{summary.get('avg_output_rate', 0):.2f} tokens/sec"],
+                        ['Best RPS Configuration', summary.get('best_rps', {}).get('config', 'N/A')],
+                        ['Best Latency Configuration', summary.get('best_latency', {}).get('config', 'N/A')],
+                    ]
+                    
+                    summary_table = Table(summary_info, colWidths=[2.5*inch, 3.5*inch])
+                    summary_table.setStyle(TableStyle([
+                        ('BACKGROUND', (0,0), (0,-1), colors.lightblue),
+                        ('TEXTCOLOR', (0,0), (0,-1), colors.black),
+                        ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+                        ('FONTNAME', (0,0), (-1,-1), 'Helvetica'),
+                        ('FONTSIZE', (0,0), (-1,-1), 9),
+                        ('BOTTOMPADDING', (0,0), (-1,-1), 8),
+                        ('BACKGROUND', (1,0), (1,-1), colors.lightcyan),
+                        ('GRID', (0,0), (-1,-1), 1, colors.black)
+                    ]))
+                    story.append(summary_table)
+                    story.append(Spacer(1, 20))
+                
+                # Detailed performance metrics table
+                story.append(Paragraph("Detailed Performance Metrics", styles['Heading3']))
+                
+                performance_table = results.get('performance_table', [])
+                if performance_table:
+                    # Create table headers
+                    headers = ['Concurrency', 'RPS', 'Avg Lat.(s)', 'P99 Lat.(s)', 
+                              'Gen tok/s', 'Tot tok/s', 'Avg TTFT(s)', 'Avg TPOT(s)', 'Success %']
+                    
+                    # Create table data
+                    table_data = [headers]
+                    for row in performance_table:
+                        table_row = [
+                            str(row.get('concurrency', 'N/A')),
+                            f"{row.get('rps', 0):.2f}",
+                            f"{row.get('avg_latency', 0):.3f}",
+                            f"{row.get('p99_latency', 0):.3f}",
+                            f"{row.get('gen_toks_per_sec', 0):.0f}",
+                            f"{row.get('total_toks_per_sec', 0):.0f}",
+                            f"{row.get('avg_ttft', 0):.3f}",
+                            f"{row.get('avg_tpot', 0):.3f}",
+                            f"{row.get('success_rate', 0):.1f}%"
+                        ]
+                        table_data.append(table_row)
+                    
+                    perf_table = Table(table_data, colWidths=[0.7*inch]*9)
+                    perf_table.setStyle(TableStyle([
+                        ('BACKGROUND', (0,0), (-1,0), colors.grey),
+                        ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+                        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+                        ('FONTNAME', (0,1), (-1,-1), 'Helvetica'),
+                        ('FONTSIZE', (0,0), (-1,-1), 8),
+                        ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+                        ('BACKGROUND', (0,1), (-1,-1), colors.beige),
+                        ('GRID', (0,0), (-1,-1), 1, colors.black)
+                    ]))
+                    story.append(perf_table)
+                
+            else:
+                # Legacy results format
+                story.append(Paragraph("Performance Metrics", styles['Heading2']))
+                
+                metrics_info = [
+                    ['QPS (Requests/sec)', f"{results.get('qps', 0):.2f}"],
+                    ['Average TTFT', f"{results.get('avg_ttft', 0):.3f} seconds"],
+                    ['Average Latency', f"{results.get('avg_latency', 0):.3f} seconds"],
+                    ['P50 TTFT', f"{results.get('p50_ttft', 0):.3f} seconds"],
+                    ['P99 TTFT', f"{results.get('p99_ttft', 0):.3f} seconds"],
+                    ['P50 Latency', f"{results.get('p50_latency', 0):.3f} seconds"],
+                    ['P99 Latency', f"{results.get('p99_latency', 0):.3f} seconds"],
+                    ['Token Throughput', f"{results.get('tokens_per_second', 0):.2f} tokens/sec"],
+                    ['Total Requests', str(results.get('total_requests', 0))],
+                    ['Successful Requests', str(results.get('successful_requests', 0))],
+                    ['Failed Requests', str(results.get('failed_requests', 0))],
+                ]
+                
+                metrics_table = Table(metrics_info, colWidths=[2.5*inch, 3.5*inch])
+                metrics_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0,0), (0,-1), colors.lightblue),
+                    ('TEXTCOLOR', (0,0), (0,-1), colors.black),
+                    ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+                    ('FONTNAME', (0,0), (-1,-1), 'Helvetica'),
+                    ('FONTSIZE', (0,0), (-1,-1), 10),
+                    ('BOTTOMPADDING', (0,0), (-1,-1), 8),
+                    ('BACKGROUND', (1,0), (1,-1), colors.lightcyan),
+                    ('GRID', (0,0), (-1,-1), 1, colors.black)
+                ]))
+                story.append(metrics_table)
+            
+            story.append(Spacer(1, 20))
+            
+            # Footer
+            story.append(Paragraph(f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", 
+                                 styles['Normal']))
+            
+            # Build PDF
+            doc.build(story)
+            
+            # Return PDF bytes
+            buffer.seek(0)
+            return buffer.getvalue()
+            
+        except ImportError as e:
+            logger.error(f"reportlab not available: {e}")
+            # Fallback to simple text format
+            return self._generate_simple_text_report(session, session_id)
+        except Exception as e:
+            logger.error(f"Error generating comprehensive PDF: {e}")
+            # Fallback to simple text format
+            return self._generate_simple_text_report(session, session_id)
+    
+    def _generate_simple_text_report(self, session: dict, session_id: str) -> bytes:
+        """Generate a simple text-based report as fallback.
         
-        return report_content.encode('utf-8')
+        Args:
+            session: Session data dictionary
+            session_id: Session ID
+            
+        Returns:
+            Text report as bytes
+        """
+        results = session.get('results', {})
+        params = session.get('params', {})
+        
+        report_lines = [
+            f"Stress Test Report - Session {session_id}",
+            "=" * 50,
+            "",
+            f"Model: {session.get('model', 'N/A')}",
+            f"Start Time: {session.get('start_time', 'N/A')}",
+            f"End Time: {session.get('end_time', 'N/A')}",
+            f"Status: {session.get('status', 'N/A')}",
+            "",
+            "Test Configuration:",
+            f"- Concurrency: {params.get('concurrency', 'N/A')}",
+            f"- Total Requests: {params.get('num_requests', 'N/A')}",
+            f"- Input Tokens: {params.get('input_tokens', 'N/A')}",
+            f"- Output Tokens: {params.get('output_tokens', 'N/A')}",
+            f"- Temperature: {params.get('temperature', 'N/A')}",
+            ""
+        ]
+        
+        if results.get('is_comprehensive') and results.get('performance_table'):
+            # Comprehensive results
+            summary = results.get('comprehensive_summary', {})
+            report_lines.extend([
+                "Performance Summary:",
+                f"- Total Generated Tokens: {summary.get('total_generated_tokens', 0):,}",
+                f"- Total Test Time: {summary.get('total_test_time', 0):.2f} seconds",
+                f"- Average Output Rate: {summary.get('avg_output_rate', 0):.2f} tokens/sec",
+                "",
+                "Detailed Metrics by Concurrency:",
+            ])
+            
+            performance_table = results.get('performance_table', [])
+            if performance_table:
+                report_lines.append(f"{'Conc.':<6} {'RPS':<8} {'Lat.(s)':<8} {'TTFT(s)':<8} {'Gen.tok/s':<10} {'Success%':<8}")
+                report_lines.append("-" * 60)
+                for row in performance_table:
+                    report_lines.append(
+                        f"{row.get('concurrency', 0):<6} "
+                        f"{row.get('rps', 0):<8.2f} "
+                        f"{row.get('avg_latency', 0):<8.3f} "
+                        f"{row.get('avg_ttft', 0):<8.3f} "
+                        f"{row.get('gen_toks_per_sec', 0):<10.0f} "
+                        f"{row.get('success_rate', 0):<8.1f}"
+                    )
+        else:
+            # Legacy results
+            report_lines.extend([
+                "Performance Metrics:",
+                f"- QPS: {results.get('qps', 0):.2f} requests/sec",
+                f"- Average TTFT: {results.get('avg_ttft', 0):.3f} seconds",
+                f"- Average Latency: {results.get('avg_latency', 0):.3f} seconds",
+                f"- Token Throughput: {results.get('tokens_per_second', 0):.2f} tokens/sec",
+                f"- Total Requests: {results.get('total_requests', 0)}",
+                f"- Successful Requests: {results.get('successful_requests', 0)}",
+                f"- Failed Requests: {results.get('failed_requests', 0)}",
+            ])
+        
+        report_lines.extend([
+            "",
+            f"Generated on: {datetime.now().isoformat()}"
+        ])
+        
+        return "\n".join(report_lines).encode('utf-8')
