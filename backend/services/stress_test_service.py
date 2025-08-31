@@ -844,7 +844,12 @@ except Exception as e:
             subfolder_results = self._collect_subfolder_results(output_dir, session_id)
             if subfolder_results:
                 logger.info(f"Found {len(subfolder_results)} subfolder results, using comprehensive format")
-                return self._process_comprehensive_results(subfolder_results, test_params, session_id)
+                comprehensive_results = self._process_comprehensive_results(subfolder_results, test_params, session_id)
+                
+                # Save comprehensive results including CSV and config files
+                self._save_results_to_output_dir(output_dir, comprehensive_results, test_params, model_key, session_id)
+                
+                return comprehensive_results
             
             # Fallback to old format processing if no subfolders found
             logger.info(f"[DEBUG] Raw results type: {type(raw_results)}, content preview: {str(raw_results)[:200]}...")
@@ -1510,12 +1515,193 @@ except Exception as e:
                 f.write(f"- Successful Requests: {results.get('successful_requests', 0)}\n")
                 f.write(f"- Failed Requests: {results.get('failed_requests', 0)}\n")
             
+            # Generate CSV and enhanced config files for comprehensive results
+            if results.get('is_comprehensive') and results.get('performance_table'):
+                self._generate_performance_csv(output_dir, results, session_id)
+                self._generate_enhanced_config(output_dir, results, test_params, model_info, session_id)
+            
             logger.info(f"Saved benchmark results to directory: {output_dir}")
             logger.info(f"Files created: eval_config.json, benchmark_results.json, summary.txt")
             
         except Exception as e:
             logger.error(f"Failed to save results to output directory {output_dir}: {e}")
             # Don't raise exception as this is not critical for the main benchmark flow
+
+    def _generate_performance_csv(self, output_dir: str, results: Dict[str, Any], session_id: str):
+        """Generate detailed performance metrics CSV file.
+        
+        Args:
+            output_dir: Output directory path
+            results: Comprehensive results with performance table
+            session_id: Session ID for logging
+        """
+        import csv
+        import os
+        
+        try:
+            performance_table = results.get('performance_table', [])
+            if not performance_table:
+                logger.warning(f"No performance table data found for session {session_id}")
+                return
+            
+            csv_file = os.path.join(output_dir, 'performance_metrics.csv')
+            
+            # Define CSV headers
+            headers = [
+                'Concurrency', 'Total_Requests', 'Succeed_Requests', 'Failed_Requests',
+                'RPS_req_s', 'Avg_Latency_s', 'P99_Latency_s', 'Avg_TTFT_s', 'P99_TTFT_s',
+                'Avg_TPOT_s', 'P99_TPOT_s', 'Gen_Throughput_tok_s', 'Total_Throughput_tok_s',
+                'Success_Rate_%'
+            ]
+            
+            with open(csv_file, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow(headers)
+                
+                for row in performance_table:
+                    # Calculate success/failure metrics
+                    total_requests = row.get('requests', 0)
+                    success_rate = row.get('success_rate', 100.0)
+                    succeed_requests = int(total_requests * success_rate / 100.0)
+                    failed_requests = total_requests - succeed_requests
+                    
+                    csv_row = [
+                        row.get('concurrency', 0),
+                        total_requests,
+                        succeed_requests,
+                        failed_requests,
+                        round(row.get('rps', 0), 4),
+                        round(row.get('avg_latency', 0), 4),
+                        round(row.get('p99_latency', 0), 4),
+                        round(row.get('avg_ttft', 0), 4),
+                        round(row.get('p99_ttft', 0), 4),
+                        round(row.get('avg_tpot', 0), 4),
+                        round(row.get('p99_tpot', 0), 4),
+                        round(row.get('gen_toks_per_sec', 0), 4),
+                        round(row.get('total_toks_per_sec', 0), 4),
+                        round(success_rate, 1)
+                    ]
+                    writer.writerow(csv_row)
+            
+            logger.info(f"Generated performance metrics CSV: {csv_file}")
+            
+        except Exception as e:
+            logger.error(f"Failed to generate performance CSV for session {session_id}: {e}")
+
+    def _generate_enhanced_config(self, output_dir: str, results: Dict[str, Any], 
+                                test_params: Dict[str, Any], model_info: Dict[str, Any], session_id: str):
+        """Generate enhanced configuration JSON file with comprehensive test details.
+        
+        Args:
+            output_dir: Output directory path
+            results: Comprehensive results 
+            test_params: Test parameters
+            model_info: Model information
+            session_id: Session ID for logging
+        """
+        import json
+        import os
+        import glob
+        from datetime import datetime
+        
+        try:
+            # Get comprehensive summary data
+            comprehensive_summary = results.get('comprehensive_summary', {})
+            performance_table = results.get('performance_table', [])
+            
+            # Extract paired combinations from performance table
+            paired_combinations = []
+            for row in performance_table:
+                paired_combinations.append({
+                    "concurrency": row.get('concurrency', 0),
+                    "requests": row.get('requests', 0)
+                })
+            
+            # Calculate test summary statistics
+            total_requests = sum(row.get('requests', 0) for row in performance_table)
+            total_successful = sum(int(row.get('requests', 0) * row.get('success_rate', 100) / 100) for row in performance_table)
+            total_failed = total_requests - total_successful
+            peak_rps = max((row.get('rps', 0) for row in performance_table), default=0)
+            peak_throughput = max((row.get('total_toks_per_sec', 0) for row in performance_table), default=0)
+            best_latency = min((row.get('avg_latency', float('inf')) for row in performance_table if row.get('avg_latency', 0) > 0), default=0)
+            
+            # Find benchmark result directories
+            benchmark_dirs = []
+            pattern = os.path.join(output_dir, "*", "*", "parallel_*_number_*")
+            for path in glob.glob(pattern):
+                rel_path = os.path.relpath(path, output_dir)
+                benchmark_dirs.append(rel_path + "/")
+            
+            # Create enhanced config
+            enhanced_config = {
+                "session_id": session_id,
+                "timestamp": datetime.now().isoformat(),
+                "model": {
+                    "model_name": model_info.get('name', model_info.get('model_path', 'Unknown')).split('/')[0],
+                    "model_path": model_info.get('model_path', 'Unknown'),
+                    "model_id": model_info.get('model_path', 'Unknown').split('/')[-1] if '/' in model_info.get('model_path', '') else 'Unknown',
+                    "tokenizer_path": test_params.get('tokenizer_path', 'Unknown')
+                },
+                "deployment_config": {
+                    "framework": test_params.get('inference_framework', 'vllm'),
+                    "instance_type": test_params.get('instance_type', 'g5.xlarge'),
+                    "tp_size": test_params.get('tp_size', 1),
+                    "dp_size": test_params.get('dp_size', 1),
+                    "platform": "EMD",
+                    "region": "us-west-2",
+                    "api_endpoint": test_params.get('api_url', 'Unknown'),
+                    "api_type": "openai"
+                },
+                "stress_test_config": {
+                    "concurrency": test_params.get('concurrency', []),
+                    "total_requests": test_params.get('num_requests', []),
+                    "paired_combinations": paired_combinations,
+                    "dataset": test_params.get('dataset', 'random'),
+                    "input_tokens": {
+                        "min": test_params.get('input_tokens', 32),
+                        "max": test_params.get('input_tokens', 32),
+                        "average": test_params.get('input_tokens', 32)
+                    },
+                    "output_tokens": {
+                        "min": test_params.get('output_tokens', 32),
+                        "max": test_params.get('output_tokens', 32),
+                        "average": test_params.get('output_tokens', 32)
+                    },
+                    "temperature": test_params.get('temperature', 0.1),
+                    "stream": test_params.get('stream', True),
+                    "seed": 42,
+                    "prefix_length": 0,
+                    "apply_chat_template": True
+                },
+                "test_results_summary": {
+                    "total_test_time": comprehensive_summary.get('total_test_time', 0),
+                    "total_requests": total_requests,
+                    "total_successful_requests": total_successful,
+                    "total_failed_requests": total_failed,
+                    "overall_success_rate": (total_successful / max(total_requests, 1)) * 100,
+                    "peak_rps": peak_rps,
+                    "peak_throughput_tok_s": peak_throughput,
+                    "best_latency_s": best_latency,
+                    "configurations_tested": len(performance_table),
+                    "total_generated_tokens": comprehensive_summary.get('total_generated_tokens', 0),
+                    "avg_output_rate": comprehensive_summary.get('avg_output_rate', 0),
+                    "best_rps_config": comprehensive_summary.get('best_rps', {}).get('config', 'N/A'),
+                    "best_latency_config": comprehensive_summary.get('best_latency', {}).get('config', 'N/A')
+                },
+                "performance_files": {
+                    "detailed_metrics_csv": "performance_metrics.csv",
+                    "benchmark_results": benchmark_dirs
+                }
+            }
+            
+            config_file = os.path.join(output_dir, 'config.json')
+            with open(config_file, 'w', encoding='utf-8') as f:
+                json.dump(enhanced_config, f, indent=2, ensure_ascii=False)
+            
+            logger.info(f"Generated enhanced config file: {config_file}")
+            
+        except Exception as e:
+            logger.error(f"Failed to generate enhanced config for session {session_id}: {e}")
 
     def _run_evalscope_with_custom_api(self, api_url: str, model_name: str, test_params: Dict[str, Any], session_id: str) -> Dict[str, Any]:
         """Run stress test using evalscope with custom API endpoint.
