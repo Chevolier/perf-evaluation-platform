@@ -46,11 +46,13 @@ def get_results_structure():
                     
                 session_id = session_dir.name
                 
-                # Look for eval_config.json to get session metadata
-                config_path = session_dir / 'eval_config.json'
+                # Look for config files to get session metadata (prefer new format)
+                config_path = session_dir / 'config.json'
                 if not config_path.exists():
-                    logger.debug(f"No eval_config.json found in {session_dir}")
-                    continue
+                    config_path = session_dir / 'eval_config.json'
+                    if not config_path.exists():
+                        logger.debug(f"No config files found in {session_dir}")
+                        continue
                 
                 try:
                     with open(config_path, 'r', encoding='utf-8') as f:
@@ -266,8 +268,11 @@ def get_results_stats():
                 if not session_dir.is_dir():
                     continue
                     
-                # Check if session has valid config
-                config_path = session_dir / 'eval_config.json'
+                # Check if session has valid config (prefer new format)
+                config_path = session_dir / 'config.json'
+                if not config_path.exists():
+                    config_path = session_dir / 'eval_config.json'
+                
                 if config_path.exists():
                     session_count += 1
                     

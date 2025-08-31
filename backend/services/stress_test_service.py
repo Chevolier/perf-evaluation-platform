@@ -1472,15 +1472,26 @@ except Exception as e:
                 }
             }
             
-            # Save eval_config.json
-            config_file = os.path.join(output_dir, 'eval_config.json')
-            with open(config_file, 'w', encoding='utf-8') as f:
-                json.dump(eval_config, f, indent=2, ensure_ascii=False)
-            
-            # Save benchmark_results.json
-            results_file = os.path.join(output_dir, 'benchmark_results.json')
-            with open(results_file, 'w', encoding='utf-8') as f:
-                json.dump(results, f, indent=2, ensure_ascii=False)
+            # Generate CSV and enhanced config files for comprehensive results
+            if results.get('is_comprehensive') and results.get('performance_table'):
+                self._generate_performance_csv(output_dir, results, session_id)
+                self._generate_enhanced_config(output_dir, results, test_params, model_info, session_id)
+                
+                # For comprehensive results, we skip the legacy files since we have better versions
+                logger.info(f"Generated comprehensive results files: performance_metrics.csv, config.json")
+            else:
+                # For legacy/fallback results, generate the old format files
+                # Save eval_config.json
+                config_file = os.path.join(output_dir, 'eval_config.json')
+                with open(config_file, 'w', encoding='utf-8') as f:
+                    json.dump(eval_config, f, indent=2, ensure_ascii=False)
+                
+                # Save benchmark_results.json
+                results_file = os.path.join(output_dir, 'benchmark_results.json')
+                with open(results_file, 'w', encoding='utf-8') as f:
+                    json.dump(results, f, indent=2, ensure_ascii=False)
+                
+                logger.info(f"Generated legacy results files: eval_config.json, benchmark_results.json")
             
             # Save summary.txt
             summary_file = os.path.join(output_dir, 'summary.txt')
@@ -1515,13 +1526,11 @@ except Exception as e:
                 f.write(f"- Successful Requests: {results.get('successful_requests', 0)}\n")
                 f.write(f"- Failed Requests: {results.get('failed_requests', 0)}\n")
             
-            # Generate CSV and enhanced config files for comprehensive results
-            if results.get('is_comprehensive') and results.get('performance_table'):
-                self._generate_performance_csv(output_dir, results, session_id)
-                self._generate_enhanced_config(output_dir, results, test_params, model_info, session_id)
-            
             logger.info(f"Saved benchmark results to directory: {output_dir}")
-            logger.info(f"Files created: eval_config.json, benchmark_results.json, summary.txt")
+            if results.get('is_comprehensive') and results.get('performance_table'):
+                logger.info(f"Files created: performance_metrics.csv, config.json, summary.txt")
+            else:
+                logger.info(f"Files created: eval_config.json, benchmark_results.json, summary.txt")
             
         except Exception as e:
             logger.error(f"Failed to save results to output directory {output_dir}: {e}")
