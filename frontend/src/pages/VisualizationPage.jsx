@@ -344,15 +344,15 @@ const VisualizationPage = () => {
           const data = metricGroups[metric];
           console.log(`Rendering chart for metric ${metric}:`, data);
           
-          // Create color mapping based on unique series
-          const uniqueSeries = [...new Set(data.map(d => d.modelLabel))];
-          const colorMapping = {};
-          uniqueSeries.forEach((series, index) => {
+          // Create simple color array - the chart library expects colors in series order
+          const uniqueSeries = [...new Set(data.map(d => d.modelLabel))].sort();
+          const colorArray = uniqueSeries.map(series => {
             const firstDataPoint = data.find(d => d.modelLabel === series);
-            colorMapping[series] = firstDataPoint.seriesColor;
+            return firstDataPoint.seriesColor;
           });
           
-          console.log(`Color mapping for ${metric}:`, colorMapping);
+          console.log(`Series order for ${metric}:`, uniqueSeries);
+          console.log(`Color array for ${metric}:`, colorArray);
           
           return (
             <Col span={12} key={metric}>
@@ -364,33 +364,13 @@ const VisualizationPage = () => {
                     yField="yValue"
                     seriesField="modelLabel"
                     smooth={true}
-                    color={(seriesName) => {
-                      console.log(`Color callback for series:`, seriesName, 'mapping:', colorMapping[seriesName]);
-                      return colorMapping[seriesName] || '#1890ff';
-                    }}
+                    color={colorArray}
                     point={{
-                      size: 8,
-                      shape: (datum) => {
-                        console.log(`Point shape for ${datum.modelLabel}:`, datum.seriesShape);
-                        return datum.seriesShape || 'circle';
-                      },
-                      style: (datum) => {
-                        console.log(`Point style for ${datum.modelLabel}:`, datum.seriesColor);
-                        return {
-                          fill: datum.seriesColor || '#1890ff',
-                          stroke: datum.seriesColor || '#1890ff',
-                          lineWidth: 2,
-                          fillOpacity: 0.9
-                        };
-                      }
+                      size: 10,
+                      shape: 'circle'
                     }}
-                    lineStyle={(datum) => {
-                      console.log(`Line style for ${datum.modelLabel}:`, datum.seriesColor, datum.seriesDashPattern);
-                      return {
-                        stroke: datum.seriesColor || '#1890ff',
-                        lineWidth: 3,
-                        lineDash: datum.seriesDashPattern || [0]
-                      };
+                    lineStyle={{
+                      lineWidth: 4
                     }}
                     legend={{
                       position: 'bottom'
