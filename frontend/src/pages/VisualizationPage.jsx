@@ -298,9 +298,12 @@ const VisualizationPage = () => {
                 seriesDashPattern: sessionDashPattern,
                 seriesIndex: styleIndex,
                 // Add color field for the chart library
-                color: sessionColor
+                color: sessionColor,
+                // Add shape field for markers
+                shape: sessionShape
               };
               chartData.push(dataPoint);
+              console.log(`Added datapoint: ${modelLabel}, shape: ${sessionShape}, color: ${sessionColor}`);
             }
           });
         });
@@ -370,16 +373,12 @@ const VisualizationPage = () => {
                     smooth={true}
                     color={colorArray}
                     point={{
-                      size: 12,
-                      shape: (datum) => {
-                        const shapes = ['circle', 'square', 'diamond', 'triangle', 'triangle-down', 'hexagon', 'bowtie', 'cross', 'tick', 'plus'];
-                        const seriesIndex = uniqueSeries.indexOf(datum.modelLabel);
-                        return shapes[seriesIndex % shapes.length];
-                      },
+                      size: 20,
+                      shapeField: 'shape',
                       style: {
                         stroke: '#fff',
-                        lineWidth: 2,
-                        fillOpacity: 0.8
+                        lineWidth: 3,
+                        fillOpacity: 0.9
                       }
                     }}
                     lineStyle={(datum) => {
