@@ -112,9 +112,12 @@ def get_results_structure():
                     continue
         
         # Convert hierarchy to tree structure for frontend
-        def build_tree(hierarchy_dict, level=0):
+        def build_tree(hierarchy_dict, level=0, path_prefix=""):
             tree = []
             for key, value in sorted(hierarchy_dict.items()):
+                # Create unique key by including the full path
+                unique_key = f"{path_prefix}/{key}" if path_prefix else key
+                
                 if isinstance(value, dict):
                     # Check if this contains sessions directly (deepest level)
                     has_direct_sessions = any(isinstance(v, list) for v in value.values())
@@ -127,7 +130,7 @@ def get_results_structure():
                                 # Sort sessions by timestamp (newest first)
                                 sessions_list.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
                                 tokens_children.append({
-                                    "key": f"{key}_{tokens_key}",
+                                    "key": f"{unique_key}_{tokens_key}",
                                     "title": tokens_key,
                                     "level": level + 1,
                                     "sessions": sessions_list,
@@ -136,7 +139,7 @@ def get_results_structure():
                         
                         if tokens_children:
                             tree.append({
-                                "key": key,
+                                "key": unique_key,
                                 "title": key,
                                 "level": level,
                                 "children": tokens_children,
@@ -144,10 +147,10 @@ def get_results_structure():
                             })
                     else:
                         # This is a parent node, recurse deeper
-                        children = build_tree(value, level + 1)
+                        children = build_tree(value, level + 1, unique_key)
                         if children:  # Only include if has valid children
                             tree.append({
-                                "key": key,
+                                "key": unique_key,
                                 "title": key,
                                 "level": level,
                                 "children": children,
