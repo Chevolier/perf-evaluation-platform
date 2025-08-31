@@ -131,10 +131,20 @@ const StressTestPage = () => {
         return str.split(',').map(v => parseInt(v.trim())).filter(n => !isNaN(n) && n > 0);
       };
 
+      const numRequestsArray = parseCommaSeparatedNumbers(values.num_requests);
+      const concurrencyArray = parseCommaSeparatedNumbers(values.concurrency);
+
+      // Validate that both arrays have the same length
+      if (numRequestsArray.length !== concurrencyArray.length) {
+        message.error(`请求总数和并发数的值数量必须相同。当前请求总数有 ${numRequestsArray.length} 个值，并发数有 ${concurrencyArray.length} 个值。`);
+        setLoading(false);
+        return;
+      }
+
       const requestBody = {
         params: {
-          num_requests: parseCommaSeparatedNumbers(values.num_requests),
-          concurrency: parseCommaSeparatedNumbers(values.concurrency),
+          num_requests: numRequestsArray,
+          concurrency: concurrencyArray,
           input_tokens: values.input_tokens,
           output_tokens: values.output_tokens,
           temperature: 0.1
@@ -434,14 +444,7 @@ const StressTestPage = () => {
         {/* Summary Header */}
         <Card title="Performance Test Summary Report" size="small" style={{ marginBottom: 16 }}>
           <Row gutter={[16, 16]}>
-            <Col span={6}>
-              <Statistic
-                title="Model"
-                value={summary?.model || 'N/A'}
-                valueStyle={{ fontSize: '16px' }}
-              />
-            </Col>
-            <Col span={6}>
+            <Col span={8}>
               <Statistic
                 title="Total Generated"
                 value={summary?.total_generated_tokens || 0}
@@ -449,7 +452,7 @@ const StressTestPage = () => {
                 valueStyle={{ color: '#3f8600' }}
               />
             </Col>
-            <Col span={6}>
+            <Col span={8}>
               <Statistic
                 title="Total Test Time"
                 value={summary?.total_test_time || 0}
@@ -458,7 +461,7 @@ const StressTestPage = () => {
                 valueStyle={{ color: '#1890ff' }}
               />
             </Col>
-            <Col span={6}>
+            <Col span={8}>
               <Statistic
                 title="Avg Output Rate"
                 value={summary?.avg_output_rate || 0}
@@ -517,6 +520,7 @@ const StressTestPage = () => {
 
     // Prepare data for charts - sort by concurrency for better visualization
     const chartData = [...tableData].sort((a, b) => a.concurrency - b.concurrency);
+    console.log('Performance chart data:', chartData);
 
     const rpsConfig = {
       data: chartData,
@@ -527,18 +531,6 @@ const StressTestPage = () => {
       point: { 
         size: 4,
         shape: 'circle'
-      },
-      tooltip: {
-        formatter: (datum) => [
-          {
-            name: 'Concurrency',
-            value: datum.concurrency
-          },
-          {
-            name: 'RPS',
-            value: `${datum.rps?.toFixed(2)} req/s`
-          }
-        ]
       },
       xAxis: {
         title: {
@@ -562,18 +554,6 @@ const StressTestPage = () => {
         size: 4,
         shape: 'circle'
       },
-      tooltip: {
-        formatter: (datum) => [
-          {
-            name: 'Concurrency',
-            value: datum.concurrency
-          },
-          {
-            name: 'Gen. Throughput',
-            value: `${datum.gen_toks_per_sec?.toFixed(0)} tok/s`
-          }
-        ]
-      },
       xAxis: {
         title: {
           text: 'Concurrency'
@@ -595,18 +575,6 @@ const StressTestPage = () => {
       point: { 
         size: 4,
         shape: 'circle'
-      },
-      tooltip: {
-        formatter: (datum) => [
-          {
-            name: 'Concurrency',
-            value: datum.concurrency
-          },
-          {
-            name: 'Total Throughput',
-            value: `${datum.total_toks_per_sec?.toFixed(0)} tok/s`
-          }
-        ]
       },
       xAxis: {
         title: {
@@ -630,18 +598,6 @@ const StressTestPage = () => {
         size: 4,
         shape: 'circle'
       },
-      tooltip: {
-        formatter: (datum) => [
-          {
-            name: 'Concurrency',
-            value: datum.concurrency
-          },
-          {
-            name: 'Average Latency',
-            value: `${datum.avg_latency?.toFixed(3)}s`
-          }
-        ]
-      },
       xAxis: {
         title: {
           text: 'Concurrency'
@@ -664,18 +620,6 @@ const StressTestPage = () => {
         size: 4,
         shape: 'circle'
       },
-      tooltip: {
-        formatter: (datum) => [
-          {
-            name: 'Concurrency',
-            value: datum.concurrency
-          },
-          {
-            name: 'Average TTFT',
-            value: `${datum.avg_ttft?.toFixed(3)}s`
-          }
-        ]
-      },
       xAxis: {
         title: {
           text: 'Concurrency'
@@ -697,18 +641,6 @@ const StressTestPage = () => {
       point: { 
         size: 4,
         shape: 'circle'
-      },
-      tooltip: {
-        formatter: (datum) => [
-          {
-            name: 'Concurrency',
-            value: datum.concurrency
-          },
-          {
-            name: 'Average TPOT',
-            value: `${datum.avg_tpot?.toFixed(3)}s`
-          }
-        ]
       },
       xAxis: {
         title: {
@@ -1139,8 +1071,8 @@ const StressTestPage = () => {
               initialValues={{
                 num_requests: "50, 100, 200",
                 concurrency: "1, 5, 10",
-                input_tokens: 200,
-                output_tokens: 500
+                input_tokens: 32,
+                output_tokens: 32
               }}
             >
               <Form.Item label="模型选择方式">
@@ -1215,6 +1147,13 @@ const StressTestPage = () => {
                 </>
               )}
 
+              <Alert
+                description="提醒：请求总数和并发数需数量相同，按顺序配对测试，如 '50,100,200' 与 '1,5,10' 进行 (50,1), (100,5), (200,10) 三组测试。"
+                type="info"
+                showIcon={false}
+                style={{ marginBottom: 8, padding: '4px 8px' }}
+              />
+
               <Form.Item
                 name="num_requests"
                 label="请求总数"
@@ -1231,12 +1170,23 @@ const StressTestPage = () => {
                       if (invalidNumbers.length > 0) {
                         return Promise.reject(new Error('请输入有效的正整数，用逗号分隔'));
                       }
+
+                      // Check if concurrency field exists and validate count match
+                      const concurrencyValue = form.getFieldValue('concurrency');
+                      if (concurrencyValue) {
+                        const concurrencyNumbers = concurrencyValue.split(',').map(v => v.trim()).filter(v => v);
+                        const validConcurrencyNumbers = concurrencyNumbers.filter(n => !isNaN(n) && parseInt(n) > 0);
+                        
+                        if (validConcurrencyNumbers.length > 0 && numbers.length !== validConcurrencyNumbers.length) {
+                          return Promise.reject(new Error(`请求总数(${numbers.length}个值)和并发数(${validConcurrencyNumbers.length}个值)的数量必须相同`));
+                        }
+                      }
                       
                       return Promise.resolve();
                     }
                   }
                 ]}
-                extra="输入多个值用逗号分隔，如: 10, 20, 50, 100"
+                extra="可以输入多个值，用英文逗号分隔，如: 10, 20, 50, 100"
               >
                 <Input
                   placeholder="10, 20, 50, 100"
@@ -1260,12 +1210,23 @@ const StressTestPage = () => {
                       if (invalidNumbers.length > 0) {
                         return Promise.reject(new Error('请输入有效的正整数，用逗号分隔'));
                       }
+
+                      // Check if num_requests field exists and validate count match
+                      const numRequestsValue = form.getFieldValue('num_requests');
+                      if (numRequestsValue) {
+                        const requestNumbers = numRequestsValue.split(',').map(v => v.trim()).filter(v => v);
+                        const validRequestNumbers = requestNumbers.filter(n => !isNaN(n) && parseInt(n) > 0);
+                        
+                        if (validRequestNumbers.length > 0 && numbers.length !== validRequestNumbers.length) {
+                          return Promise.reject(new Error(`并发数(${numbers.length}个值)和请求总数(${validRequestNumbers.length}个值)的数量必须相同`));
+                        }
+                      }
                       
                       return Promise.resolve();
                     }
                   }
                 ]}
-                extra="输入多个值用逗号分隔，如: 1, 5, 10, 20"
+                extra="可以输入多个值，用英文逗号分隔，如: 1, 5, 10, 20"
               >
                 <Input
                   placeholder="1, 5, 10, 20"

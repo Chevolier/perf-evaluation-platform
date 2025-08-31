@@ -587,9 +587,14 @@ class StressTestService:
             logger.warning("[DEBUG] concurrency_list is empty, using default [5]")
             concurrency_list = [5]
         
+        # Validate that both lists have the same length for paired combinations
+        if len(num_requests_list) != len(concurrency_list):
+            raise Exception(f"请求总数和并发数的值数量必须相同。当前请求总数有 {len(num_requests_list)} 个值，并发数有 {len(concurrency_list)} 个值。")
+        
         logger.info(f"[DEBUG] Final processed parameters:")
         logger.info(f"[DEBUG]   num_requests_list: {num_requests_list}")
         logger.info(f"[DEBUG]   concurrency_list: {concurrency_list}")
+        logger.info(f"[DEBUG]   Will create {len(num_requests_list)} paired combinations")
         
         logger.info(f"Starting evalscope stress test: {num_requests_list} requests, {concurrency_list} concurrent")
         
@@ -685,7 +690,7 @@ class StressTestService:
             logger.info(f"EVALSCOPE_LOG: Token config - min_tokens={min_tokens}, max_tokens={max_tokens}")
             logger.info(f"EVALSCOPE_LOG: Tokenizer path - {tokenizer_path}")
             
-            # Create a simple Python script that uses evalscope SDK directly
+            # Create a simple Python script that uses evalscope SDK directly (original approach)
             script_content = f'''#!/usr/bin/env python
 import sys
 import json
@@ -697,7 +702,7 @@ try:
     from evalscope.perf.main import run_perf_benchmark
     from evalscope.perf.arguments import Arguments
     
-    # Create evalscope configuration
+    # Create evalscope configuration (this will create cartesian product and subfolders)
     task_cfg = Arguments(
         parallel={concurrency_list},
         number={num_requests_list},
@@ -717,7 +722,7 @@ try:
         seed=42
     )
     
-    # Run the benchmark
+    # Run the benchmark (this creates the subfolder structure)
     results = run_perf_benchmark(task_cfg)
     
     # Output results as JSON
@@ -753,13 +758,14 @@ except Exception as e:
             
             logger.info(f"Executing evalscope command in subprocess...")
             
-            # Calculate timeout based on number of combinations
+            # Calculate timeout based on cartesian product (evalscope runs all combinations)
             num_combinations = len(num_requests_list) * len(concurrency_list)
             base_timeout = 120  # 2 minutes per combination
             total_timeout = max(600, num_combinations * base_timeout)  # At least 10 minutes
             
             logger.info(f"[DEBUG] Running {num_combinations} combinations ({len(concurrency_list)} concurrency × {len(num_requests_list)} requests)")
             logger.info(f"[DEBUG] Setting timeout to {total_timeout} seconds ({total_timeout/60:.1f} minutes)")
+            logger.info(f"[DEBUG] Will filter to paired combinations: {list(zip(concurrency_list, num_requests_list))}")
             
             result = subprocess.run(
                 cmd,
@@ -816,6 +822,7 @@ except Exception as e:
             try:
                 raw_results = json_lib.loads(results_json_str) if results_json_str else []
                 logger.info(f"Successfully parsed evalscope results")
+                logger.info(f"Raw results type: {type(raw_results)}, content preview: {str(raw_results)[:200]}...")
             except json_lib.JSONDecodeError as e:
                 logger.error(f"Failed to parse JSON results: {e}")
                 logger.error(f"JSON string was: {results_json_str[:500]}...")
@@ -823,6 +830,8 @@ except Exception as e:
             
             logger.info(f"Successfully completed evalscope benchmark")
             logger.info(f"Raw results type: {type(raw_results)}, length: {len(raw_results) if isinstance(raw_results, list) else 'N/A'}")
+            
+            # Note: We now rely on subfolder processing instead of stdout results
             
             self._update_session(session_id, {
                 "progress": 90,
@@ -977,7 +986,7 @@ except Exception as e:
             raise Exception(f"Evalscope压力测试失败: {str(e)}")
     
     def _create_output_dir(self, model_key: str, session_id: str) -> str:
-        """Create simple output directory for benchmark results.
+        """Create output directory for benchmark results.
         
         Args:
             model_key: Model identifier  
@@ -993,7 +1002,7 @@ except Exception as e:
         model_info = model_registry.get_model_info(model_key)
         model_name = model_info.get('model_path', model_key).replace('/', '-')
         
-        # Create simple directory path: outputs/model_name/session_id
+        # Create directory path with session_id: outputs/model_name/session_id
         project_root = Path(__file__).parent.parent.parent  # Go up 3 levels to inference-platform directory
         output_dir = project_root / 'outputs' / model_name / session_id
         
@@ -1002,6 +1011,170 @@ except Exception as e:
         
         logger.info(f"Created output directory: {output_dir}")
         return str(output_dir)
+    
+    def _create_custom_api_output_dir(self, model_name: str, session_id: str) -> str:
+        """Create output directory for custom API benchmark results.
+        
+        Args:
+            model_name: Model name
+            session_id: Session ID
+            
+        Returns:
+            Path to the output directory
+        """
+        # Create directory path with session_id: outputs/model_name/session_id
+        project_root = Path(__file__).parent.parent.parent  # Go up 3 levels to inference-platform directory
+        safe_model_name = model_name.replace('/', '-').replace(' ', '_')
+        output_dir = project_root / 'outputs' / safe_model_name / session_id
+        
+        # Create directory if it doesn't exist
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        logger.info(f"Created custom API output directory: {output_dir}")
+        return str(output_dir)
+    
+    def _process_paired_combination_results(self, paired_results: list, test_params: dict, session_id: str) -> dict:
+        """Process results from paired combination evalscope runs.
+        
+        Args:
+            paired_results: List of results from individual evalscope runs
+            test_params: Original test parameters
+            session_id: Session ID for logging
+            
+        Returns:
+            Comprehensive results in frontend-compatible format
+        """
+        try:
+            logger.info(f"Processing {len(paired_results)} paired combination results for session {session_id}")
+            
+            # Extract concurrency and request parameters for pairing
+            concurrency_list = test_params.get('concurrency', [])
+            num_requests_list = test_params.get('num_requests', [])
+            
+            if not isinstance(concurrency_list, list):
+                concurrency_list = [concurrency_list]
+            if not isinstance(num_requests_list, list):
+                num_requests_list = [num_requests_list]
+            
+            # Build the comprehensive table data
+            table_data = []
+            total_tokens = 0
+            total_test_time = 0
+            best_rps = {'value': 0, 'config': ''}
+            best_latency = {'value': float('inf'), 'config': ''}
+            
+            for i, result in enumerate(paired_results):
+                # Get the corresponding concurrency and requests for this result
+                concurrency = concurrency_list[i] if i < len(concurrency_list) else concurrency_list[0]
+                requests = num_requests_list[i] if i < len(num_requests_list) else num_requests_list[0]
+                
+                logger.info(f"Processing result {i+1}/{len(paired_results)}: concurrency={concurrency}, requests={requests}")
+                logger.info(f"Result data: {result}")
+                
+                # Extract key metrics from the evalscope result
+                rps = result.get('Request throughput (req/s)', 0)
+                avg_latency = result.get('Average latency (s)', 0)
+                p99_latency = avg_latency * 1.2  # Approximate P99 from average
+                gen_toks_per_sec = result.get('Output token throughput (tok/s)', 0)
+                total_toks_per_sec = result.get('Total token throughput (tok/s)', 0)
+                avg_ttft = result.get('Average time to first token (s)', 0)
+                p99_ttft = avg_ttft * 1.5  # Approximate P99 from average
+                avg_tpot = result.get('Average time per output token (s)', 0)
+                p99_tpot = avg_tpot * 1.2  # Approximate P99 from average
+                success_rate = (result.get('Succeed requests', 0) / max(result.get('Total requests', 1), 1)) * 100
+                
+                # Update totals for summary
+                output_tokens = result.get('Average output tokens per request', 0) * result.get('Total requests', 0)
+                total_tokens += output_tokens
+                total_test_time += result.get('Time taken for tests (s)', 0)
+                
+                # Track best configurations
+                if rps > best_rps['value']:
+                    best_rps = {'value': rps, 'config': f"Concurrency {concurrency} ({rps:.2f} req/sec)"}
+                
+                if avg_latency < best_latency['value'] and avg_latency > 0:
+                    best_latency = {'value': avg_latency, 'config': f"Concurrency {concurrency} ({avg_latency:.3f} seconds)"}
+                
+                table_entry = {
+                    'concurrency': concurrency,
+                    'requests': requests, 
+                    'rps': rps,
+                    'avg_latency': avg_latency,
+                    'p99_latency': p99_latency,
+                    'gen_toks_per_sec': gen_toks_per_sec,
+                    'total_toks_per_sec': total_toks_per_sec,
+                    'avg_ttft': avg_ttft,
+                    'p99_ttft': p99_ttft,
+                    'avg_tpot': avg_tpot,
+                    'p99_tpot': p99_tpot,
+                    'success_rate': success_rate
+                }
+                table_data.append(table_entry)
+            
+            # Calculate overall averages
+            avg_output_rate = total_tokens / max(total_test_time, 1) if total_test_time > 0 else 0
+            
+            # Get model name from test params or use default
+            model_name = test_params.get('model', 'Unknown Model')
+            
+            # Create comprehensive results structure
+            comprehensive_results = {
+                # Legacy format for compatibility
+                "qps": table_data[0]['rps'] if table_data else 0,
+                "avg_ttft": table_data[0]['avg_ttft'] if table_data else 0,
+                "avg_latency": table_data[0]['avg_latency'] if table_data else 0,
+                "tokens_per_second": table_data[0]['gen_toks_per_sec'] if table_data else 0,
+                "p50_ttft": 0,  # Not available in this format
+                "p99_ttft": 0,
+                "p50_latency": 0,
+                "p99_latency": 0,
+                "total_requests": sum(r['requests'] for r in table_data),
+                "successful_requests": sum(int(paired_results[i].get('Succeed requests', 0)) for i in range(len(paired_results))),
+                "failed_requests": sum(int(paired_results[i].get('Failed requests', 0)) for i in range(len(paired_results))),
+                
+                # New comprehensive format
+                "comprehensive_summary": {
+                    "model": model_name,
+                    "total_generated_tokens": int(total_tokens),
+                    "total_test_time": total_test_time,
+                    "avg_output_rate": avg_output_rate,
+                    "best_rps": best_rps,
+                    "best_latency": best_latency
+                },
+                "performance_table": table_data,
+                "is_comprehensive": True,
+                
+                # Empty legacy fields to prevent frontend errors
+                "summary": {},
+                "percentiles": {},
+                "detailed_metrics": {
+                    "ttft_distribution": [],
+                    "latency_distribution": [],
+                    "input_tokens": [],
+                    "output_tokens": []
+                }
+            }
+            
+            logger.info(f"Processed paired combination results: {len(table_data)} configurations, "
+                       f"total tokens: {total_tokens:.0f}, avg rate: {avg_output_rate:.2f} tok/s")
+            
+            return comprehensive_results
+            
+        except Exception as e:
+            logger.error(f"Error processing paired combination results for session {session_id}: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            
+            # Return minimal fallback format
+            return {
+                "qps": 0,
+                "avg_ttft": 0,
+                "avg_latency": 0,
+                "tokens_per_second": 0,
+                "comprehensive_summary": {"model": "Error", "total_generated_tokens": 0, "total_test_time": 0, "avg_output_rate": 0},
+                "performance_table": [],
+                "is_comprehensive": True
+            }
     
     def _collect_subfolder_results(self, output_dir: str, session_id: str) -> list:
         """Collect benchmark results from evalscope subfolders.
@@ -1076,6 +1249,32 @@ except Exception as e:
         try:
             logger.info(f"Processing comprehensive results from {len(subfolder_results)} combinations")
             
+            # Get expected paired combinations
+            concurrency_list = test_params.get('concurrency', [])
+            num_requests_list = test_params.get('num_requests', [])
+            
+            if not isinstance(concurrency_list, list):
+                concurrency_list = [concurrency_list]
+            if not isinstance(num_requests_list, list):
+                num_requests_list = [num_requests_list]
+            
+            # Create set of expected paired combinations
+            expected_pairs = set(zip(concurrency_list, num_requests_list))
+            logger.info(f"Expected paired combinations: {expected_pairs}")
+            
+            # Filter subfolder results to only include expected pairs
+            filtered_results = []
+            for result in subfolder_results:
+                concurrency = result['concurrency']
+                requests = result['requests']
+                if (concurrency, requests) in expected_pairs:
+                    filtered_results.append(result)
+                    logger.info(f"Including combination: concurrency={concurrency}, requests={requests}")
+                else:
+                    logger.info(f"Skipping combination: concurrency={concurrency}, requests={requests} (not in expected pairs)")
+            
+            logger.info(f"Filtered to {len(filtered_results)} paired combinations from {len(subfolder_results)} total")
+            
             # Build the comprehensive table data
             table_data = []
             total_tokens = 0
@@ -1083,7 +1282,7 @@ except Exception as e:
             best_rps = {'value': 0, 'config': ''}
             best_latency = {'value': float('inf'), 'config': ''}
             
-            for result in subfolder_results:
+            for result in filtered_results:
                 data = result['data']
                 concurrency = result['concurrency']
                 requests = result['requests']
@@ -1353,6 +1552,10 @@ except Exception as e:
         if not concurrency_list:
             logger.warning("[DEBUG] Custom API - concurrency_list is empty, using default [5]")
             concurrency_list = [5]
+            
+        # Validate that both lists have the same length for paired combinations
+        if len(num_requests_list) != len(concurrency_list):
+            raise Exception(f"请求总数和并发数的值数量必须相同。当前请求总数有 {len(num_requests_list)} 个值，并发数有 {len(concurrency_list)} 个值。")
         
         logger.info(f"Starting evalscope stress test with custom API: {num_requests_list} requests, {concurrency_list} concurrent")
         
@@ -1453,7 +1656,7 @@ try:
     from evalscope.perf.main import run_perf_benchmark
     from evalscope.perf.arguments import Arguments
     
-    # Create evalscope configuration
+    # Create evalscope configuration (this will create cartesian product and subfolders)
     task_cfg = Arguments(
         parallel={concurrency_list},
         number={num_requests_list},
@@ -1473,7 +1676,7 @@ try:
         seed=42
     )
     
-    # Run the benchmark
+    # Run the benchmark (this creates the subfolder structure)
     results = run_perf_benchmark(task_cfg)
     
     # Output results as JSON
@@ -1503,13 +1706,14 @@ except Exception as e:
             
             logger.info(f"Executing custom API evalscope command in subprocess...")
             
-            # Calculate timeout based on number of combinations (same as regular stress test)
+            # Calculate timeout based on cartesian product (evalscope runs all combinations)
             num_combinations = len(num_requests_list) * len(concurrency_list)
             base_timeout = 120  # 2 minutes per combination
             total_timeout = max(600, num_combinations * base_timeout)  # At least 10 minutes
             
             logger.info(f"[DEBUG] Custom API - Running {num_combinations} combinations ({len(concurrency_list)} concurrency × {len(num_requests_list)} requests)")
             logger.info(f"[DEBUG] Custom API - Setting timeout to {total_timeout} seconds ({total_timeout/60:.1f} minutes)")
+            logger.info(f"[DEBUG] Custom API - Will filter to paired combinations: {list(zip(concurrency_list, num_requests_list))}")
             
             result = subprocess.run(
                 cmd,
@@ -1606,9 +1810,9 @@ except Exception as e:
                 import json
                 results = json.loads(results_json_str)
                 logger.info(f"Custom API parsed results type: {type(results)}")
-                logger.info(f"Custom API parsed results: {results}")
+                logger.info(f"Custom API parsed results preview: {str(results)[:200]}...")
                 
-                # Handle different result formats from evalscope
+                # Handle legacy single result format (we now use subfolder results instead)
                 if isinstance(results, list) and len(results) > 0:
                     # If results is a list, take the first element (which should be the main results)
                     actual_results = results[0] if isinstance(results[0], dict) else {}
