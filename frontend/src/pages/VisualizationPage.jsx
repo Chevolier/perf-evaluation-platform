@@ -374,11 +374,11 @@ const VisualizationPage = () => {
                     color={colorArray}
                     point={{
                       size: 20,
-                      shapeField: 'shape',
+                      shape: 'circle',
                       style: {
+                        fillOpacity: 0.8,
                         stroke: '#fff',
-                        lineWidth: 3,
-                        fillOpacity: 0.9
+                        lineWidth: 2
                       }
                     }}
                     lineStyle={(datum) => {
