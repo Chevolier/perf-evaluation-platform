@@ -738,8 +738,8 @@ class StressTestService:
                 model_name = f"{model_path}/{deployment_tag}"
             else:
                 model_name = model_path
-            # Use local tokenizer path
-            tokenizer_path = "/home/ec2-user/SageMaker/efs/Models/Qwen3-32B-AWQ"
+            # Use appropriate tokenizer path based on model
+            tokenizer_path = self._get_tokenizer_path(model_name)
             
         elif model_registry.is_bedrock_model(model_key):
             # Bedrock models don't support direct stress testing via evalscope
