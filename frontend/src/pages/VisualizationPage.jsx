@@ -296,7 +296,9 @@ const VisualizationPage = () => {
                 seriesColor: sessionColor,
                 seriesShape: sessionShape,
                 seriesDashPattern: sessionDashPattern,
-                seriesIndex: styleIndex
+                seriesIndex: styleIndex,
+                // Add color field for the chart library
+                color: sessionColor
               };
               chartData.push(dataPoint);
             }
@@ -353,6 +355,7 @@ const VisualizationPage = () => {
           
           console.log(`Series order for ${metric}:`, uniqueSeries);
           console.log(`Color array for ${metric}:`, colorArray);
+          console.log(`Sample data points for ${metric}:`, data.slice(0, 2));
           
           return (
             <Col span={12} key={metric}>
@@ -363,15 +366,18 @@ const VisualizationPage = () => {
                     xField="concurrency"
                     yField="yValue"
                     seriesField="modelLabel"
+                    colorField="modelLabel"
                     smooth={true}
-                    theme={{
-                      colors10: ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff']
-                    }}
+                    color={['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff']}
                     point={{
-                      size: 10
+                      size: 10,
+                      style: {
+                        stroke: '#fff',
+                        lineWidth: 2,
+                      }
                     }}
-                    line={{
-                      size: 4
+                    lineStyle={{
+                      lineWidth: 4
                     }}
                     legend={{
                       position: 'bottom'
