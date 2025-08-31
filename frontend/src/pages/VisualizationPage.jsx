@@ -368,16 +368,33 @@ const VisualizationPage = () => {
                     seriesField="modelLabel"
                     colorField="modelLabel"
                     smooth={true}
-                    color={['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff']}
+                    color={colorArray}
                     point={{
-                      size: 10,
+                      size: 12,
+                      shape: (datum) => {
+                        const shapes = ['circle', 'square', 'diamond', 'triangle', 'triangle-down', 'hexagon', 'bowtie', 'cross', 'tick', 'plus'];
+                        const seriesIndex = uniqueSeries.indexOf(datum.modelLabel);
+                        return shapes[seriesIndex % shapes.length];
+                      },
                       style: {
                         stroke: '#fff',
                         lineWidth: 2,
+                        fillOpacity: 0.8
                       }
                     }}
-                    lineStyle={{
-                      lineWidth: 4
+                    lineStyle={(datum) => {
+                      const dashPatterns = [
+                        undefined, // solid
+                        [8, 8], // dashed
+                        [2, 4], // dotted
+                        [8, 4, 2, 4], // dash-dot
+                        [8, 4, 2, 4, 2, 4] // dash-dot-dot
+                      ];
+                      const seriesIndex = uniqueSeries.indexOf(datum.modelLabel);
+                      return {
+                        lineWidth: 4,
+                        lineDash: dashPatterns[seriesIndex % dashPatterns.length]
+                      };
                     }}
                     legend={{
                       position: 'bottom'
