@@ -2243,6 +2243,92 @@ except Exception as e:
             logger.error(f"Error generating PDF report for session {session_id}: {e}")
             return None
     
+    def _generate_performance_charts(self, performance_table: list, session_id: str) -> list:
+        """Generate performance charts and return list of image paths.
+        
+        Args:
+            performance_table: Performance data table
+            session_id: Session ID for temporary file naming
+            
+        Returns:
+            List of temporary image file paths
+        """
+        import matplotlib.pyplot as plt
+        import matplotlib
+        matplotlib.use('Agg')  # Use non-interactive backend
+        import tempfile
+        import os
+        
+        chart_files = []
+        
+        if not performance_table:
+            return chart_files
+        
+        try:
+            # Extract data for charts
+            concurrency = [row['concurrency'] for row in performance_table]
+            rps = [row['rps'] for row in performance_table]
+            avg_latency = [row['avg_latency'] for row in performance_table]
+            avg_ttft = [row['avg_ttft'] for row in performance_table]
+            gen_throughput = [row['gen_toks_per_sec'] for row in performance_table]
+            total_throughput = [row['total_toks_per_sec'] for row in performance_table]
+            avg_tpot = [row['avg_tpot'] for row in performance_table]
+            
+            # Set up the plotting style
+            plt.style.use('default')
+            
+            # Create 6 charts matching the frontend
+            charts_config = [
+                {'data': rps, 'title': 'RPS vs Concurrency', 'ylabel': 'Requests per Second', 'color': '#1f77b4'},
+                {'data': gen_throughput, 'title': 'Gen. Throughput vs Concurrency', 'ylabel': 'Generated Tokens per Second', 'color': '#ff7f0e'},
+                {'data': total_throughput, 'title': 'Total Throughput vs Concurrency', 'ylabel': 'Total Tokens per Second', 'color': '#2ca02c'},
+                {'data': avg_latency, 'title': 'Average Latency vs Concurrency', 'ylabel': 'Latency (seconds)', 'color': '#d62728'},
+                {'data': avg_ttft, 'title': 'Average TTFT vs Concurrency', 'ylabel': 'TTFT (seconds)', 'color': '#9467bd'},
+                {'data': avg_tpot, 'title': 'Average TPOT vs Concurrency', 'ylabel': 'TPOT (seconds)', 'color': '#8c564b'}
+            ]
+            
+            for i, chart_config in enumerate(charts_config):
+                fig, ax = plt.subplots(figsize=(8, 6))
+                
+                # Plot line with markers
+                ax.plot(concurrency, chart_config['data'], 
+                       marker='o', linewidth=2, markersize=8, 
+                       color=chart_config['color'], markerfacecolor='white', 
+                       markeredgecolor=chart_config['color'], markeredgewidth=2)
+                
+                # Customize the chart
+                ax.set_title(chart_config['title'], fontsize=14, fontweight='bold', pad=20)
+                ax.set_xlabel('Concurrency', fontsize=12)
+                ax.set_ylabel(chart_config['ylabel'], fontsize=12)
+                ax.grid(True, alpha=0.3)
+                ax.set_facecolor('#fafafa')
+                
+                # Add value labels on points
+                for j, (x, y) in enumerate(zip(concurrency, chart_config['data'])):
+                    ax.annotate(f'{y:.2f}', (x, y), textcoords="offset points", 
+                               xytext=(0,10), ha='center', fontsize=9)
+                
+                # Save to temporary file
+                temp_file = tempfile.NamedTemporaryFile(suffix=f'_chart_{i}_{session_id}.png', delete=False)
+                plt.tight_layout()
+                plt.savefig(temp_file.name, dpi=150, bbox_inches='tight', facecolor='white')
+                plt.close()
+                
+                chart_files.append(temp_file.name)
+                logger.info(f"Generated chart {i+1}/6: {chart_config['title']} -> {temp_file.name}")
+            
+            return chart_files
+            
+        except Exception as e:
+            logger.error(f"Error generating performance charts for session {session_id}: {e}")
+            # Clean up any created files
+            for file_path in chart_files:
+                try:
+                    os.unlink(file_path)
+                except:
+                    pass
+            return []
+    
     def _generate_comprehensive_pdf(self, session: dict, session_id: str) -> bytes:
         """Generate a comprehensive PDF report with tables and charts.
         
@@ -2255,19 +2341,19 @@ except Exception as e:
         """
         try:
             from reportlab.lib.pagesizes import letter, A4
-            from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+            from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak, Image
             from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
             from reportlab.lib.units import inch
             from reportlab.lib import colors
-            from reportlab.graphics.shapes import Drawing
-            from reportlab.graphics.charts.linecharts import HorizontalLineChart
-            from reportlab.graphics.charts.legends import Legend
             import io
             
             # Create PDF buffer
             buffer = io.BytesIO()
             doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=72, leftMargin=72,
                                   topMargin=72, bottomMargin=18)
+            
+            # Initialize chart files list for cleanup
+            chart_files = []
             
             # Build story (content)
             story = []
@@ -2400,6 +2486,35 @@ except Exception as e:
                         ('GRID', (0,0), (-1,-1), 1, colors.black)
                     ]))
                     story.append(perf_table)
+                    story.append(Spacer(1, 20))
+                    
+                    # Generate and add performance charts
+                    story.append(Paragraph("Performance Charts", styles['Heading3']))
+                    story.append(Spacer(1, 10))
+                    
+                    chart_files.extend(self._generate_performance_charts(performance_table, session_id))
+                    if chart_files:
+                        # Add charts to PDF (2 per page)
+                        for i, chart_file in enumerate(chart_files):
+                            try:
+                                from reportlab.platypus import Image
+                                
+                                # Add chart image
+                                img = Image(chart_file, width=5*inch, height=3.75*inch)
+                                story.append(img)
+                                story.append(Spacer(1, 15))
+                                
+                                # Add page break after every 2 charts (except the last)
+                                if (i + 1) % 2 == 0 and i < len(chart_files) - 1:
+                                    from reportlab.platypus import PageBreak
+                                    story.append(PageBreak())
+                                    
+                            except Exception as e:
+                                logger.error(f"Error adding chart {chart_file} to PDF: {e}")
+                                continue
+                    else:
+                        story.append(Paragraph("Charts could not be generated.", styles['Normal']))
+                        story.append(Spacer(1, 10))
                 
             else:
                 # Legacy results format
@@ -2441,6 +2556,15 @@ except Exception as e:
             # Build PDF
             doc.build(story)
             
+            # Clean up temporary chart files
+            for chart_file in chart_files:
+                try:
+                    import os
+                    os.unlink(chart_file)
+                    logger.info(f"Cleaned up chart file: {chart_file}")
+                except Exception as e:
+                    logger.warning(f"Could not clean up chart file {chart_file}: {e}")
+            
             # Return PDF bytes
             buffer.seek(0)
             return buffer.getvalue()
@@ -2451,6 +2575,13 @@ except Exception as e:
             return self._generate_simple_text_report(session, session_id)
         except Exception as e:
             logger.error(f"Error generating comprehensive PDF: {e}")
+            # Clean up temporary chart files on error
+            for chart_file in chart_files:
+                try:
+                    import os
+                    os.unlink(chart_file)
+                except:
+                    pass
             # Fallback to simple text format
             return self._generate_simple_text_report(session, session_id)
     
