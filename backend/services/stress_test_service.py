@@ -1941,9 +1941,8 @@ except Exception as e:
             tokenizer_path = self._get_tokenizer_path(model_name)
             logger.info(f"[DEBUG] Using tokenizer path: {tokenizer_path}")
             
-            # Create output directory
-            output_dir = f"/tmp/stress_test_{session_id}"
-            Path(output_dir).mkdir(parents=True, exist_ok=True)
+            # Create output directory using the same structure as regular model tests
+            output_dir = self._create_custom_api_output_dir(model_name, session_id)
             
             # Store output directory in session
             self.test_sessions[session_id]["output_directory"] = output_dir
