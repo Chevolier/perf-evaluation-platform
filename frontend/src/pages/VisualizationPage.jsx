@@ -233,13 +233,41 @@ const VisualizationPage = () => {
     );
   };
 
-  // Prepare summary chart data (metrics vs concurrency)
+  // Prepare summary chart data (metrics vs concurrency) with styling info
   const prepareSummaryChartData = () => {
     const chartData = [];
+    
+    // Create stable style mapping first
+    const colors = ['#1890ff', '#52c41a', '#faad14', '#f5222d', '#722ed1', '#13c2c2', '#eb2f96', '#fa8c16', '#a0d911', '#2f54eb'];
+    const shapes = ['circle', 'square', 'diamond', 'triangle', 'triangle-down', 'hexagon', 'bowtie', 'cross', 'tick', 'plus'];
+    const dashPatterns = [
+      [0], // solid
+      [4, 4], // dashed
+      [2, 2], // dotted
+      [8, 4, 2, 4], // dash-dot
+      [8, 4, 2, 4, 2, 4], // dash-dot-dot
+      [12, 4], // long dash
+      [2, 6], // sparse dot
+      [6, 2, 2, 2], // dash-dot short
+      [10, 2], // long dash short
+      [4, 2, 4, 6] // complex pattern
+    ];
+    
+    // Get all unique sessions sorted for consistent indexing
+    const uniqueSessions = [...new Set(Object.values(resultData).map(r => `${r.model}_${r.instance_type}_${r.framework}_${r.session_id}`))].sort();
+    console.log('Unique sessions for styling:', uniqueSessions);
     
     Object.entries(resultData).forEach(([key, result]) => {
       const performanceData = result.data?.performance_data || [];
       const modelLabel = `${result.model}_${result.instance_type}_${result.framework}_${result.session_id}`;
+      
+      // Get style index for this session
+      const styleIndex = uniqueSessions.indexOf(modelLabel);
+      const sessionColor = colors[styleIndex % colors.length];
+      const sessionShape = shapes[styleIndex % shapes.length];
+      const sessionDashPattern = dashPatterns[styleIndex % dashPatterns.length];
+      
+      console.log(`Session ${modelLabel} gets index ${styleIndex}, color ${sessionColor}, shape ${sessionShape}`);
       
       if (performanceData && Array.isArray(performanceData)) {
         // Process each concurrency level from the CSV data
@@ -263,9 +291,13 @@ const VisualizationPage = () => {
                 metric: metric.name,
                 yValue: metric.value,
                 modelLabel,
-                session: result.session_id
+                session: result.session_id,
+                // Add styling info directly to data points
+                seriesColor: sessionColor,
+                seriesShape: sessionShape,
+                seriesDashPattern: sessionDashPattern,
+                seriesIndex: styleIndex
               };
-              console.log('Adding summary data point:', dataPoint);
               chartData.push(dataPoint);
             }
           });
@@ -284,10 +316,6 @@ const VisualizationPage = () => {
     if (chartData.length === 0) {
       return <Empty description="No summary data available" />;
     }
-
-    // Create stable style mapping for all series
-    const styleMap = createSeriesStyleMap();
-    console.log('Style Map:', styleMap);
 
     // Define the 6 specific metrics requested (in display order)
     const allowedMetrics = [
@@ -315,6 +343,10 @@ const VisualizationPage = () => {
         {allowedMetrics.filter(metric => metricGroups[metric]).map((metric) => {
           const data = metricGroups[metric];
           console.log(`Rendering chart for metric ${metric}:`, data);
+          
+          // Extract unique colors for this metric's data
+          const uniqueColors = [...new Set(data.map(d => d.seriesColor))];
+          
           return (
             <Col span={12} key={metric}>
               <Card title={metric} size="small">
@@ -325,35 +357,26 @@ const VisualizationPage = () => {
                     yField="yValue"
                     seriesField="modelLabel"
                     smooth={true}
-                    color={(datum) => {
-                      const style = styleMap[datum.modelLabel];
-                      return style ? style.color : '#1890ff';
-                    }}
+                    color={uniqueColors}
                     point={{
                       size: 8,
                       shape: (datum) => {
-                        const style = styleMap[datum.modelLabel];
-                        return style ? style.shape : 'circle';
+                        return datum.seriesShape || 'circle';
                       },
                       style: (datum) => {
-                        const style = styleMap[datum.modelLabel];
-                        const color = style ? style.color : '#1890ff';
                         return {
-                          fill: color,
-                          stroke: color,
+                          fill: datum.seriesColor || '#1890ff',
+                          stroke: datum.seriesColor || '#1890ff',
                           lineWidth: 2,
                           fillOpacity: 0.9
                         };
                       }
                     }}
                     lineStyle={(datum) => {
-                      const style = styleMap[datum.modelLabel];
-                      const color = style ? style.color : '#1890ff';
-                      const dashPattern = style ? style.dashPattern : [0];
                       return {
-                        stroke: color,
+                        stroke: datum.seriesColor || '#1890ff',
                         lineWidth: 3,
-                        lineDash: dashPattern
+                        lineDash: datum.seriesDashPattern || [0]
                       };
                     }}
                     legend={{
@@ -405,38 +428,6 @@ const VisualizationPage = () => {
       return 'seconds';
     }
     return '';
-  };
-
-  // Create a stable mapping of series styles
-  const createSeriesStyleMap = () => {
-    const colors = ['#1890ff', '#52c41a', '#faad14', '#f5222d', '#722ed1', '#13c2c2', '#eb2f96', '#fa8c16', '#a0d911', '#2f54eb'];
-    const shapes = ['circle', 'square', 'diamond', 'triangle', 'triangle-down', 'hexagon', 'bowtie', 'cross', 'tick', 'plus'];
-    const dashPatterns = [
-      [0], // solid
-      [4, 4], // dashed
-      [2, 2], // dotted
-      [8, 4, 2, 4], // dash-dot
-      [8, 4, 2, 4, 2, 4], // dash-dot-dot
-      [12, 4], // long dash
-      [2, 6], // sparse dot
-      [6, 2, 2, 2], // dash-dot short
-      [10, 2], // long dash short
-      [4, 2, 4, 6] // complex pattern
-    ];
-    
-    // Get unique model labels across all selected results - sorted for consistency
-    const uniqueLabels = [...new Set(Object.values(resultData).map(r => `${r.model}_${r.instance_type}_${r.framework}_${r.session_id}`))].sort();
-    
-    const styleMap = {};
-    uniqueLabels.forEach((label, index) => {
-      styleMap[label] = {
-        color: colors[index % colors.length],
-        shape: shapes[index % shapes.length],
-        dashPattern: dashPatterns[index % dashPatterns.length]
-      };
-    });
-    
-    return styleMap;
   };
 
   useEffect(() => {
