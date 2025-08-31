@@ -851,10 +851,14 @@ except Exception as e:
     sys.exit(1)
 '''
             
-            # Write script to temporary file
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as script_file:
-                script_file.write(script_content)
-                script_path = script_file.name
+            # # Write script to temporary file
+            # with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as script_file:
+            #     script_file.write(script_content)
+            #     script_path = script_file.name
+
+            script_path = f"{output_dir}/run_evalscope.py"
+            with open(script_path, 'w', encoding='utf-8') as f:
+                f.write(script_content)
             
             logger.info(f"Created evalscope script: {script_path}")
             
@@ -1135,15 +1139,21 @@ except Exception as e:
         """Create output directory for custom API benchmark results.
         
         Args:
-            model_name: Model name
+            model_name: Model name (may include tag like "Qwen3-8B/08230851")
             session_id: Session ID
             
         Returns:
             Path to the output directory
         """
-        # Create directory path with session_id: outputs/model_name/session_id
+        # Extract base model name by removing the tag (everything after the last "/")
+        if "/" in model_name:
+            base_model = model_name.split("/")[0]
+        else:
+            base_model = model_name
+        
+        # Create directory path with session_id: outputs/base_model/session_id
         project_root = Path(__file__).parent.parent.parent  # Go up 3 levels to inference-platform directory
-        safe_model_name = model_name.replace('/', '-').replace(' ', '_')
+        safe_model_name = base_model.replace('/', '-').replace(' ', '_')
         output_dir = project_root / 'outputs' / safe_model_name / session_id
         
         # Create directory if it doesn't exist

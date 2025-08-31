@@ -123,7 +123,7 @@ function App() {
         height: '64px'
       }}>
         <Title level={2} style={{ color: '#fff', margin: 0 }}>
-          大模型评测平台
+          大模型性能评测平台
         </Title>
       </Header>
       
