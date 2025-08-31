@@ -344,8 +344,15 @@ const VisualizationPage = () => {
           const data = metricGroups[metric];
           console.log(`Rendering chart for metric ${metric}:`, data);
           
-          // Extract unique colors for this metric's data
-          const uniqueColors = [...new Set(data.map(d => d.seriesColor))];
+          // Create color mapping based on unique series
+          const uniqueSeries = [...new Set(data.map(d => d.modelLabel))];
+          const colorMapping = {};
+          uniqueSeries.forEach((series, index) => {
+            const firstDataPoint = data.find(d => d.modelLabel === series);
+            colorMapping[series] = firstDataPoint.seriesColor;
+          });
+          
+          console.log(`Color mapping for ${metric}:`, colorMapping);
           
           return (
             <Col span={12} key={metric}>
@@ -357,13 +364,18 @@ const VisualizationPage = () => {
                     yField="yValue"
                     seriesField="modelLabel"
                     smooth={true}
-                    color={uniqueColors}
+                    color={(seriesName) => {
+                      console.log(`Color callback for series:`, seriesName, 'mapping:', colorMapping[seriesName]);
+                      return colorMapping[seriesName] || '#1890ff';
+                    }}
                     point={{
                       size: 8,
                       shape: (datum) => {
+                        console.log(`Point shape for ${datum.modelLabel}:`, datum.seriesShape);
                         return datum.seriesShape || 'circle';
                       },
                       style: (datum) => {
+                        console.log(`Point style for ${datum.modelLabel}:`, datum.seriesColor);
                         return {
                           fill: datum.seriesColor || '#1890ff',
                           stroke: datum.seriesColor || '#1890ff',
@@ -373,6 +385,7 @@ const VisualizationPage = () => {
                       }
                     }}
                     lineStyle={(datum) => {
+                      console.log(`Line style for ${datum.modelLabel}:`, datum.seriesColor, datum.seriesDashPattern);
                       return {
                         stroke: datum.seriesColor || '#1890ff',
                         lineWidth: 3,
