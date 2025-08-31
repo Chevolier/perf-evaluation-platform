@@ -3,6 +3,7 @@
 import os
 import json
 import glob
+import csv
 from pathlib import Path
 from flask import Blueprint, jsonify, request
 from datetime import datetime
@@ -58,16 +59,10 @@ def get_results_structure():
                     with open(config_path, 'r', encoding='utf-8') as f:
                         config = json.load(f)
                     
-                    # Check if we have benchmark data
-                    benchmark_dirs = list(session_dir.glob('*/*/'))  # Look for timestamp/tag directories
-                    has_benchmark_data = any(
-                        (bd / 'benchmark_summary.json').exists() and 
-                        (bd / 'benchmark_percentile.json').exists()
-                        for bd in benchmark_dirs
-                    )
-                    
-                    if not has_benchmark_data:
-                        logger.debug(f"No benchmark data found in {session_dir}")
+                    # Check if we have performance metrics CSV file
+                    performance_csv = session_dir / 'performance_metrics.csv'
+                    if not performance_csv.exists():
+                        logger.debug(f"No performance_metrics.csv found in {session_dir}")
                         continue
                     
                     # Extract hierarchy information
@@ -192,41 +187,73 @@ def get_result_data():
         
         logger.info(f"Fetching data for result: {result_path}")
         
-        # Find benchmark data directories
-        benchmark_dirs = list(session_dir.glob('*/*/'))  # timestamp/tag directories
+        # Check for performance metrics CSV
+        performance_csv = session_dir / 'performance_metrics.csv'
+        config_file = session_dir / 'config.json'
         
-        summary_data = None
-        percentile_data = None
-        
-        # Look for the first valid benchmark data
-        for benchmark_dir in benchmark_dirs:
-            summary_path = benchmark_dir / 'benchmark_summary.json'
-            percentile_path = benchmark_dir / 'benchmark_percentile.json'
+        if not performance_csv.exists():
+            return jsonify({"error": "No performance_metrics.csv found"}), 404
             
-            if summary_path.exists() and percentile_path.exists():
-                try:
-                    # Read summary data
-                    with open(summary_path, 'r', encoding='utf-8') as f:
-                        summary_data = json.load(f)
-                    
-                    # Read percentile data
-                    with open(percentile_path, 'r', encoding='utf-8') as f:
-                        percentile_data = json.load(f)
-                    
-                    logger.info(f"Successfully loaded benchmark data from {benchmark_dir}")
-                    break
-                    
-                except Exception as e:
-                    logger.error(f"Error reading benchmark data from {benchmark_dir}: {e}")
-                    continue
+        if not config_file.exists():
+            return jsonify({"error": "No config.json found"}), 404
         
-        if not summary_data or not percentile_data:
-            return jsonify({"error": "No valid benchmark data found"}), 404
+        try:
+            # Read config file
+            with open(config_file, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+            
+            # Read CSV performance data
+            performance_data = []
+            with open(performance_csv, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    # Convert string values to floats where applicable
+                    processed_row = {}
+                    for key, value in row.items():
+                        try:
+                            processed_row[key] = float(value)
+                        except (ValueError, TypeError):
+                            processed_row[key] = value
+                    performance_data.append(processed_row)
+            
+            # Prepare summary data in the format expected by frontend
+            summary_data = {}
+            percentile_data = []
+            
+            for row in performance_data:
+                concurrency = row.get('Concurrency', 0)
+                
+                # Add each row as a summary point
+                summary_data[f"concurrency_{int(concurrency)}"] = {
+                    'Request throughput (req/s)': row.get('RPS_req_s', 0),
+                    'Output token throughput (tok/s)': row.get('Gen_Throughput_tok_s', 0),
+                    'Total token throughput (tok/s)': row.get('Total_Throughput_tok_s', 0),
+                    'Average latency (s)': row.get('Avg_Latency_s', 0),
+                    'Average time to first token (s)': row.get('Avg_TTFT_s', 0),
+                    'Average time per output token (s)': row.get('Avg_TPOT_s', 0),
+                    'concurrency': concurrency
+                }
+                
+                # Create percentile data (using P99 values as example percentiles)
+                percentile_data.append({
+                    'Percentiles': 99,
+                    'Latency (s)': row.get('P99_Latency_s', 0),
+                    'TTFT (s)': row.get('P99_TTFT_s', 0),
+                    'TPOT (s)': row.get('P99_TPOT_s', 0),
+                    'concurrency': concurrency
+                })
+            
+            logger.info(f"Successfully processed performance data with {len(performance_data)} rows")
+            
+        except Exception as e:
+            logger.error(f"Error reading performance data: {e}")
+            return jsonify({"error": f"Failed to read performance data: {str(e)}"}), 500
         
         return jsonify({
             "summary": summary_data,
             "percentiles": percentile_data,
-            "benchmark_dir": str(benchmark_dir) if 'benchmark_dir' in locals() else None
+            "config": config,
+            "performance_data": performance_data
         })
         
     except Exception as e:
@@ -276,11 +303,9 @@ def get_results_stats():
                 if config_path.exists():
                     session_count += 1
                     
-                    # Count benchmark results
-                    benchmark_dirs = list(session_dir.glob('*/*/'))
-                    for bd in benchmark_dirs:
-                        if (bd / 'benchmark_summary.json').exists():
-                            result_count += 1
+                    # Check if has performance metrics CSV
+                    if (session_dir / 'performance_metrics.csv').exists():
+                        result_count += 1
             
             if session_count > 0:
                 stats["models"].append({

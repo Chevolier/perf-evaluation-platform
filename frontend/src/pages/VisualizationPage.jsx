@@ -238,56 +238,34 @@ const VisualizationPage = () => {
     const chartData = [];
     
     Object.entries(resultData).forEach(([key, result]) => {
-      const summary = result.data?.summary;
-      const config = result.config;
-      
-      if (summary && config) {
-        const concurrency = config.stress_test_config?.concurrency || 0;
-        const modelLabel = `${result.model}_${result.instance_type}_${result.framework}`;
-        const fullModelLabel = `${result.model}_${result.instance_type}_${result.framework}_${result.session_id}`;
-        
-        // Add data points for each metric
-        Object.entries(summary).forEach(([metric, value]) => {
-          if (typeof value === 'number') {
-            const dataPoint = {
-              concurrency,
-              metric,
-              yValue: value,
-              modelLabel,
-              fullModelLabel,
-              session: result.session_id
-            };
-            console.log('Adding summary data point:', dataPoint);
-            chartData.push(dataPoint);
-          }
-        });
-      }
-    });
-    
-    return chartData;
-  };
-
-  // Prepare percentile chart data
-  const preparePercentileChartData = () => {
-    const chartData = [];
-    
-    Object.entries(resultData).forEach(([key, result]) => {
-      const percentiles = result.data?.percentiles;
+      const performanceData = result.data?.performance_data || [];
       const modelLabel = `${result.model}_${result.instance_type}_${result.framework}_${result.session_id}`;
       
-      if (percentiles && Array.isArray(percentiles)) {
-        percentiles.forEach(p => {
-          // Add data for each metric in percentiles
-          Object.entries(p).forEach(([metric, value]) => {
-            if (metric !== 'Percentiles' && typeof value === 'number') {
+      if (performanceData && Array.isArray(performanceData)) {
+        // Process each concurrency level from the CSV data
+        performanceData.forEach(row => {
+          const concurrency = row.Concurrency || 0;
+          
+          // Add data points for the 6 specific metrics requested
+          const metrics = [
+            { name: 'Request throughput (req/s)', value: row.RPS_req_s },
+            { name: 'Output token throughput (tok/s)', value: row.Gen_Throughput_tok_s },
+            { name: 'Total token throughput (tok/s)', value: row.Total_Throughput_tok_s },
+            { name: 'Average latency (s)', value: row.Avg_Latency_s },
+            { name: 'Average time to first token (s)', value: row.Avg_TTFT_s },
+            { name: 'Average time per output token (s)', value: row.Avg_TPOT_s }
+          ];
+          
+          metrics.forEach(metric => {
+            if (typeof metric.value === 'number') {
               const dataPoint = {
-                percentile: p.Percentiles,
-                metric,
-                yValue: value,
+                concurrency,
+                metric: metric.name,
+                yValue: metric.value,
                 modelLabel,
                 session: result.session_id
               };
-              console.log('Adding percentile data point:', dataPoint);
+              console.log('Adding summary data point:', dataPoint);
               chartData.push(dataPoint);
             }
           });
@@ -298,6 +276,7 @@ const VisualizationPage = () => {
     return chartData;
   };
 
+
   // Render summary charts (metrics vs concurrency)
   const renderSummaryCharts = () => {
     const chartData = prepareSummaryChartData();
@@ -306,14 +285,14 @@ const VisualizationPage = () => {
       return <Empty description="No summary data available" />;
     }
 
-    // Define allowed metrics for Performance Metrics vs Concurrency (in display order)
+    // Define the 6 specific metrics requested (in display order)
     const allowedMetrics = [
-      'Average time to first token (s)', 
-      'Average time per output token (s)',
-      'Average latency (s)',
+      'Request throughput (req/s)',
       'Output token throughput (tok/s)',
       'Total token throughput (tok/s)',
-      'Request throughput (req/s)'
+      'Average latency (s)',
+      'Average time to first token (s)',
+      'Average time per output token (s)'
     ];
 
     // Group by metric type and filter to only allowed metrics
@@ -335,7 +314,7 @@ const VisualizationPage = () => {
           return (
             <Col span={12} key={metric}>
               <Card title={metric} size="small">
-                <div style={{ height: 250 }}>
+                <div style={{ height: 300 }}>
                   <Line
                     data={data}
                     xField="concurrency"
@@ -350,17 +329,30 @@ const VisualizationPage = () => {
                       shape: 'circle',
                     }}
                     legend={{
-                      position: 'right-top'
+                      position: 'bottom'
                     }}
                     yAxis={{
                       label: {
-                        text: `${metric} ${getMetricUnit(metric)}`,
+                        formatter: (value) => `${value}`
                       },
+                      title: {
+                        text: getMetricUnit(metric),
+                        style: { fontSize: 12 }
+                      }
                     }}
                     xAxis={{
-                      label: {
-                        text: 'Concurrency',
-                      },
+                      title: {
+                        text: 'Concurrency Level',
+                        style: { fontSize: 12 }
+                      }
+                    }}
+                    tooltip={{
+                      formatter: (datum) => {
+                        return {
+                          name: datum.modelLabel,
+                          value: `${datum.yValue.toFixed(4)} ${getMetricUnit(metric)}`
+                        };
+                      }
                     }}
                   />
               </div>
@@ -372,89 +364,17 @@ const VisualizationPage = () => {
     );
   };
 
-  // Render percentile charts
-  const renderPercentileCharts = () => {
-    const chartData = preparePercentileChartData();
-    
-    if (chartData.length === 0) {
-      return <Empty description="No percentile data available" />;
-    }
-
-    // Define allowed metrics for Percentile Analysis (in display order)
-    const allowedPercentileMetrics = [
-      'TTFT (s)', 
-      'TPOT (s)',
-      'Latency (s)',
-      'Output (tok/s)',
-      'Total (tok/s)'
-    ];
-
-    // Group by metric type and filter to only allowed percentile metrics
-    const metricGroups = chartData.reduce((acc, item) => {
-      if (allowedPercentileMetrics.includes(item.metric)) {
-        if (!acc[item.metric]) {
-          acc[item.metric] = [];
-        }
-        acc[item.metric].push(item);
-      }
-      return acc;
-    }, {});
-
-    return (
-      <Row gutter={[16, 16]}>
-        {allowedPercentileMetrics.filter(metric => metricGroups[metric]).map((metric) => {
-          const data = metricGroups[metric];
-          console.log(`Rendering percentile chart for metric ${metric}:`, data);
-          return (
-            <Col span={12} key={metric}>
-              <Card title={`${metric} Percentiles`} size="small">
-                <div style={{ height: 250 }}>
-                  <Line
-                    data={data}
-                    xField="percentile"
-                    yField="yValue"
-                    seriesField="modelLabel"
-                    theme={{
-                      colors10: ['#1890ff', '#52c41a', '#faad14', '#f5222d', '#722ed1', '#13c2c2', '#eb2f96', '#fa8c16', '#a0d911', '#2f54eb']
-                    }}
-                    point={{
-                      size: 6,
-                      shape: 'circle',
-                    }}
-                    yAxis={{
-                      label: {
-                        text: `${metric} ${getMetricUnit(metric)}`,
-                      },
-                    }}
-                    xAxis={{
-                      label: {
-                        text: 'Percentile',
-                      },
-                    }}
-                  />
-              </div>
-            </Card>
-          </Col>
-        );
-        })}
-      </Row>
-    );
-  };
 
   // Get metric unit for display
   const getMetricUnit = (metric) => {
-    const lowerMetric = metric.toLowerCase();
-    if (lowerMetric.includes('time') || lowerMetric.includes('latency') || lowerMetric.includes('ttft') || lowerMetric.includes('tpot') || lowerMetric.includes('itl')) {
-      return '(s)';
+    if (metric === 'Request throughput (req/s)') {
+      return 'req/s';
     }
-    if (lowerMetric.includes('throughput') || lowerMetric.includes('tok/s')) {
-      return '(tok/s)';
+    if (metric === 'Output token throughput (tok/s)' || metric === 'Total token throughput (tok/s)') {
+      return 'tok/s';
     }
-    if (lowerMetric.includes('req/s')) {
-      return '(req/s)';
-    }
-    if (lowerMetric.includes('tokens')) {
-      return '(tokens)';
+    if (metric === 'Average latency (s)' || metric === 'Average time to first token (s)' || metric === 'Average time per output token (s)') {
+      return 'seconds';
     }
     return '';
   };
@@ -504,7 +424,7 @@ const VisualizationPage = () => {
               </Space>
             }
             style={{ height: 'calc(100vh - 200px)' }}
-            bodyStyle={{ height: 'calc(100vh - 280px)', overflow: 'auto' }}
+            styles={{ body: { height: 'calc(100vh - 280px)', overflow: 'auto' } }}
           >
             {loading ? (
               <Spin size="large" style={{ display: 'block', textAlign: 'center', marginTop: '100px' }} />
@@ -529,7 +449,7 @@ const VisualizationPage = () => {
               </Space>
             }
             style={{ height: 'calc(100vh - 200px)' }}
-            bodyStyle={{ height: 'calc(100vh - 280px)', overflow: 'auto' }}
+            styles={{ body: { height: 'calc(100vh - 280px)', overflow: 'auto' } }}
           >
             {selectedResults.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '100px 0' }}>
@@ -540,28 +460,16 @@ const VisualizationPage = () => {
               </div>
             ) : (
               <Space direction="vertical" style={{ width: '100%' }} size="large">
-                {/* Summary Charts Section */}
+                {/* Performance Metrics vs Concurrency */}
                 <div>
                   <Title level={4}>
                     <DashboardOutlined /> Performance Metrics vs Concurrency
                   </Title>
                   <Text type="secondary">
-                    Shows how different metrics change with concurrency levels
+                    RPS, Gen Throughput, Total Throughput, Avg Latency, Avg Time to First Token, and Avg Time per Output Token vs Concurrency
                   </Text>
                   <Divider />
                   {renderSummaryCharts()}
-                </div>
-
-                {/* Percentile Charts Section */}
-                <div>
-                  <Title level={4}>
-                    <LineChartOutlined /> Percentile Analysis
-                  </Title>
-                  <Text type="secondary">
-                    Distribution of performance metrics across percentiles
-                  </Text>
-                  <Divider />
-                  {renderPercentileCharts()}
                 </div>
               </Space>
             )}
