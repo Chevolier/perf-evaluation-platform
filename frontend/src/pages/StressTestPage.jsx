@@ -155,6 +155,11 @@ const StressTestPage = () => {
       if (inputMode === 'manual') {
         requestBody.api_url = values.api_url;
         requestBody.model_name = values.model_name;
+        // Add deployment configuration for manual input
+        requestBody.params.instance_type = values.instance_type;
+        requestBody.params.inference_framework = values.framework;
+        requestBody.params.tp_size = values.tp_size;
+        requestBody.params.dp_size = values.dp_size;
       } else {
         requestBody.model = values.model;
       }
@@ -1072,7 +1077,11 @@ const StressTestPage = () => {
                 num_requests: "50, 100, 200",
                 concurrency: "1, 5, 10",
                 input_tokens: 32,
-                output_tokens: 32
+                output_tokens: 32,
+                instance_type: "g5.2xlarge",
+                framework: "vllm",
+                tp_size: 1,
+                dp_size: 1
               }}
             >
               <Form.Item label="模型选择方式">
@@ -1081,7 +1090,7 @@ const StressTestPage = () => {
                   onChange={(e) => {
                     setInputMode(e.target.value);
                     // Clear form fields when switching modes
-                    form.resetFields(['model', 'api_url', 'model_name']);
+                    form.resetFields(['model', 'api_url', 'model_name', 'instance_type', 'framework', 'tp_size', 'dp_size']);
                   }}
                 >
                   <Radio value="dropdown">
@@ -1144,15 +1153,95 @@ const StressTestPage = () => {
                       prefix={<RocketOutlined />}
                     />
                   </Form.Item>
+                  
+                  {/* Manual deployment configuration */}
+                  <Row gutter={16}>
+                    <Col span={12}>
+                      <Form.Item
+                        name="instance_type"
+                        label="实例类型"
+                        rules={[{ required: true, message: '请选择实例类型' }]}
+                      >
+                        <Select placeholder="选择实例类型">
+                          <Option value="ml.g5.xlarge">ml.g5.xlarge</Option>
+                          <Option value="ml.g5.2xlarge">ml.g5.2xlarge</Option>
+                          <Option value="ml.g5.4xlarge">ml.g5.4xlarge</Option>
+                          <Option value="ml.g5.8xlarge">ml.g5.8xlarge</Option>
+                          <Option value="ml.g5.12xlarge">ml.g5.12xlarge</Option>
+                          <Option value="ml.g5.16xlarge">ml.g5.16xlarge</Option>
+                          <Option value="ml.g5.24xlarge">ml.g5.24xlarge</Option>
+                          <Option value="ml.g5.48xlarge">ml.g5.48xlarge</Option>
+                          <Option value="ml.p4d.24xlarge">ml.p4d.24xlarge</Option>
+                          <Option value="ml.p4de.24xlarge">ml.p4de.24xlarge</Option>
+                          <Option value="ml.p5.48xlarge">ml.p5.48xlarge</Option>
+                          <Option value="g5.xlarge">g5.xlarge</Option>
+                          <Option value="g5.2xlarge">g5.2xlarge</Option>
+                          <Option value="g5.4xlarge">g5.4xlarge</Option>
+                          <Option value="g5.8xlarge">g5.8xlarge</Option>
+                          <Option value="g5.12xlarge">g5.12xlarge</Option>
+                          <Option value="g5.16xlarge">g5.16xlarge</Option>
+                          <Option value="g5.24xlarge">g5.24xlarge</Option>
+                          <Option value="g5.48xlarge">g5.48xlarge</Option>
+                        </Select>
+                      </Form.Item>
+                    </Col>
+                    <Col span={12}>
+                      <Form.Item
+                        name="framework"
+                        label="推理框架"
+                        rules={[{ required: true, message: '请选择推理框架' }]}
+                      >
+                        <Select placeholder="选择推理框架">
+                          <Option value="vllm">vLLM</Option>
+                          <Option value="sglang">SGLang</Option>
+                          <Option value="tgi">TGI (Text Generation Inference)</Option>
+                          <Option value="transformers">Transformers</Option>
+                        </Select>
+                      </Form.Item>
+                    </Col>
+                  </Row>
+                  
+                  <Row gutter={16}>
+                    <Col span={12}>
+                      <Form.Item
+                        name="tp_size"
+                        label="张量并行 (TP Size)"
+                        rules={[{ required: true, message: '请输入张量并行数' }]}
+                        extra="通常为GPU数量，如1, 2, 4, 8"
+                      >
+                        <InputNumber
+                          min={1}
+                          max={8}
+                          placeholder="1"
+                          style={{ width: '100%' }}
+                        />
+                      </Form.Item>
+                    </Col>
+                    <Col span={12}>
+                      <Form.Item
+                        name="dp_size"
+                        label="数据并行 (DP Size)"
+                        rules={[{ required: true, message: '请输入数据并行数' }]}
+                        extra="通常为1，除非使用多节点部署"
+                      >
+                        <InputNumber
+                          min={1}
+                          max={16}
+                          placeholder="1"
+                          style={{ width: '100%' }}
+                        />
+                      </Form.Item>
+                    </Col>
+                  </Row>
                 </>
               )}
 
-              <Alert
+              {/* <Alert
                 description="提醒：请求总数和并发数需数量相同，按顺序配对测试，如 '50,100,200' 与 '1,5,10' 进行 (50,1), (100,5), (200,10) 三组测试。"
                 type="info"
                 showIcon={false}
                 style={{ marginBottom: 8, padding: '4px 8px' }}
-              />
+              /> */}
 
               <Form.Item
                 name="num_requests"
@@ -1186,7 +1275,7 @@ const StressTestPage = () => {
                     }
                   }
                 ]}
-                extra="可以输入多个值，用英文逗号分隔，如: 10, 20, 50, 100"
+                extra="可以输入多个值，用英文逗号分隔，如: 10, 20, 50"
               >
                 <Input
                   placeholder="10, 20, 50, 100"
@@ -1226,7 +1315,7 @@ const StressTestPage = () => {
                     }
                   }
                 ]}
-                extra="可以输入多个值，用英文逗号分隔，如: 1, 5, 10, 20"
+                extra="可以输入多个值，用英文逗号分隔，需要与请求总数数量相同，如: 1, 5, 10"
               >
                 <Input
                   placeholder="1, 5, 10, 20"
