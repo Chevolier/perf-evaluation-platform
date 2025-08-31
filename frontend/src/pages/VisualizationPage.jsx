@@ -364,13 +364,14 @@ const VisualizationPage = () => {
                     yField="yValue"
                     seriesField="modelLabel"
                     smooth={true}
-                    color={colorArray}
-                    point={{
-                      size: 10,
-                      shape: 'circle'
+                    theme={{
+                      colors10: ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff']
                     }}
-                    lineStyle={{
-                      lineWidth: 4
+                    point={{
+                      size: 10
+                    }}
+                    line={{
+                      size: 4
                     }}
                     legend={{
                       position: 'bottom'
