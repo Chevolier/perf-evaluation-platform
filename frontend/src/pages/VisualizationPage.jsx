@@ -321,12 +321,33 @@ const VisualizationPage = () => {
                     yField="yValue"
                     seriesField="modelLabel"
                     smooth={true}
-                    theme={{
-                      colors10: ['#1890ff', '#52c41a', '#faad14', '#f5222d', '#722ed1', '#13c2c2', '#eb2f96', '#fa8c16', '#a0d911', '#2f54eb']
+                    color={(datum) => {
+                      const style = getSeriesStyle(datum.modelLabel);
+                      return style.color;
                     }}
                     point={{
-                      size: 6,
-                      shape: 'circle',
+                      size: 8,
+                      shape: (datum) => {
+                        const style = getSeriesStyle(datum.modelLabel);
+                        return style.shape;
+                      },
+                      style: (datum) => {
+                        const style = getSeriesStyle(datum.modelLabel);
+                        return {
+                          fill: style.color,
+                          stroke: style.color,
+                          lineWidth: 2,
+                          fillOpacity: 0.9
+                        };
+                      }
+                    }}
+                    lineStyle={(datum) => {
+                      const style = getSeriesStyle(datum.modelLabel);
+                      return {
+                        stroke: style.color,
+                        lineWidth: 3,
+                        lineDash: style.dashPattern
+                      };
                     }}
                     legend={{
                       position: 'bottom'
@@ -377,6 +398,34 @@ const VisualizationPage = () => {
       return 'seconds';
     }
     return '';
+  };
+
+  // Get consistent styling for series
+  const getSeriesStyle = (modelLabel) => {
+    const colors = ['#1890ff', '#52c41a', '#faad14', '#f5222d', '#722ed1', '#13c2c2', '#eb2f96', '#fa8c16', '#a0d911', '#2f54eb'];
+    const shapes = ['circle', 'square', 'diamond', 'triangle', 'triangle-down', 'hexagon', 'bowtie', 'cross', 'tick', 'plus'];
+    const dashPatterns = [
+      [0], // solid
+      [4, 4], // dashed
+      [2, 2], // dotted
+      [8, 4, 2, 4], // dash-dot
+      [8, 4, 2, 4, 2, 4], // dash-dot-dot
+      [12, 4], // long dash
+      [2, 6], // sparse dot
+      [6, 2, 2, 2], // dash-dot short
+      [10, 2], // long dash short
+      [4, 2, 4, 6] // complex pattern
+    ];
+    
+    // Get unique model labels across all selected results to ensure consistency
+    const uniqueLabels = [...new Set(Object.values(resultData).map(r => `${r.model}_${r.instance_type}_${r.framework}_${r.session_id}`))];
+    const seriesIndex = uniqueLabels.indexOf(modelLabel);
+    
+    return {
+      color: colors[seriesIndex % colors.length],
+      shape: shapes[seriesIndex % shapes.length],
+      dashPattern: dashPatterns[seriesIndex % dashPatterns.length]
+    };
   };
 
   useEffect(() => {
