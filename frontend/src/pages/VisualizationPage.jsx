@@ -285,6 +285,10 @@ const VisualizationPage = () => {
       return <Empty description="No summary data available" />;
     }
 
+    // Create stable style mapping for all series
+    const styleMap = createSeriesStyleMap();
+    console.log('Style Map:', styleMap);
+
     // Define the 6 specific metrics requested (in display order)
     const allowedMetrics = [
       'Request throughput (req/s)',
@@ -322,31 +326,34 @@ const VisualizationPage = () => {
                     seriesField="modelLabel"
                     smooth={true}
                     color={(datum) => {
-                      const style = getSeriesStyle(datum.modelLabel);
-                      return style.color;
+                      const style = styleMap[datum.modelLabel];
+                      return style ? style.color : '#1890ff';
                     }}
                     point={{
                       size: 8,
                       shape: (datum) => {
-                        const style = getSeriesStyle(datum.modelLabel);
-                        return style.shape;
+                        const style = styleMap[datum.modelLabel];
+                        return style ? style.shape : 'circle';
                       },
                       style: (datum) => {
-                        const style = getSeriesStyle(datum.modelLabel);
+                        const style = styleMap[datum.modelLabel];
+                        const color = style ? style.color : '#1890ff';
                         return {
-                          fill: style.color,
-                          stroke: style.color,
+                          fill: color,
+                          stroke: color,
                           lineWidth: 2,
                           fillOpacity: 0.9
                         };
                       }
                     }}
                     lineStyle={(datum) => {
-                      const style = getSeriesStyle(datum.modelLabel);
+                      const style = styleMap[datum.modelLabel];
+                      const color = style ? style.color : '#1890ff';
+                      const dashPattern = style ? style.dashPattern : [0];
                       return {
-                        stroke: style.color,
+                        stroke: color,
                         lineWidth: 3,
-                        lineDash: style.dashPattern
+                        lineDash: dashPattern
                       };
                     }}
                     legend={{
@@ -400,8 +407,8 @@ const VisualizationPage = () => {
     return '';
   };
 
-  // Get consistent styling for series
-  const getSeriesStyle = (modelLabel) => {
+  // Create a stable mapping of series styles
+  const createSeriesStyleMap = () => {
     const colors = ['#1890ff', '#52c41a', '#faad14', '#f5222d', '#722ed1', '#13c2c2', '#eb2f96', '#fa8c16', '#a0d911', '#2f54eb'];
     const shapes = ['circle', 'square', 'diamond', 'triangle', 'triangle-down', 'hexagon', 'bowtie', 'cross', 'tick', 'plus'];
     const dashPatterns = [
@@ -417,15 +424,19 @@ const VisualizationPage = () => {
       [4, 2, 4, 6] // complex pattern
     ];
     
-    // Get unique model labels across all selected results to ensure consistency
-    const uniqueLabels = [...new Set(Object.values(resultData).map(r => `${r.model}_${r.instance_type}_${r.framework}_${r.session_id}`))];
-    const seriesIndex = uniqueLabels.indexOf(modelLabel);
+    // Get unique model labels across all selected results - sorted for consistency
+    const uniqueLabels = [...new Set(Object.values(resultData).map(r => `${r.model}_${r.instance_type}_${r.framework}_${r.session_id}`))].sort();
     
-    return {
-      color: colors[seriesIndex % colors.length],
-      shape: shapes[seriesIndex % shapes.length],
-      dashPattern: dashPatterns[seriesIndex % dashPatterns.length]
-    };
+    const styleMap = {};
+    uniqueLabels.forEach((label, index) => {
+      styleMap[label] = {
+        color: colors[index % colors.length],
+        shape: shapes[index % shapes.length],
+        dashPattern: dashPatterns[index % dashPatterns.length]
+      };
+    });
+    
+    return styleMap;
   };
 
   useEffect(() => {
