@@ -236,7 +236,7 @@ const ModelHubPage = () => {
       console.log('[Debug] 初始化组件数据');
       
       try {
-        // 直接获取数据并处理，而不使用中间状态
+        // 快速获取模型列表并立即显示UI
         const response = await fetch('/api/model-list');
         if (response.ok) {
           const data = await response.json();
@@ -263,7 +263,7 @@ const ModelHubPage = () => {
               
             console.log('[Debug] 处理后的模型列表:', { bedrockModels, emdModels });
               
-            // 更新模型分类信息
+            // 立即更新UI显示模型列表
             setModelCategories({
               bedrock: {
                 title: 'Bedrock 模型',
@@ -278,40 +278,48 @@ const ModelHubPage = () => {
                 models: emdModels
               }
             });
-              
-            // 立即准备模型列表并发送请求
+            
+            // 立即停止loading，让用户看到模型列表
+            setLoading(false);
+            
+            // 在后台异步加载模型状态
             const allModels = [...bedrockModels.map(m => m.key), ...emdModels.map(m => m.key)];
             console.log('[Debug] 将发送到后端的模型列表:', allModels);
               
             if (allModels.length > 0) {
-              // 直接调用API检查状态，而不使用中间函数
-              const statusResponse = await fetch('/api/check-model-status', {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ models: allModels })
-              });
-                
-              if (statusResponse.ok) {
-                const statusData = await statusResponse.json();
-                console.log('[Debug] 获取到模型状态响应:', statusData);
-                  
-                if (statusData.model_status) {
-                  setModelStatus(statusData.model_status);
+              // 后台异步检查模型状态，不阻塞UI
+              setTimeout(async () => {
+                try {
+                  const statusResponse = await fetch('/api/check-model-status', {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ models: allModels })
+                  });
+                    
+                  if (statusResponse.ok) {
+                    const statusData = await statusResponse.json();
+                    console.log('[Debug] 获取到模型状态响应:', statusData);
+                      
+                    if (statusData.model_status) {
+                      setModelStatus(statusData.model_status);
+                    }
+                  } else {
+                    console.log('[Debug] 状态检查失败, HTTP状态码:', statusResponse.status);
+                    const errorText = await statusResponse.text();
+                    console.log('[Debug] 错误内容:', errorText);
+                  }
+                } catch (statusError) {
+                  console.error('[Debug] 状态检查异常:', statusError);
                 }
-              } else {
-                console.log('[Debug] 状态检查失败, HTTP状态码:', statusResponse.status);
-                const errorText = await statusResponse.text();
-                console.log('[Debug] 错误内容:', errorText);
-              }
+              }, 100); // 短暂延迟让UI先渲染
             }
           }
         }
       } catch (error) {
         console.error('[Debug] 初始化数据异常:', error);
-      } finally {
-        setLoading(false);
+        setLoading(false); // 确保即使出错也停止loading
       }
     };
     
@@ -324,7 +332,7 @@ const ModelHubPage = () => {
     }
     
     const status = modelStatus[model.key];
-    if (!status) return <Tag color="default">检查中</Tag>;
+    if (!status) return <Tag color="processing">检查中...</Tag>;
 
     switch (status.status) {
       case 'available':
