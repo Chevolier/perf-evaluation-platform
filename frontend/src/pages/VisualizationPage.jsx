@@ -678,7 +678,7 @@ const VisualizationPage = () => {
       doc.text('Performance Metrics Tables', margin, currentY);
       currentY += 12;
 
-      selectedResults.forEach((resultKey) => {
+      for (const resultKey of selectedResults) {
         const result = resultData[resultKey];
         if (result && result.data?.performance_data) {
           const performanceData = result.data.performance_data;
@@ -696,57 +696,107 @@ const VisualizationPage = () => {
           doc.text(`${result.model} - ${result.session_id} Performance Metrics`, margin, currentY);
           currentY += 15;
 
-          // Add key parameters section
+          // Fetch config data from config.json
+          let configData = {};
+          try {
+            const configResponse = await fetch(`${API_BASE}/api/results/data`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ result_path: result.path.replace('performance_metrics.csv', 'config.json') }),
+            });
+            if (configResponse.ok) {
+              const configResult = await configResponse.json();
+              configData = configResult || {};
+            }
+          } catch (error) {
+            console.warn('Failed to fetch config.json:', error);
+          }
+
+          // Add key parameters table
           doc.setFontSize(10);
-          doc.setFont('helvetica', 'normal');
-          
-          // Parameters in two columns
-          const leftColumnX = margin;
-          const rightColumnX = margin + 90;
-          
-          // Left column
           doc.setFont('helvetica', 'bold');
-          doc.text('Model:', leftColumnX, currentY);
-          doc.setFont('helvetica', 'normal');
-          doc.text(result.model || 'N/A', leftColumnX + 25, currentY);
-          
+          doc.text('Configuration Parameters', margin, currentY);
+          currentY += 8;
+
+          // Configuration table setup
+          const configHeaders = ['Parameter', 'Value'];
+          const configColWidths = [60, 80];
+          const configTableWidth = configColWidths.reduce((sum, width) => sum + width, 0);
+          const configTableStartX = margin;
+          const configTableStartY = currentY;
+
+          // Configuration parameters to display
+          const configParams = [
+            { label: 'Model', value: result.model || configData.model || 'N/A' },
+            { label: 'Instance Type', value: result.instance_type || configData.instance_type || 'N/A' },
+            { label: 'Framework', value: result.framework || configData.framework || 'N/A' },
+            { label: 'Dataset', value: result.dataset || configData.dataset || 'N/A' },
+            { label: 'TP (Tensor Parallel)', value: result.tp?.toString() || configData.tp?.toString() || 'N/A' },
+            { label: 'DP (Data Parallel)', value: result.dp?.toString() || configData.dp?.toString() || 'N/A' },
+            { label: 'Input Tokens', value: result.input_tokens?.toString() || configData.input_tokens?.toString() || 'N/A' },
+            { label: 'Output Tokens', value: result.output_tokens?.toString() || configData.output_tokens?.toString() || 'N/A' }
+          ];
+
+          // Draw config table header
+          doc.setFillColor(240, 240, 240);
+          doc.rect(configTableStartX, configTableStartY - 2, configTableWidth, 8, 'F');
+          doc.setDrawColor(0, 0, 0);
+          doc.rect(configTableStartX, configTableStartY - 2, configTableWidth, 8);
+
+          // Config table column headers
+          doc.setFontSize(9);
           doc.setFont('helvetica', 'bold');
-          doc.text('Instance Type:', leftColumnX, currentY + 8);
-          doc.setFont('helvetica', 'normal');
-          doc.text(result.instance_type || 'N/A', leftColumnX + 35, currentY + 8);
+          doc.setTextColor(0, 0, 0);
+          let configXPos = configTableStartX + 2;
           
-          doc.setFont('helvetica', 'bold');
-          doc.text('Framework:', leftColumnX, currentY + 16);
+          configHeaders.forEach((header, i) => {
+            doc.text(header, configXPos, currentY + 3);
+            
+            // Draw vertical lines between columns
+            if (i < configHeaders.length - 1) {
+              const lineX = configXPos + configColWidths[i] - 2;
+              doc.line(lineX, configTableStartY - 2, lineX, configTableStartY + 6);
+            }
+            configXPos += configColWidths[i];
+          });
+          currentY += 8;
+
+          // Config table data rows
           doc.setFont('helvetica', 'normal');
-          doc.text(result.framework || 'N/A', leftColumnX + 30, currentY + 16);
+          doc.setFontSize(8);
+          let configRowIndex = 0;
           
-          doc.setFont('helvetica', 'bold');
-          doc.text('Dataset:', leftColumnX, currentY + 24);
-          doc.setFont('helvetica', 'normal');
-          doc.text(result.dataset || 'N/A', leftColumnX + 25, currentY + 24);
-          
-          // Right column
-          doc.setFont('helvetica', 'bold');
-          doc.text('TP (Tensor Parallel):', rightColumnX, currentY);
-          doc.setFont('helvetica', 'normal');
-          doc.text(result.tp?.toString() || 'N/A', rightColumnX + 55, currentY);
-          
-          doc.setFont('helvetica', 'bold');
-          doc.text('DP (Data Parallel):', rightColumnX, currentY + 8);
-          doc.setFont('helvetica', 'normal');
-          doc.text(result.dp?.toString() || 'N/A', rightColumnX + 50, currentY + 8);
-          
-          doc.setFont('helvetica', 'bold');
-          doc.text('Input Tokens:', rightColumnX, currentY + 16);
-          doc.setFont('helvetica', 'normal');
-          doc.text(result.input_tokens?.toString() || 'N/A', rightColumnX + 35, currentY + 16);
-          
-          doc.setFont('helvetica', 'bold');
-          doc.text('Output Tokens:', rightColumnX, currentY + 24);
-          doc.setFont('helvetica', 'normal');
-          doc.text(result.output_tokens?.toString() || 'N/A', rightColumnX + 40, currentY + 24);
-          
-          currentY += 35;
+          configParams.forEach(param => {
+            // Alternate row colors
+            if (configRowIndex % 2 === 1) {
+              doc.setFillColor(248, 248, 248);
+              doc.rect(configTableStartX, currentY - 2, configTableWidth, 6, 'F');
+            }
+
+            // Draw row border
+            doc.setDrawColor(0, 0, 0);
+            doc.rect(configTableStartX, currentY - 2, configTableWidth, 6);
+
+            configXPos = configTableStartX + 2;
+            const configValues = [param.label, param.value];
+
+            configValues.forEach((value, i) => {
+              doc.text(String(value), configXPos, currentY + 2);
+              
+              // Draw vertical lines between columns
+              if (i < configValues.length - 1) {
+                const lineX = configXPos + configColWidths[i] - 2;
+                doc.line(lineX, currentY - 2, lineX, currentY + 4);
+              }
+              configXPos += configColWidths[i];
+            });
+            currentY += 6;
+            configRowIndex++;
+          });
+
+          currentY += 10;
 
           // Table setup
           const headers = ['Concurrency', 'RPS', 'Gen Tput', 'Total Tput', 'Avg Lat', 'Avg TTFT', 'Avg TPOT'];
@@ -863,7 +913,7 @@ const VisualizationPage = () => {
           // Add spacing after table
           currentY += 15;
         }
-      });
+      }
 
       // Capture charts
       const chartRows = document.querySelectorAll('[data-chart-row]');
