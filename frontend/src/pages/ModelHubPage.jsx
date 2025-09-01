@@ -58,6 +58,7 @@ const ModelHubPage = () => {
       return saved ? JSON.parse(saved) : {
         method: 'SageMaker Endpoint',
         framework: 'vllm',
+        serviceType: 'sagemaker_realtime',
         machineType: 'g5.2xlarge',
         tpSize: 1,
         dpSize: 1
@@ -67,6 +68,7 @@ const ModelHubPage = () => {
       return {
         method: 'SageMaker Endpoint',
         framework: 'vllm',
+        serviceType: 'sagemaker_realtime',
         machineType: 'g5.2xlarge',
         tpSize: 1,
         dpSize: 1
@@ -108,7 +110,8 @@ const ModelHubPage = () => {
         body: JSON.stringify({ 
           models: selectedModels,
           instance_type: deploymentConfig.machineType,
-          engine_type: deploymentConfig.framework
+          engine_type: deploymentConfig.framework,
+          service_type: deploymentConfig.serviceType
         })
       });
       
@@ -320,6 +323,7 @@ const ModelHubPage = () => {
       setDeploymentConfig({
         method: 'SageMaker Endpoint',
         framework: 'vllm',
+        serviceType: 'sagemaker_realtime',
         machineType: 'g5.2xlarge',
         tpSize: 1,
         dpSize: 1
@@ -619,14 +623,17 @@ const ModelHubPage = () => {
                       value={deploymentConfig.machineType}
                       onChange={(value) => setDeploymentConfig(prev => ({ ...prev, machineType: value }))}
                       options={[
-                        { value: 'g5.2xlarge', label: 'g5.2xlarge (1 A10G, 24GB RAM)' },
-                        { value: 'g6e.2xlarge', label: 'g6e.2xlarge (1 L40S, 48GB RAM)' },
-                        { value: 'g5.12xlarge', label: 'g5.12xlarge (4 A10G, 96GB RAM)' },
-                        { value: 'g6e.12xlarge', label: 'g6.48xlarge (4 L40S , 384GB RAM)' },
+                        { value: 'g5.xlarge', label: 'g5.xlarge (1 A10G, 16GB RAM)' },
+                        { value: 'g5.2xlarge', label: 'g5.2xlarge (1 A10G, 32GB RAM)' },
+                        { value: 'g5.4xlarge', label: 'g5.4xlarge (1 A10G, 64GB RAM)' },
+                        { value: 'g5.8xlarge', label: 'g5.8xlarge (1 A10G, 128GB RAM)' },
+                        { value: 'g5.12xlarge', label: 'g5.12xlarge (4 A10G, 192GB RAM)' },
+                        { value: 'g5.16xlarge', label: 'g5.16xlarge (1 A10G, 256GB RAM)' },
+                        { value: 'g5.24xlarge', label: 'g5.24xlarge (4 A10G, 384GB RAM)' },
+                        { value: 'g5.48xlarge', label: 'g5.48xlarge (8 A10G, 768GB RAM)' },
+                        { value: 'p4d.24xlarge', label: 'p4d.24xlarge (8 A100, 320GB RAM)' },
+                        { value: 'p4de.24xlarge', label: 'p4de.24xlarge (8 A100, 640GB RAM)' },
                         { value: 'p5.48xlarge', label: 'p5.48xlarge (8 H100, 640GB RAM)' },
-                        { value: 'p5en.48xlarge', label: 'p5en.48xlarge (8 H200, 1128GB RAM)' },
-                        { value: 'p4d.24xlarge', label: 'p4d.24xlarge (8 A100, 320GB RAM)' },  
-                        { value: 'p4de.24xlarge', label: 'p4d.24xlarge (8 A100, 640GB RAM)' },
                       ]}
                     />
                   </Form.Item>

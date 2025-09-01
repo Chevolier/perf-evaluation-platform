@@ -87,7 +87,7 @@ class ModelService:
                     }
                 elif model_key in deployed_models.get("inprogress", {}):
                     return {
-                        "status": "deploying",
+                        "status": "inprogress",  # Frontend expects 'inprogress'
                         "message": "Model is being deployed",
                         "tag": deployed_models["inprogress"][model_key].get("tag")
                     }
@@ -121,12 +121,17 @@ class ModelService:
             # Call get_model_status() without parameters to get all models
             status = get_model_status()
             logger.info(f"EMD SDK get_model_status returned: {status}")
+            print(f"🔍 DEBUG: EMD status check result: {status}")
             
             # Create reverse mapping from model_path to model_key
             reverse_mapping = {}
             for model_key, model_info in self.registry.get_emd_models().items():
                 model_path = model_info.get("model_path", model_key)
                 reverse_mapping[model_path] = model_key
+            
+            print(f"🔍 DEBUG: Reverse mapping: {reverse_mapping}")
+            print(f"🔍 DEBUG: Models in EMD status - completed: {[m.get('model_id') for m in status.get('completed', [])]}")
+            print(f"🔍 DEBUG: Models in EMD status - inprogress: {[m.get('model_id') for m in status.get('inprogress', [])]}")
             
             deployed = {}
             inprogress = {}
@@ -159,19 +164,37 @@ class ModelService:
                 model_tag = model.get("model_tag")
                 stack_status = model.get("stack_status", "")  # Use stack_status, not status
                 
+                # Check execution_info for pipeline status (more accurate than stack_status for in-progress)
+                execution_info = model.get("execution_info", {})
+                pipeline_status = execution_info.get("status", "")
+                
                 if model_id in reverse_mapping:
                     model_key = reverse_mapping[model_id]
-                    inprogress[model_key] = {
-                        "tag": model_tag,
-                        "model_id": model_id,
-                        "status": stack_status
-                    }
+                    
+                    # If pipeline failed, move to failed category
+                    if pipeline_status == "Failed":
+                        failed[model_key] = {
+                            "tag": model_tag,
+                            "model_id": model_id,
+                            "status": pipeline_status,
+                            "stage": model.get("stage_name", "")
+                        }
+                    else:
+                        # Still in progress
+                        inprogress[model_key] = {
+                            "tag": model_tag,
+                            "model_id": model_id,
+                            "status": stack_status or pipeline_status,
+                            "stage": model.get("stage_name", "")
+                        }
             
-            return {
+            result = {
                 "deployed": deployed,
                 "inprogress": inprogress,
                 "failed": failed
             }
+            print(f"🔍 DEBUG: Processed EMD status - deployed: {deployed}, inprogress: {inprogress}, failed: {failed}")
+            return result
             
         except Exception as e:
             logger.error(f"Failed to get current EMD models: {e}")
@@ -214,14 +237,15 @@ class ModelService:
                 "error": str(e)
             }
     
-    def deploy_emd_model(self, model_key: str, instance_type: str = "ml.g5.2xlarge",
-                        engine_type: str = "vllm") -> Dict[str, Any]:
+    def deploy_emd_model(self, model_key: str, instance_type: str = "g5.2xlarge",
+                        engine_type: str = "vllm", service_type: str = "sagemaker_realtime") -> Dict[str, Any]:
         """Deploy an EMD model.
         
         Args:
             model_key: Model to deploy
             instance_type: AWS instance type
             engine_type: Inference engine type
+            service_type: Service type (sagemaker_realtime, sagemaker_async, ecs, local)
             
         Returns:
             Deployment result
@@ -248,7 +272,7 @@ class ModelService:
         
         # Update deployment status
         self._deployment_status[model_key] = {
-            "status": "deploying",
+            "status": "inprogress",  # Frontend expects 'inprogress'
             "message": f"Deploying {model_key} with tag {deployment_tag}",
             "tag": deployment_tag,
             "instance_type": instance_type,
@@ -270,22 +294,32 @@ class ModelService:
                 }
                 framework_type = framework_mapping.get(engine_type, engine_type)
                 
-                logger.info(f"Starting EMD deployment for {model_key} (model_path: {model_path}) with tag {deployment_tag}")
+                # # Remove 'ml.' prefix from instance type for EMD deployment
+                # if service_type in ["sagemaker_realtime", "sagemaker_async"]:
+                #     emd_instance_type = "ml."+ instance_type if not instance_type.startswith('ml.') else instance_type
                 
-                # Call EMD deployment
+                emd_instance_type = instance_type
+
+                logger.info(f"Starting EMD deployment for {model_key} (model_path: {model_path}) with tag {deployment_tag}")
+                print(f"🚀 DEBUG: Starting EMD deployment for {model_key} (model_path: {model_path}) with tag {deployment_tag}")
+                print(f"🚀 DEBUG: Converting instance type from {instance_type} to {emd_instance_type}")
+                
+                # Call EMD deployment with correct parameters matching CLI format
                 result = emd_deploy(
                     model_id=model_path,
-                    instance_type=instance_type,
+                    instance_type=emd_instance_type,
                     engine_type=framework_type,
+                    service_type=service_type,  # Use the service_type parameter from API request
+                    framework_type="fastapi",  # Default framework type
                     model_tag=deployment_tag,
                     waiting_until_deploy_complete=False  # Don't wait, return immediately
                 )
                 
                 logger.info(f"EMD deployment initiated for {model_key}: {result}")
                 
-                # Update status to deploying
+                # Update status to inprogress (matches frontend expectation)
                 self._deployment_status[model_key] = {
-                    "status": "deploying",
+                    "status": "inprogress",  # Frontend expects 'inprogress' not 'deploying'
                     "message": f"Deployment in progress for {model_key}",
                     "tag": deployment_tag,
                     "instance_type": instance_type,
@@ -303,6 +337,9 @@ class ModelService:
                 
             except Exception as e:
                 logger.error(f"Failed to deploy {model_key} via EMD: {e}")
+                print(f"❌ DEBUG: Failed to deploy {model_key} via EMD: {e}")
+                print(f"❌ DEBUG: Error type: {type(e)}")
+                print(f"❌ DEBUG: Error args: {e.args}")
                 # Update status to failed
                 self._deployment_status[model_key] = {
                     "status": "failed",
@@ -375,7 +412,8 @@ class ModelService:
         """
         status_mapping = {
             "deployed": "deployed",
-            "deploying": "deploying", 
+            "deploying": "inprogress",  # Map 'deploying' to 'inprogress' for frontend
+            "inprogress": "inprogress",
             "not_deployed": "not_deployed",
             "failed": "failed",
             "unknown": "unknown"

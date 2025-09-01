@@ -52,10 +52,19 @@ def deploy_models():
         models = data.get('models', [])
         instance_type = data.get('instance_type', 'ml.g5.2xlarge')
         engine_type = data.get('engine_type', 'vllm')
+        service_type = data.get('service_type', 'sagemaker_realtime')
+        
+        print(f"🚀 DEBUG: Deploy request received:")
+        print(f"  Models: {models}")
+        print(f"  Instance type: {instance_type}")
+        print(f"  Engine type: {engine_type}")
+        print(f"  Service type: {service_type}")
         
         results = {}
         for model_key in models:
-            result = model_service.deploy_emd_model(model_key, instance_type, engine_type)
+            print(f"🚀 DEBUG: Deploying model: {model_key}")
+            result = model_service.deploy_emd_model(model_key, instance_type, engine_type, service_type)
+            print(f"🚀 DEBUG: Deployment result for {model_key}: {result}")
             results[model_key] = result
         
         return jsonify({
@@ -64,6 +73,7 @@ def deploy_models():
         })
     except Exception as e:
         logger.error(f"Error deploying models: {e}")
+        print(f"❌ DEBUG: Error deploying models: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
 @model_bp.route('/check-model-status', methods=['POST'])

@@ -46,9 +46,9 @@ class EMDModel:
         """
         # Valid instance types for EMD deployment
         valid_instances = [
-            "ml.g5.xlarge", "ml.g5.2xlarge", "ml.g5.4xlarge", "ml.g5.8xlarge",
-            "ml.g5.12xlarge", "ml.g5.16xlarge", "ml.g5.24xlarge", "ml.g5.48xlarge",
-            "ml.p4d.24xlarge", "ml.p4de.24xlarge", "ml.p5.48xlarge"
+            "g5.xlarge", "g5.2xlarge", "g5.4xlarge", "g5.8xlarge",
+            "g5.12xlarge", "g5.16xlarge", "g5.24xlarge", "g5.48xlarge",
+            "p4d.24xlarge", "p4de.24xlarge", "p5.48xlarge"
         ]
         
         # Valid engine types
@@ -66,7 +66,7 @@ class EMDModel:
         
         return True, "Configuration is valid"
     
-    def get_deployment_config(self, instance_type: str = "ml.g5.2xlarge", 
+    def get_deployment_config(self, instance_type: str = "g5.2xlarge", 
                             engine_type: str = "vllm") -> Dict[str, Any]:
         """Get deployment configuration for this model.
         
