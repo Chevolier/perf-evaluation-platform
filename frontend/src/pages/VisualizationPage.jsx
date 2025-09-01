@@ -420,7 +420,8 @@ const VisualizationPage = () => {
           ];
           
           metrics.forEach(metric => {
-            if (typeof metric.value === 'number') {
+            console.log(`Processing metric ${metric.name}: value=${metric.value}, type=${typeof metric.value}`);
+            if (typeof metric.value === 'number' && !isNaN(metric.value)) {
               const dataPoint = {
                 concurrency,
                 metric: metric.name,
@@ -438,7 +439,9 @@ const VisualizationPage = () => {
                 shape: sessionShape
               };
               chartData.push(dataPoint);
-              console.log(`Added datapoint: ${modelLabel}, shape: ${sessionShape}, color: ${sessionColor}`);
+              console.log(`Added datapoint: ${modelLabel}, metric: ${metric.name}, yValue: ${metric.value}, concurrency: ${concurrency}`);
+            } else {
+              console.log(`Skipping invalid metric ${metric.name}: value=${metric.value}, type=${typeof metric.value}`);
             }
           });
         });
@@ -483,6 +486,7 @@ const VisualizationPage = () => {
         {allowedMetrics.filter(metric => metricGroups[metric]).map((metric) => {
           const data = metricGroups[metric];
           console.log(`Rendering chart for metric ${metric}:`, data);
+          console.log(`Sample data point for ${metric}:`, data[0]);
           
           // Create simple color array - the chart library expects colors in series order
           const uniqueSeries = [...new Set(data.map(d => d.modelLabel))].sort();
@@ -507,7 +511,7 @@ const VisualizationPage = () => {
                     colorField="modelLabel"
                     smooth={true}
                     color={colorArray}
-                    point={{
+                    point={{ 
                       size: 20,
                       shape: 'circle',
                       style: {
@@ -533,27 +537,16 @@ const VisualizationPage = () => {
                     legend={{
                       position: 'bottom'
                     }}
-                    yAxis={{
-                      label: {
-                        formatter: (value) => `${value}`
-                      },
-                      title: {
-                        text: getMetricUnit(metric),
-                        style: { fontSize: 12 }
-                      }
-                    }}
                     xAxis={{
                       title: {
                         text: 'Concurrency Level',
                         style: { fontSize: 12 }
                       }
                     }}
-                    tooltip={{
-                      formatter: (datum) => {
-                        return {
-                          name: datum.modelLabel,
-                          value: `${datum.yValue.toFixed(4)} ${getMetricUnit(metric)}`
-                        };
+                    yAxis={{
+                      title: {
+                        text: getMetricUnit(metric),
+                        style: { fontSize: 12 }
                       }
                     }}
                   />
