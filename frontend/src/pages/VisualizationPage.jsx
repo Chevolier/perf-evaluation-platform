@@ -672,6 +672,92 @@ const VisualizationPage = () => {
 
       currentY += 10;
 
+      // Add performance metrics tables for each selected session
+      doc.setFontSize(14);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Performance Metrics Tables', margin, currentY);
+      currentY += 12;
+
+      selectedResults.forEach((resultKey, index) => {
+        const result = resultData[resultKey];
+        if (result && result.data?.performance_data) {
+          const performanceData = result.data.performance_data;
+          
+          // Check if we need a new page for the table
+          const tableHeight = (performanceData.length + 3) * 6 + 20; // Estimate table height
+          if (currentY + tableHeight > pageHeight - margin) {
+            doc.addPage();
+            currentY = margin;
+          }
+
+          // Table header
+          doc.setFontSize(12);
+          doc.setFont('helvetica', 'bold');
+          doc.text(`${result.model} - ${result.session_id} Performance Metrics`, margin, currentY);
+          currentY += 10;
+
+          // Table column headers
+          doc.setFontSize(8);
+          doc.setFont('helvetica', 'bold');
+          const headers = ['Concurrency', 'RPS', 'Gen Tput', 'Total Tput', 'Avg Lat', 'Avg TTFT', 'Avg TPOT'];
+          const colWidths = [20, 20, 20, 22, 20, 20, 22];
+          let xPos = margin;
+          
+          headers.forEach((header, i) => {
+            doc.text(header, xPos, currentY);
+            xPos += colWidths[i];
+          });
+          currentY += 6;
+
+          // Draw header line
+          doc.line(margin, currentY, pageWidth - margin, currentY);
+          currentY += 2;
+
+          // Table data rows
+          doc.setFont('helvetica', 'normal');
+          performanceData.forEach(row => {
+            // Check if we need a new page mid-table
+            if (currentY > pageHeight - 30) {
+              doc.addPage();
+              currentY = margin;
+              
+              // Repeat headers on new page
+              doc.setFontSize(8);
+              doc.setFont('helvetica', 'bold');
+              xPos = margin;
+              headers.forEach((header, i) => {
+                doc.text(header, xPos, currentY);
+                xPos += colWidths[i];
+              });
+              currentY += 6;
+              doc.line(margin, currentY, pageWidth - margin, currentY);
+              currentY += 2;
+              doc.setFont('helvetica', 'normal');
+            }
+
+            xPos = margin;
+            const values = [
+              row.Concurrency || 0,
+              (row.RPS_req_s || 0).toFixed(2),
+              (row.Gen_Throughput_tok_s || 0).toFixed(2),
+              (row.Total_Throughput_tok_s || 0).toFixed(2),
+              (row.Avg_Latency_s || 0).toFixed(3),
+              (row.Avg_TTFT_s || 0).toFixed(3),
+              (row.Avg_TPOT_s || 0).toFixed(4)
+            ];
+
+            values.forEach((value, i) => {
+              doc.text(String(value), xPos, currentY);
+              xPos += colWidths[i];
+            });
+            currentY += 6;
+          });
+
+          // Add spacing after table
+          currentY += 10;
+        }
+      });
+
       // Capture charts
       const chartRows = document.querySelectorAll('[data-chart-row]');
       
