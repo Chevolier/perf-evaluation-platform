@@ -108,6 +108,85 @@ const VisualizationPage = () => {
     }
   };
 
+  // Handle checking all sessions in a group (model or instance_framework_dataset level)
+  const handleGroupCheckAll = async (nodeKey, checked) => {
+    const allSessionKeys = getAllSessionKeysInNode(resultsTree, nodeKey);
+    
+    if (checked) {
+      // Add all sessions in this group
+      const newSelectedResults = [...selectedResults];
+      const newResultData = { ...resultData };
+      
+      for (const sessionKey of allSessionKeys) {
+        if (!selectedResults.includes(sessionKey)) {
+          newSelectedResults.push(sessionKey);
+          
+          // Fetch data for each session
+          const resultInfo = findResultByKey(resultsTree, sessionKey);
+          if (resultInfo) {
+            const data = await fetchResultData(resultInfo.path);
+            if (data) {
+              newResultData[sessionKey] = {
+                ...resultInfo,
+                data: data
+              };
+            }
+          }
+        }
+      }
+      
+      setSelectedResults(newSelectedResults);
+      setResultData(newResultData);
+    } else {
+      // Remove all sessions in this group
+      setSelectedResults(prev => prev.filter(key => !allSessionKeys.includes(key)));
+      setResultData(prev => {
+        const newData = { ...prev };
+        allSessionKeys.forEach(key => {
+          delete newData[key];
+        });
+        return newData;
+      });
+    }
+  };
+
+  // Get all session keys within a node (recursively)
+  const getAllSessionKeysInNode = (tree, nodeKey) => {
+    const sessionKeys = [];
+    
+    const searchNode = (nodes) => {
+      for (const node of nodes) {
+        if (node.key === nodeKey) {
+          // Found the target node, collect all sessions underneath it
+          collectAllSessions(node, sessionKeys);
+          return sessionKeys;
+        } else if (node.children) {
+          // Continue searching in children
+          const result = searchNode(node.children);
+          if (result.length > 0) return result;
+        }
+      }
+      return sessionKeys;
+    };
+    
+    const collectAllSessions = (node, keys) => {
+      if (node.sessions) {
+        // This node has sessions directly
+        node.sessions.forEach(session => {
+          keys.push(session.key);
+        });
+      }
+      if (node.children) {
+        // Recurse into children
+        node.children.forEach(child => {
+          collectAllSessions(child, keys);
+        });
+      }
+    };
+    
+    return searchNode(tree);
+  };
+
   // Find result by key in the hierarchical tree structure
   const findResultByKey = (tree, targetKey) => {
     const searchNode = (nodes) => {
@@ -141,16 +220,29 @@ const VisualizationPage = () => {
     const convertToTreeData = (nodes) => {
       return nodes.map(node => {
         if (node.children) {
-          // This is a parent node (model, instance, framework, dataset)
+          // This is a parent node (model or instance_framework_dataset)
+          const totalSessions = countTotalSessions(node.children);
+          const allSessionKeys = getAllSessionKeysInNode([node], node.key);
+          const selectedCount = allSessionKeys.filter(key => selectedResults.includes(key)).length;
+          const allSelected = selectedCount === totalSessions && totalSessions > 0;
+          const someSelected = selectedCount > 0 && selectedCount < totalSessions;
+          
           return {
             title: (
               <Space>
                 <FolderOutlined />
                 <Text strong>{node.title}</Text>
-                {node.children && (
-                  <Tag color="blue">
-                    {countTotalSessions(node.children)} sessions
-                  </Tag>
+                <Tag color="blue">{totalSessions} sessions</Tag>
+                {totalSessions > 0 && (
+                  <Checkbox
+                    checked={allSelected}
+                    indeterminate={someSelected}
+                    onChange={(e) => handleGroupCheckAll(node.key, e.target.checked)}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                )}
+                {selectedCount > 0 && (
+                  <Tag color="green">{selectedCount} selected</Tag>
                 )}
               </Space>
             ),
@@ -160,12 +252,28 @@ const VisualizationPage = () => {
           };
         } else if (node.sessions) {
           // This is a leaf node (input_output_tokens level) with sessions
+          const allSessionKeys = node.sessions.map(s => s.key);
+          const selectedCount = allSessionKeys.filter(key => selectedResults.includes(key)).length;
+          const allSelected = selectedCount === node.sessions.length && node.sessions.length > 0;
+          const someSelected = selectedCount > 0 && selectedCount < node.sessions.length;
+          
           return {
             title: (
               <Space>
                 <FileTextOutlined />
                 <Text>{node.title}</Text>
                 <Tag color="green">{node.sessions.length} sessions</Tag>
+                {node.sessions.length > 0 && (
+                  <Checkbox
+                    checked={allSelected}
+                    indeterminate={someSelected}
+                    onChange={(e) => handleGroupCheckAll(node.key, e.target.checked)}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                )}
+                {selectedCount > 0 && (
+                  <Tag color="orange">{selectedCount} selected</Tag>
+                )}
               </Space>
             ),
             key: node.key,
