@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { 
   Card, 
   Typography, 
@@ -13,7 +13,8 @@ import {
   Checkbox,
   Select,
   Form,
-  InputNumber 
+  InputNumber,
+  Skeleton 
 } from 'antd';
 import { 
   RobotOutlined, 
@@ -27,7 +28,8 @@ import {
 const { Title, Text, Paragraph } = Typography;
 
 const ModelHubPage = () => {
-  const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [statusLoading, setStatusLoading] = useState(false);
   
   // Load state from localStorage
   const [modelStatus, setModelStatus] = useState(() => {
@@ -71,9 +73,8 @@ const ModelHubPage = () => {
       };
     }
   });
-  // const [deployingModels, setDeployingModels] = useState(new Set());
-  // const deployingModelsRef = useRef(new Set());
-  const [modelCategories, setModelCategories] = useState({
+  // Memoized category templates to avoid recreating icons
+  const categoryTemplates = useMemo(() => ({
     bedrock: {
       title: 'Bedrock 模型',
       icon: <CloudOutlined />,
@@ -86,70 +87,13 @@ const ModelHubPage = () => {
       color: '#52c41a',
       models: []
     }
-  });
-  
-  // 从后端获取模型列表
-  const fetchModelList = async () => {
-    try {
-      const response = await fetch('/api/model-list');
-      if (response.ok) {
-        const data = await response.json();
-        if (data.status === 'success' && data.models) {
-          // 处理Bedrock模型
-          if (data.models.bedrock) {
-            const bedrockModels = Object.entries(data.models.bedrock).map(([key, info]) => ({
-              key,
-              name: info.name,
-              description: info.description,
-              alwaysAvailable: true
-            }));
-            
-            setModelCategories(prev => {
-              const newState = {
-                ...prev,
-                bedrock: {
-                  ...prev.bedrock,
-                  models: bedrockModels
-                }
-              };
-              return newState;
-            });
-          }
-          
-          // 处理EMD模型
-          if (data.models.emd) {
-            const emdModels = Object.entries(data.models.emd).map(([key, info]) => ({
-              key,
-              name: info.name,
-              description: info.description,
-              alwaysAvailable: false
-            }));
-            
-            setModelCategories(prev => {
-              const newState = {
-                ...prev,
-                emd: {
-                  ...prev.emd,
-                  models: emdModels
-                }
-              };
-              return newState;
-            });
-          }
-          
-          // 在成功获取模型列表后检查模型状态
-          return true;
-        }
-      } else {
-      }
-      return false;
-    } catch (error) {
-      return false;
-    }
-  };
+  }), []);
 
-  // 批量部署模型
-  const handleBatchDeploy = async () => {
+  const [modelCategories, setModelCategories] = useState(categoryTemplates);
+  
+
+  // 批量部署模型 (memoized for performance)
+  const handleBatchDeploy = useCallback(async () => {
     if (selectedModels.length === 0) {
       message.warning('请选择要部署的模型');
       return;
@@ -191,10 +135,10 @@ const ModelHubPage = () => {
       console.error('批量部署模型失败:', error);
       message.error('部署请求失败');
     }
-  };
+  }, [selectedModels, deploymentConfig]);
 
-  // 处理模型选择
-  const handleModelSelection = (modelKey, checked) => {
+  // 处理模型选择 (memoized for performance)
+  const handleModelSelection = useCallback((modelKey, checked) => {
     setSelectedModels(prev => {
       if (checked) {
         return [...prev, modelKey];
@@ -202,7 +146,7 @@ const ModelHubPage = () => {
         return prev.filter(key => key !== modelKey);
       }
     });
-  };
+  }, []);
 
   // Save modelStatus to localStorage
   useEffect(() => {
@@ -231,102 +175,100 @@ const ModelHubPage = () => {
     }
   }, [deploymentConfig]);
 
-  useEffect(() => {
-    const initData = async () => {
-      console.log('[Debug] 初始化组件数据');
+  // Optimized data fetching with parallel API calls and immediate UI rendering
+  const fetchModelData = useCallback(async () => {
+    try {
+      // Make both API calls in parallel for faster loading
+      const [modelListResponse] = await Promise.allSettled([
+        fetch('/api/model-list')
+      ]);
       
-      try {
-        // 快速获取模型列表并立即显示UI
-        const response = await fetch('/api/model-list');
-        if (response.ok) {
-          const data = await response.json();
-          console.log('[Debug] 获取到模型列表数据:', data);
-          
-          if (data.status === 'success' && data.models) {
-            // 构建bedrock模型列表
-            const bedrockModels = data.models.bedrock ? 
-              Object.entries(data.models.bedrock).map(([key, info]) => ({
-                key,
-                name: info.name,
-                description: info.description,
-                alwaysAvailable: true
-              })) : [];
-              
-            // 构建emd模型列表
-            const emdModels = data.models.emd ? 
-              Object.entries(data.models.emd).map(([key, info]) => ({
-                key,
-                name: info.name,
-                description: info.description,
-                alwaysAvailable: false
-              })) : [];
-              
-            console.log('[Debug] 处理后的模型列表:', { bedrockModels, emdModels });
-              
-            // 立即更新UI显示模型列表
-            setModelCategories({
-              bedrock: {
-                title: 'Bedrock 模型',
-                icon: <CloudOutlined />,
-                color: '#1890ff',
-                models: bedrockModels
-              },
-              emd: {
-                title: '部署模型',
-                icon: <ThunderboltOutlined />,
-                color: '#52c41a',
-                models: emdModels
-              }
-            });
+      if (modelListResponse.status === 'fulfilled' && modelListResponse.value.ok) {
+        const data = await modelListResponse.value.json();
+        
+        if (data.status === 'success' && data.models) {
+          // Process models with memoized transformation
+          const bedrockModels = data.models.bedrock ? 
+            Object.entries(data.models.bedrock).map(([key, info]) => ({
+              key,
+              name: info.name,
+              description: info.description,
+              alwaysAvailable: true
+            })) : [];
             
-            // 立即停止loading，让用户看到模型列表
-            setLoading(false);
+          const emdModels = data.models.emd ? 
+            Object.entries(data.models.emd).map(([key, info]) => ({
+              key,
+              name: info.name,
+              description: info.description,
+              alwaysAvailable: false
+            })) : [];
             
-            // 在后台异步加载模型状态
-            const allModels = [...bedrockModels.map(m => m.key), ...emdModels.map(m => m.key)];
-            console.log('[Debug] 将发送到后端的模型列表:', allModels);
-              
-            if (allModels.length > 0) {
-              // 后台异步检查模型状态，不阻塞UI
-              setTimeout(async () => {
-                try {
-                  const statusResponse = await fetch('/api/check-model-status', {
-                    method: 'POST',
-                    headers: {
-                      'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ models: allModels })
-                  });
-                    
-                  if (statusResponse.ok) {
-                    const statusData = await statusResponse.json();
-                    console.log('[Debug] 获取到模型状态响应:', statusData);
-                      
-                    if (statusData.model_status) {
-                      setModelStatus(statusData.model_status);
-                    }
-                  } else {
-                    console.log('[Debug] 状态检查失败, HTTP状态码:', statusResponse.status);
-                    const errorText = await statusResponse.text();
-                    console.log('[Debug] 错误内容:', errorText);
-                  }
-                } catch (statusError) {
-                  console.error('[Debug] 状态检查异常:', statusError);
-                }
-              }, 100); // 短暂延迟让UI先渲染
+          // Update UI immediately with model data
+          setModelCategories({
+            bedrock: {
+              ...categoryTemplates.bedrock,
+              models: bedrockModels
+            },
+            emd: {
+              ...categoryTemplates.emd,
+              models: emdModels
             }
+          });
+          
+          // Stop initial loading immediately
+          setInitialLoading(false);
+          
+          // Fetch status for deployable models only (non-blocking)
+          const deployableModels = emdModels.map(m => m.key);
+          if (deployableModels.length > 0) {
+            setStatusLoading(true);
+            
+            // Use requestIdleCallback or setTimeout to defer status check
+            const timeoutId = setTimeout(async () => {
+              try {
+                const statusResponse = await fetch('/api/check-model-status', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ models: deployableModels })
+                });
+                
+                if (statusResponse.ok) {
+                  const statusData = await statusResponse.json();
+                  if (statusData.model_status) {
+                    setModelStatus(statusData.model_status);
+                  }
+                }
+              } catch (error) {
+                console.warn('Status check failed:', error);
+              } finally {
+                setStatusLoading(false);
+              }
+            }, 50); // Minimal delay to let UI render first
+            
+            return () => clearTimeout(timeoutId);
           }
         }
-      } catch (error) {
-        console.error('[Debug] 初始化数据异常:', error);
-        setLoading(false); // 确保即使出错也停止loading
       }
-    };
-    
-    initData();
+    } catch (error) {
+      console.error('Failed to fetch model data:', error);
+    } finally {
+      setInitialLoading(false);
+    }
+  }, [categoryTemplates]);
+
+  useEffect(() => {
+    fetchModelData();
+  }, [fetchModelData]);
+
+  const handleCleanup = useCallback((modelKey) => {
+    // TODO: 实现清理资源逻辑
+    console.log(`Cleanup requested for model: ${modelKey}`);
+    // 这里以后会调用清理API
+    // message.info(`${modelKey} 清理功能开发中...`);
   }, []);
 
-  const getStatusTag = (model) => {
+  const getStatusTag = useCallback((model) => {
     if (model.alwaysAvailable) {
       return <Tag color="success" icon={<CheckCircleOutlined />}>可用</Tag>;
     }
@@ -349,9 +291,9 @@ const ModelHubPage = () => {
       default:
         return <Tag color="default">未知</Tag>;
     }
-  };
+  }, [modelStatus]);
 
-  const getModelCheckbox = (model) => {
+  const getModelCheckbox = useCallback((model) => {
     if (model.alwaysAvailable) return null;
     
     const status = modelStatus[model.key];
@@ -370,9 +312,9 @@ const ModelHubPage = () => {
         选择部署
       </Checkbox>
     );
-  };
+  }, [modelStatus, selectedModels, handleModelSelection]);
 
-  const getCleanupButton = (model) => {
+  const getCleanupButton = useCallback((model) => {
     if (model.alwaysAvailable) return null;
     
     const status = modelStatus[model.key];
@@ -393,16 +335,33 @@ const ModelHubPage = () => {
     }
     
     return null;
-  };
+  }, [modelStatus, handleCleanup]);
 
-  const handleCleanup = (modelKey) => {
-    // TODO: 实现清理资源逻辑
-    console.log(`Cleanup requested for model: ${modelKey}`);
-    // 这里以后会调用清理API
-    // message.info(`${modelKey} 清理功能开发中...`);
-  };
+  // Skeleton component for loading states
+  const SkeletonCard = useMemo(() => (
+    <Card
+      size="small"
+      style={{ 
+        marginBottom: 16,
+        borderRadius: 8
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <Skeleton.Input style={{ width: 150, height: 20 }} active />
+            <Skeleton.Button style={{ width: 60, height: 24 }} active />
+          </div>
+          <Skeleton active paragraph={{ rows: 2, width: ['100%', '80%'] }} title={false} />
+        </div>
+        <div style={{ marginLeft: 16, width: 80 }}>
+          <Skeleton.Button style={{ width: '100%', height: 32 }} active />
+        </div>
+      </div>
+    </Card>
+  ), []);
 
-  const renderModelCard = (model) => (
+  const renderModelCard = useCallback((model) => (
     <Card
       key={model.key}
       size="small"
@@ -432,7 +391,7 @@ const ModelHubPage = () => {
         </div>
       </div>
     </Card>
-  );
+  ), [getStatusTag, getModelCheckbox, getCleanupButton]);
 
   return (
     <div style={{ padding: '24px', background: '#f5f5f5', minHeight: '100vh' }}>
@@ -446,41 +405,101 @@ const ModelHubPage = () => {
         </Text>
       </div>
 
-      <Spin spinning={loading}>
-        {Object.entries(modelCategories).map(([categoryKey, category]) => (
-          <div key={categoryKey} style={{ marginBottom: 32 }}>
-            <div style={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              marginBottom: 16
-            }}>
-              <Space>
-                {category.icon}
-                <Title level={3} style={{ margin: 0, color: category.color }}>
-                  {category.title}
-                </Title>
-              </Space>
-            </div>
-            
-            <Row gutter={[16, 16]}>
-              {category.models.map(model => (
+      {/* Show UI structure immediately, even during initial loading */}
+      {Object.entries(modelCategories).map(([categoryKey, category]) => (
+        <div key={categoryKey} style={{ marginBottom: 32 }}>
+          <div style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            marginBottom: 16
+          }}>
+            <Space>
+              {category.icon}
+              <Title level={3} style={{ margin: 0, color: category.color }}>
+                {category.title}
+              </Title>
+              {statusLoading && categoryKey === 'emd' && (
+                <Spin size="small" />
+              )}
+            </Space>
+          </div>
+          
+          <Row gutter={[16, 16]}>
+            {initialLoading ? (
+              // Show skeleton cards during initial loading
+              Array.from({ length: 6 }, (_, index) => (
+                <Col key={`skeleton-${categoryKey}-${index}`} xs={24} sm={12} lg={8} xl={6}>
+                  {SkeletonCard}
+                </Col>
+              ))
+            ) : (
+              // Show actual model cards once data is loaded
+              category.models.map(model => (
                 <Col key={model.key} xs={24} sm={12} lg={8} xl={6}>
                   {renderModelCard(model)}
                 </Col>
+              ))
+            )}
+          </Row>
+          
+          {categoryKey !== 'emd' && <Divider />}
+        </div>
+      ))}
+      
+      {/* Show skeleton structure if no categories loaded yet */}
+      {initialLoading && Object.keys(modelCategories).length === 0 && (
+        <>
+          <div style={{ marginBottom: 32 }}>
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
+              <Space>
+                <CloudOutlined />
+                <Title level={3} style={{ margin: 0, color: '#1890ff' }}>
+                  Bedrock 模型
+                </Title>
+              </Space>
+            </div>
+            <Row gutter={[16, 16]}>
+              {Array.from({ length: 4 }, (_, index) => (
+                <Col key={`bedrock-skeleton-${index}`} xs={24} sm={12} lg={8} xl={6}>
+                  {SkeletonCard}
+                </Col>
               ))}
             </Row>
-            
-            {categoryKey !== 'emd' && <Divider />}
+            <Divider />
           </div>
-        ))}
-        {/* 部署配置面板 */}
-        {Object.values(modelCategories).some(category => 
+          
+          <div style={{ marginBottom: 32 }}>
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
+              <Space>
+                <ThunderboltOutlined />
+                <Title level={3} style={{ margin: 0, color: '#52c41a' }}>
+                  部署模型
+                </Title>
+              </Space>
+            </div>
+            <Row gutter={[16, 16]}>
+              {Array.from({ length: 6 }, (_, index) => (
+                <Col key={`emd-skeleton-${index}`} xs={24} sm={12} lg={8} xl={6}>
+                  {SkeletonCard}
+                </Col>
+              ))}
+            </Row>
+          </div>
+        </>
+      )}
+      {/* 部署配置面板 - 只有在有可部署模型时显示 */}
+      {useMemo(() => {
+        const hasDeployableModels = Object.values(modelCategories).some(category => 
           category.models.some(model => 
             !model.alwaysAvailable && 
             (!modelStatus[model.key] || 
              ['not_deployed', 'failed'].includes(modelStatus[model.key]?.status))
           )
-        ) && (
+        );
+
+        if (!hasDeployableModels) return null;
+
+        return (
           <Card 
             title={
               <Space>
@@ -583,8 +602,8 @@ const ModelHubPage = () => {
               </Row>
             </Form>
           </Card>
-        )}
-      </Spin>
+        );
+      }, [modelCategories, modelStatus, selectedModels, deploymentConfig, handleBatchDeploy])}
     </div>
   );
 };
