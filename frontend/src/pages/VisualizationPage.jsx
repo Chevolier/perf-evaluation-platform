@@ -683,18 +683,70 @@ const VisualizationPage = () => {
         if (result && result.data?.performance_data) {
           const performanceData = result.data.performance_data;
           
-          // Check if we need a new page for the table
-          const tableHeight = (performanceData.length + 4) * 6 + 25; // Estimate table height with borders
+          // Check if we need a new page for the table and parameters
+          const tableHeight = (performanceData.length + 4) * 6 + 80; // Estimate table height with borders + parameters
           if (currentY + tableHeight > pageHeight - margin) {
             doc.addPage();
             currentY = margin;
           }
 
           // Table header with background
-          doc.setFontSize(12);
+          doc.setFontSize(14);
           doc.setFont('helvetica', 'bold');
           doc.text(`${result.model} - ${result.session_id} Performance Metrics`, margin, currentY);
-          currentY += 12;
+          currentY += 15;
+
+          // Add key parameters section
+          doc.setFontSize(10);
+          doc.setFont('helvetica', 'normal');
+          
+          // Parameters in two columns
+          const leftColumnX = margin;
+          const rightColumnX = margin + 90;
+          
+          // Left column
+          doc.setFont('helvetica', 'bold');
+          doc.text('Model:', leftColumnX, currentY);
+          doc.setFont('helvetica', 'normal');
+          doc.text(result.model || 'N/A', leftColumnX + 25, currentY);
+          
+          doc.setFont('helvetica', 'bold');
+          doc.text('Instance Type:', leftColumnX, currentY + 8);
+          doc.setFont('helvetica', 'normal');
+          doc.text(result.instance_type || 'N/A', leftColumnX + 35, currentY + 8);
+          
+          doc.setFont('helvetica', 'bold');
+          doc.text('Framework:', leftColumnX, currentY + 16);
+          doc.setFont('helvetica', 'normal');
+          doc.text(result.framework || 'N/A', leftColumnX + 30, currentY + 16);
+          
+          doc.setFont('helvetica', 'bold');
+          doc.text('Dataset:', leftColumnX, currentY + 24);
+          doc.setFont('helvetica', 'normal');
+          doc.text(result.dataset || 'N/A', leftColumnX + 25, currentY + 24);
+          
+          // Right column
+          doc.setFont('helvetica', 'bold');
+          doc.text('TP (Tensor Parallel):', rightColumnX, currentY);
+          doc.setFont('helvetica', 'normal');
+          doc.text(result.tp?.toString() || 'N/A', rightColumnX + 55, currentY);
+          
+          doc.setFont('helvetica', 'bold');
+          doc.text('DP (Data Parallel):', rightColumnX, currentY + 8);
+          doc.setFont('helvetica', 'normal');
+          doc.text(result.dp?.toString() || 'N/A', rightColumnX + 50, currentY + 8);
+          
+          doc.setFont('helvetica', 'bold');
+          doc.text('Input Tokens:', rightColumnX, currentY + 16);
+          doc.setFont('helvetica', 'normal');
+          doc.text(result.input_tokens?.toString() || 'N/A', rightColumnX + 35, currentY + 16);
+          
+          doc.setFont('helvetica', 'bold');
+          doc.text('Output Tokens:', rightColumnX, currentY + 24);
+          doc.setFont('helvetica', 'normal');
+          doc.text(result.output_tokens?.toString() || 'N/A', rightColumnX + 40, currentY + 24);
+          
+          currentY += 35;
 
           // Table setup
           const headers = ['Concurrency', 'RPS', 'Gen Tput', 'Total Tput', 'Avg Lat', 'Avg TTFT', 'Avg TPOT'];
