@@ -297,40 +297,33 @@ const VisualizationPage = () => {
                     </Text>
                     <Space wrap size="small">
                       <Tag size="small">Concurrency: {(() => {
-                        console.log('Concurrency value:', session.concurrency, 'Type:', typeof session.concurrency);
-                        const formatNumber = (val) => {
-                          const str = String(val);
-                          // If it looks like concatenated numbers, try to split and format
-                          if (str.length > 6 && /^\d+$/.test(str)) {
-                            // Try to parse as single large number first
-                            const num = parseInt(str);
-                            if (!isNaN(num)) {
-                              return num.toLocaleString();
-                            }
+                        console.log('Available Results - Session object:', session);
+                        console.log('Available Results - Concurrency value:', session.concurrency, 'Type:', typeof session.concurrency);
+                        const val = String(session.concurrency);
+                        if (/^\d+$/.test(val)) {
+                          try {
+                            const num = parseInt(val, 10);
+                            console.log('Available Results - Parsed concurrency:', num);
+                            return num.toLocaleString();
+                          } catch (e) {
+                            console.error('Available Results - Error parsing concurrency:', e);
                           }
-                          // Try to parse as regular number
-                          const num = parseInt(str);
-                          return !isNaN(num) ? num.toLocaleString() : str;
-                        };
-                        return formatNumber(session.concurrency);
+                        }
+                        return val;
                       })()}</Tag>
                       <Tag size="small">Requests: {(() => {
-                        console.log('Requests value:', session.total_requests, 'Type:', typeof session.total_requests);
-                        const formatNumber = (val) => {
-                          const str = String(val);
-                          // If it looks like concatenated numbers, try to split and format
-                          if (str.length > 6 && /^\d+$/.test(str)) {
-                            // Try to parse as single large number first
-                            const num = parseInt(str);
-                            if (!isNaN(num)) {
-                              return num.toLocaleString();
-                            }
+                        console.log('Available Results - Requests value:', session.total_requests, 'Type:', typeof session.total_requests);
+                        const val = String(session.total_requests);
+                        if (/^\d+$/.test(val)) {
+                          try {
+                            const num = parseInt(val, 10);
+                            console.log('Available Results - Parsed requests:', num);
+                            return num.toLocaleString();
+                          } catch (e) {
+                            console.error('Available Results - Error parsing requests:', e);
                           }
-                          // Try to parse as regular number
-                          const num = parseInt(str);
-                          return !isNaN(num) ? num.toLocaleString() : str;
-                        };
-                        return formatNumber(session.total_requests);
+                        }
+                        return val;
                       })()}</Tag>
                     </Space>
                   </Space>
