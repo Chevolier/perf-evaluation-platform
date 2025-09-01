@@ -293,21 +293,14 @@ class ModelService:
                     "transformers": "hf"
                 }
                 framework_type = framework_mapping.get(engine_type, engine_type)
-                
-                # # Remove 'ml.' prefix from instance type for EMD deployment
-                # if service_type in ["sagemaker_realtime", "sagemaker_async"]:
-                #     emd_instance_type = "ml."+ instance_type if not instance_type.startswith('ml.') else instance_type
-                
-                emd_instance_type = instance_type
 
                 logger.info(f"Starting EMD deployment for {model_key} (model_path: {model_path}) with tag {deployment_tag}")
                 print(f"🚀 DEBUG: Starting EMD deployment for {model_key} (model_path: {model_path}) with tag {deployment_tag}")
-                print(f"🚀 DEBUG: Converting instance type from {instance_type} to {emd_instance_type}")
                 
                 # Call EMD deployment with correct parameters matching CLI format
                 result = emd_deploy(
                     model_id=model_path,
-                    instance_type=emd_instance_type,
+                    instance_type=instance_type,
                     engine_type=framework_type,
                     service_type=service_type,  # Use the service_type parameter from API request
                     framework_type="fastapi",  # Default framework type
