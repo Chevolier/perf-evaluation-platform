@@ -44,7 +44,17 @@ const PlaygroundPage = ({
   onParamsChange,
   onModelChange
 }) => {
-  const [inferenceResults, setInferenceResults] = useState({});
+  // Load inference results from localStorage
+  const [inferenceResults, setInferenceResults] = useState(() => {
+    try {
+      const saved = localStorage.getItem('playground_inferenceResults');
+      return saved ? JSON.parse(saved) : {};
+    } catch (error) {
+      console.error('Failed to load inference results from localStorage:', error);
+      return {};
+    }
+  });
+  
   const [isInferring, setIsInferring] = useState(false);
   const [modelSelectorVisible, setModelSelectorVisible] = useState(false);
   
@@ -77,6 +87,14 @@ const PlaygroundPage = ({
   const fileInputRef = useRef(null);
 
   // Save playground internal state to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('playground_inferenceResults', JSON.stringify(inferenceResults));
+    } catch (error) {
+      console.error('Failed to save inference results to localStorage:', error);
+    }
+  }, [inferenceResults]);
+
   useEffect(() => {
     try {
       localStorage.setItem('playground_inputMode', JSON.stringify(inputMode));
