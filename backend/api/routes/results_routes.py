@@ -78,20 +78,18 @@ def get_results_structure():
                     output_tokens = stress_config.get('output_tokens', {})
                     tokens_desc = f"input:{input_tokens.get('min', 0)}-{input_tokens.get('max', 0)}_output:{output_tokens.get('min', 0)}-{output_tokens.get('max', 0)}"
                     
-                    # Build hierarchy: model -> instance -> framework -> dataset -> tokens
+                    # Build flatter hierarchy: model -> instance_framework_dataset -> tokens
+                    instance_framework_dataset = f"{instance_type}_{framework}_{dataset}"
+                    
                     if model_name not in hierarchy:
                         hierarchy[model_name] = {}
-                    if instance_type not in hierarchy[model_name]:
-                        hierarchy[model_name][instance_type] = {}
-                    if framework not in hierarchy[model_name][instance_type]:
-                        hierarchy[model_name][instance_type][framework] = {}
-                    if dataset not in hierarchy[model_name][instance_type][framework]:
-                        hierarchy[model_name][instance_type][framework][dataset] = {}
-                    if tokens_desc not in hierarchy[model_name][instance_type][framework][dataset]:
-                        hierarchy[model_name][instance_type][framework][dataset][tokens_desc] = []
+                    if instance_framework_dataset not in hierarchy[model_name]:
+                        hierarchy[model_name][instance_framework_dataset] = {}
+                    if tokens_desc not in hierarchy[model_name][instance_framework_dataset]:
+                        hierarchy[model_name][instance_framework_dataset][tokens_desc] = []
                     
                     # Add session to the deepest level
-                    hierarchy[model_name][instance_type][framework][dataset][tokens_desc].append({
+                    hierarchy[model_name][instance_framework_dataset][tokens_desc].append({
                         "key": f"{model_name}_{instance_type}_{framework}_{dataset}_{tokens_desc}_{session_id}",
                         "session_id": session_id,
                         "model": model_name,
@@ -166,7 +164,7 @@ def get_results_structure():
             "structure": structure,
             "total_models": len(hierarchy),
             "total_sessions": total_sessions,
-            "hierarchy_levels": ["model", "instance", "framework", "dataset", "input_output_tokens"]
+            "hierarchy_levels": ["model", "instance_framework_dataset", "input_output_tokens"]
         })
         
     except Exception as e:
