@@ -23,7 +23,8 @@ import {
   DashboardOutlined,
   FolderOutlined,
   FileTextOutlined,
-  CheckCircleOutlined
+  CheckCircleOutlined,
+  DownloadOutlined
 } from '@ant-design/icons';
 
 const { Title, Text } = Typography;
@@ -33,6 +34,7 @@ const API_BASE = process.env.REACT_APP_API_BASE || '';
 
 const VisualizationPage = () => {
   const [loading, setLoading] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState(null);
   const [resultsTree, setResultsTree] = useState([]);
   
@@ -501,7 +503,7 @@ const VisualizationPage = () => {
     }, {});
 
     return (
-      <Row gutter={[16, 16]}>
+      <Row gutter={[16, 16]} data-chart-row>
         {allowedMetrics.filter(metric => metricGroups[metric]).map((metric) => {
           const data = metricGroups[metric];
           console.log(`Rendering chart for metric ${metric}:`, data);
@@ -610,6 +612,121 @@ const VisualizationPage = () => {
     }
   }, [resultData]);
 
+  // Download report as PDF
+  const downloadReport = async () => {
+    if (selectedResults.length === 0) {
+      message.warning('请先选择要导出的结果');
+      return;
+    }
+
+    setDownloading(true);
+    
+    try {
+      // Import libraries dynamically to avoid bundle size issues
+      const html2canvas = (await import('html2canvas')).default;
+      const jsPDF = (await import('jspdf')).default;
+
+      message.loading('正在生成PDF报告...', 0);
+
+      const doc = new jsPDF('p', 'mm', 'a4');
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const margin = 20;
+      let currentY = margin;
+
+      // Title
+      doc.setFontSize(20);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Benchmark Results Visualization Report', pageWidth / 2, currentY, { align: 'center' });
+      currentY += 20;
+
+      // Generated timestamp
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
+      const timestamp = new Date().toLocaleString();
+      doc.text(`Generated on: ${timestamp}`, margin, currentY);
+      currentY += 15;
+
+      // Selected results summary
+      doc.setFontSize(12);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Selected Results:', margin, currentY);
+      currentY += 8;
+
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
+      selectedResults.forEach((resultKey, index) => {
+        const result = resultData[resultKey];
+        if (result && currentY < pageHeight - 30) {
+          const summaryText = `${index + 1}. ${result.model} - ${result.session_id} (${result.instance_type}, ${result.framework})`;
+          doc.text(summaryText, margin + 5, currentY);
+          currentY += 6;
+        } else if (result && currentY >= pageHeight - 30) {
+          doc.addPage();
+          currentY = margin;
+          const summaryText = `${index + 1}. ${result.model} - ${result.session_id} (${result.instance_type}, ${result.framework})`;
+          doc.text(summaryText, margin + 5, currentY);
+          currentY += 6;
+        }
+      });
+
+      currentY += 10;
+
+      // Capture charts
+      const chartRows = document.querySelectorAll('[data-chart-row]');
+      
+      for (let i = 0; i < chartRows.length; i++) {
+        const row = chartRows[i];
+        
+        try {
+          // Check if we need a new page
+          if (currentY > pageHeight - 100) {
+            doc.addPage();
+            currentY = margin;
+          }
+
+          const canvas = await html2canvas(row, {
+            scale: 2,
+            useCORS: true,
+            backgroundColor: '#ffffff',
+            width: row.offsetWidth,
+            height: row.offsetHeight
+          });
+
+          const imgData = canvas.toDataURL('image/png');
+          const imgWidth = pageWidth - (margin * 2);
+          const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+          // Check if image fits in current page
+          if (currentY + imgHeight > pageHeight - margin) {
+            doc.addPage();
+            currentY = margin;
+          }
+
+          doc.addImage(imgData, 'PNG', margin, currentY, imgWidth, imgHeight);
+          currentY += imgHeight + 10;
+
+        } catch (error) {
+          console.error(`Error capturing chart ${i}:`, error);
+        }
+      }
+
+      // Save the PDF
+      const filename = `benchmark-visualization-report-${new Date().toISOString().slice(0, 10)}.pdf`;
+      doc.save(filename);
+
+      message.destroy();
+      message.success('PDF报告已生成并下载');
+
+    } catch (error) {
+      message.destroy();
+      console.error('Error generating PDF:', error);
+      message.error('生成PDF报告时出现错误');
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   useEffect(() => {
     fetchResultsStructure();
   }, []);
@@ -630,13 +747,24 @@ const VisualizationPage = () => {
                 </Text>
               </Col>
               <Col>
-                <Button 
-                  icon={<ReloadOutlined />} 
-                  onClick={fetchResultsStructure}
-                  loading={loading}
-                >
-                  Refresh Results
-                </Button>
+                <Space>
+                  <Button 
+                    icon={<ReloadOutlined />} 
+                    onClick={fetchResultsStructure}
+                    loading={loading}
+                  >
+                    Refresh Results
+                  </Button>
+                  <Button 
+                    type="primary"
+                    icon={<DownloadOutlined />} 
+                    onClick={downloadReport}
+                    loading={downloading}
+                    disabled={selectedResults.length === 0}
+                  >
+                    下载报告
+                  </Button>
+                </Space>
               </Col>
             </Row>
           </Card>
