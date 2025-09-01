@@ -296,8 +296,42 @@ const VisualizationPage = () => {
                       {new Date(session.timestamp).toLocaleString()}
                     </Text>
                     <Space wrap size="small">
-                      <Tag size="small">Concurrency: {session.concurrency}</Tag>
-                      <Tag size="small">Requests: {session.total_requests}</Tag>
+                      <Tag size="small">Concurrency: {(() => {
+                        console.log('Concurrency value:', session.concurrency, 'Type:', typeof session.concurrency);
+                        const formatNumber = (val) => {
+                          const str = String(val);
+                          // If it looks like concatenated numbers, try to split and format
+                          if (str.length > 6 && /^\d+$/.test(str)) {
+                            // Try to parse as single large number first
+                            const num = parseInt(str);
+                            if (!isNaN(num)) {
+                              return num.toLocaleString();
+                            }
+                          }
+                          // Try to parse as regular number
+                          const num = parseInt(str);
+                          return !isNaN(num) ? num.toLocaleString() : str;
+                        };
+                        return formatNumber(session.concurrency);
+                      })()}</Tag>
+                      <Tag size="small">Requests: {(() => {
+                        console.log('Requests value:', session.total_requests, 'Type:', typeof session.total_requests);
+                        const formatNumber = (val) => {
+                          const str = String(val);
+                          // If it looks like concatenated numbers, try to split and format
+                          if (str.length > 6 && /^\d+$/.test(str)) {
+                            // Try to parse as single large number first
+                            const num = parseInt(str);
+                            if (!isNaN(num)) {
+                              return num.toLocaleString();
+                            }
+                          }
+                          // Try to parse as regular number
+                          const num = parseInt(str);
+                          return !isNaN(num) ? num.toLocaleString() : str;
+                        };
+                        return formatNumber(session.total_requests);
+                      })()}</Tag>
                     </Space>
                   </Space>
                 </Card>
@@ -673,8 +707,36 @@ const VisualizationPage = () => {
                           </Space>
                           <Space wrap size="small">
                             <Tag size="small">Tokens: {result.tokens_desc}</Tag>
-                            <Tag size="small">Concurrency: {result.concurrency}</Tag>
-                            <Tag size="small">Requests: {result.total_requests}</Tag>
+                            <Tag size="small">Concurrency: {(() => {
+                              console.log('Summary Concurrency value:', result.concurrency, 'Type:', typeof result.concurrency);
+                              const val = String(result.concurrency);
+                              // Handle large numbers by parsing as integer
+                              if (/^\d+$/.test(val)) {
+                                try {
+                                  const num = parseInt(val, 10);
+                                  console.log('Parsed concurrency:', num);
+                                  return num.toLocaleString();
+                                } catch (e) {
+                                  console.error('Error parsing concurrency:', e);
+                                }
+                              }
+                              return val;
+                            })()}</Tag>
+                            <Tag size="small">Requests: {(() => {
+                              console.log('Summary Requests value:', result.total_requests, 'Type:', typeof result.total_requests);
+                              const val = String(result.total_requests);
+                              // Handle large numbers by parsing as integer
+                              if (/^\d+$/.test(val)) {
+                                try {
+                                  const num = parseInt(val, 10);
+                                  console.log('Parsed requests:', num);
+                                  return num.toLocaleString();
+                                } catch (e) {
+                                  console.error('Error parsing requests:', e);
+                                }
+                              }
+                              return val;
+                            })()}</Tag>
                           </Space>
                         </Space>
                       </Card>
