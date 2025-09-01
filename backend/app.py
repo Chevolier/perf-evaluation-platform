@@ -23,11 +23,13 @@ def create_app(environment=None):
     config = get_config()
     config.load_config(environment)
     
-    # Setup logging
-    setup_logging(
-        log_level=config.get('logging.level', 'INFO'),
-        log_file=config.get('logging.file')
-    )
+    # Setup logging (skip if already configured)
+    import logging
+    if not logging.getLogger().handlers:
+        setup_logging(
+            log_level=config.get('logging.level', 'INFO'),
+            log_file=config.get('logging.file')
+        )
     
     # Configure CORS
     CORS(app, 

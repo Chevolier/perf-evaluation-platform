@@ -29,6 +29,44 @@ def register_blueprints(app: Flask) -> None:
     def health_check():
         return {"status": "healthy", "service": "inference-platform"}
     
+    # Debug logging endpoint
+    @app.route('/debug/logging')
+    def debug_logging():
+        import logging
+        root_logger = logging.getLogger()
+        
+        # Test direct logging
+        root_logger.info("🧪 DIRECT ROOT LOGGER TEST FROM ENDPOINT")
+        
+        # Test named logger
+        from ...utils import get_logger
+        test_logger = get_logger("debug_endpoint")
+        test_logger.warning("🧪 NAMED LOGGER TEST FROM ENDPOINT")
+        
+        # Force flush all handlers
+        for handler in root_logger.handlers:
+            if hasattr(handler, 'flush'):
+                handler.flush()
+        
+        handlers_info = []
+        for i, handler in enumerate(root_logger.handlers):
+            handler_info = {
+                "index": i,
+                "type": type(handler).__name__,
+                "level": handler.level,
+                "formatter": str(handler.formatter) if handler.formatter else None
+            }
+            if hasattr(handler, 'baseFilename'):
+                handler_info["file"] = handler.baseFilename
+            handlers_info.append(handler_info)
+        
+        return {
+            "root_logger_level": root_logger.level,
+            "handlers_count": len(root_logger.handlers),
+            "handlers": handlers_info,
+            "test_message": "Check logs/development.log for test messages"
+        }
+    
     # Root endpoint
     @app.route('/')
     def root():

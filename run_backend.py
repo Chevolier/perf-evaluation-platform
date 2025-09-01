@@ -16,6 +16,20 @@ from backend.config import get_environment
 def main():
     """Main entry point."""
     environment = get_environment()
+    
+    # Set up logging BEFORE creating the app to ensure all module imports are logged
+    from backend.config import get_config
+    from backend.utils import setup_logging
+    
+    config = get_config()
+    config.load_config(environment)
+    
+    setup_logging(
+        log_level=config.get('logging.level', 'INFO'),
+        log_file=config.get('logging.file')
+    )
+    
+    # Now create the app - blueprints and services will be imported with logging active
     app = create_app(environment)
     
     # Get configuration

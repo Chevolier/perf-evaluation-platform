@@ -10,6 +10,9 @@ stress_test_bp = Blueprint('stress_test', __name__)
 # Initialize service
 stress_test_service = StressTestService()
 
+# Test route-level logging immediately
+logger.info("🚀 Stress test routes loaded and service initialized")
+
 @stress_test_bp.route('/stress-test/start', methods=['POST'])
 def start_stress_test():
     """Start a stress test session."""

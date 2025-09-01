@@ -7,6 +7,18 @@ from pathlib import Path
 from typing import Optional
 
 
+class FlushingRotatingFileHandler(logging.handlers.RotatingFileHandler):
+    """Custom rotating file handler that flushes after every log message."""
+    
+    def emit(self, record):
+        """Emit a record and flush immediately."""
+        try:
+            super().emit(record)
+            self.flush()
+        except Exception:
+            self.handleError(record)
+
+
 def setup_logging(
     log_level: str = "INFO",
     log_file: Optional[str] = None,
@@ -36,13 +48,24 @@ def setup_logging(
     logger = logging.getLogger()
     logger.setLevel(numeric_level)
     
-    # Check if we already have handlers setup to avoid duplicates in Flask auto-reload
-    existing_file_handlers = [h for h in logger.handlers if isinstance(h, logging.handlers.RotatingFileHandler)]
-    existing_console_handlers = [h for h in logger.handlers if isinstance(h, logging.StreamHandler) and not isinstance(h, logging.handlers.RotatingFileHandler)]
+    # Check if we already have a file handler for this specific log file to avoid duplicates
+    if log_file:
+        abs_log_file = os.path.abspath(log_file)
+        existing_file_handlers = [h for h in logger.handlers 
+                                if isinstance(h, (logging.FileHandler, logging.handlers.RotatingFileHandler))
+                                and hasattr(h, 'baseFilename') 
+                                and h.baseFilename == abs_log_file]
+        
+        # If we already have a handler for this exact file, don't add another
+        if existing_file_handlers:
+            print(f"📋 File handler already exists for: {log_file}")
+            return
     
-    # Only remove handlers if we're setting up fresh (no existing file handlers with same log file)
-    if not existing_file_handlers or (log_file and not any(h.baseFilename == os.path.abspath(log_file) for h in existing_file_handlers)):
-        # Remove existing handlers to avoid duplicates
+    # Clear existing handlers only if we're setting up fresh logging
+    if not logger.handlers:
+        pass  # No handlers to remove
+    else:
+        # Only remove if we don't have the right file handler
         for handler in logger.handlers[:]:
             logger.removeHandler(handler)
     
@@ -67,27 +90,15 @@ def setup_logging(
         print(f"📝 Log directory exists: {log_path.parent.exists()}")
         
         try:
-            # Rotating file handler with immediate flush
-            file_handler = logging.handlers.RotatingFileHandler(
-                log_file,
-                maxBytes=max_bytes,
-                backupCount=backup_count,
-                encoding='utf-8'
-            )
-            file_handler.setLevel(numeric_level)
-            file_handler.setFormatter(formatter)
-            
-            # Force immediate flushing for debugging
-            class FlushingRotatingFileHandler(logging.handlers.RotatingFileHandler):
+            # Use custom flushing file handler to ensure immediate writes
+            class ImmediateFlushFileHandler(logging.FileHandler):
                 def emit(self, record):
                     super().emit(record)
                     self.flush()
             
-            # Replace with flushing handler
-            file_handler = FlushingRotatingFileHandler(
+            file_handler = ImmediateFlushFileHandler(
                 log_file,
-                maxBytes=max_bytes,
-                backupCount=backup_count,
+                mode='a',
                 encoding='utf-8'
             )
             file_handler.setLevel(numeric_level)
