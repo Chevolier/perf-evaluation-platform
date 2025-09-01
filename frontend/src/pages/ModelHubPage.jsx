@@ -107,29 +107,64 @@ const ModelHubPage = () => {
         },
         body: JSON.stringify({ 
           models: selectedModels,
-          config: deploymentConfig
+          instance_type: deploymentConfig.machineType,
+          engine_type: deploymentConfig.framework
         })
       });
       
       if (response.ok) {
-        message.success(`已开始部署 ${selectedModels.length} 个模型`);
+        const responseData = await response.json();
+        console.log('Deployment response:', responseData);
         
-        // 更新所有选中模型的状态为部署中
-        const newStatus = {};
-        selectedModels.forEach(modelKey => {
-          newStatus[modelKey] = { status: 'init', message: '初始化' };
-        });
-        
-        setModelStatus(prev => ({
-          ...prev,
-          ...newStatus
-        }));
+        if (responseData.status === 'success') {
+          // Check individual model deployment results
+          const results = responseData.results || {};
+          let successCount = 0;
+          let failedCount = 0;
+          
+          const newStatus = {};
+          selectedModels.forEach(modelKey => {
+            const modelResult = results[modelKey];
+            if (modelResult && modelResult.success) {
+              newStatus[modelKey] = { 
+                status: 'inprogress', 
+                message: '部署中',
+                tag: modelResult.tag
+              };
+              successCount++;
+            } else {
+              newStatus[modelKey] = { 
+                status: 'failed', 
+                message: modelResult?.error || '部署失败'
+              };
+              failedCount++;
+            }
+          });
+          
+          setModelStatus(prev => ({
+            ...prev,
+            ...newStatus
+          }));
+          
+          // Show appropriate message
+          if (failedCount === 0) {
+            message.success(`已开始部署 ${successCount} 个模型`);
+          } else if (successCount === 0) {
+            message.error(`${failedCount} 个模型部署失败`);
+          } else {
+            message.warning(`${successCount} 个模型开始部署，${failedCount} 个模型部署失败`);
+          }
+        } else {
+          message.error(`部署请求失败: ${responseData.message || '未知错误'}`);
+        }
         
         // 清空选择
         setSelectedModels([]);
         
       } else {
-        message.error('批量部署请求失败');
+        const errorText = await response.text();
+        console.error('Deployment failed:', response.status, errorText);
+        message.error(`批量部署请求失败 (${response.status}): ${errorText}`);
       }
     } catch (error) {
       console.error('批量部署模型失败:', error);

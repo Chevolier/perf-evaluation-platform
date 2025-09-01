@@ -6,7 +6,7 @@ from datetime import datetime
 
 try:
     from emd.sdk.status import get_model_status
-    from emd.sdk.clients.sagemaker_client import SageMakerClient
+    from emd.sdk.deploy import deploy as emd_deploy
     EMD_AVAILABLE = True
 except ImportError:
     EMD_AVAILABLE = False
@@ -256,15 +256,76 @@ class ModelService:
             "started_at": datetime.now().isoformat()
         }
         
-        # In production, this would trigger actual EMD deployment
-        logger.info(f"Started deployment of {model_key} with tag {deployment_tag}")
-        
-        return {
-            "success": True,
-            "message": f"Deployment started for {model_key}",
-            "tag": deployment_tag,
-            "model_key": model_key
-        }
+        # Trigger actual EMD deployment
+        if EMD_AVAILABLE:
+            try:
+                model_path = model_config.get("model_path", model_key)
+                
+                # Map frontend engine types to EMD framework types
+                framework_mapping = {
+                    "vllm": "vllm",
+                    "sglang": "sglang", 
+                    "tgi": "tgi",
+                    "transformers": "hf"
+                }
+                framework_type = framework_mapping.get(engine_type, engine_type)
+                
+                logger.info(f"Starting EMD deployment for {model_key} (model_path: {model_path}) with tag {deployment_tag}")
+                
+                # Call EMD deployment
+                result = emd_deploy(
+                    model_id=model_path,
+                    instance_type=instance_type,
+                    engine_type=framework_type,
+                    model_tag=deployment_tag,
+                    waiting_until_deploy_complete=False  # Don't wait, return immediately
+                )
+                
+                logger.info(f"EMD deployment initiated for {model_key}: {result}")
+                
+                # Update status to deploying
+                self._deployment_status[model_key] = {
+                    "status": "deploying",
+                    "message": f"Deployment in progress for {model_key}",
+                    "tag": deployment_tag,
+                    "instance_type": instance_type,
+                    "engine_type": engine_type,
+                    "started_at": datetime.now().isoformat()
+                }
+                
+                return {
+                    "success": True,
+                    "message": f"Deployment started for {model_key}",
+                    "tag": deployment_tag,
+                    "model_key": model_key,
+                    "deployment_result": result
+                }
+                
+            except Exception as e:
+                logger.error(f"Failed to deploy {model_key} via EMD: {e}")
+                # Update status to failed
+                self._deployment_status[model_key] = {
+                    "status": "failed",
+                    "message": f"Deployment failed: {str(e)}",
+                    "tag": deployment_tag,
+                    "error": str(e)
+                }
+                return {
+                    "success": False,
+                    "error": f"Deployment failed: {str(e)}",
+                    "model_key": model_key
+                }
+        else:
+            logger.warning("EMD SDK not available - deployment will be mocked")
+            logger.info(f"Mock deployment started for {model_key} with tag {deployment_tag}")
+            
+            return {
+                "success": True,
+                "message": f"Mock deployment started for {model_key}",
+                "tag": deployment_tag,
+                "model_key": model_key,
+                "note": "EMD SDK not available - this is a mock deployment"
+            }
     
     def check_multiple_model_status(self, models: List[str]) -> Dict[str, Any]:
         """Check deployment status for multiple models.
