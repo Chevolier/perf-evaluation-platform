@@ -31,9 +31,36 @@ const updateURL = (page) => {
 };
 
 function App() {
-  const [selectedModels, setSelectedModels] = useState([]);
-  const [dataset, setDataset] = useState({ type: 'image', files: [], prompt: '' });
-  const [params, setParams] = useState({ max_tokens: 1024, temperature: 0.1 });
+  // Load playground state from localStorage
+  const [selectedModels, setSelectedModels] = useState(() => {
+    try {
+      const saved = localStorage.getItem('playground_selectedModels');
+      return saved ? JSON.parse(saved) : [];
+    } catch (error) {
+      console.error('Failed to load selected models from localStorage:', error);
+      return [];
+    }
+  });
+  
+  const [dataset, setDataset] = useState(() => {
+    try {
+      const saved = localStorage.getItem('playground_dataset');
+      return saved ? JSON.parse(saved) : { type: 'image', files: [], prompt: '' };
+    } catch (error) {
+      console.error('Failed to load dataset from localStorage:', error);
+      return { type: 'image', files: [], prompt: '' };
+    }
+  });
+  
+  const [params, setParams] = useState(() => {
+    try {
+      const saved = localStorage.getItem('playground_params');
+      return saved ? JSON.parse(saved) : { max_tokens: 1024, temperature: 0.1 };
+    } catch (error) {
+      console.error('Failed to load params from localStorage:', error);
+      return { max_tokens: 1024, temperature: 0.1 };
+    }
+  });
   
   // 侧边栏状态
   const [collapsed, setCollapsed] = useState(false);
@@ -86,6 +113,31 @@ function App() {
       onClick: () => navigateToPage('settings')
     }
   ];
+
+  // Save playground state to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('playground_selectedModels', JSON.stringify(selectedModels));
+    } catch (error) {
+      console.error('Failed to save selected models to localStorage:', error);
+    }
+  }, [selectedModels]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('playground_dataset', JSON.stringify(dataset));
+    } catch (error) {
+      console.error('Failed to save dataset to localStorage:', error);
+    }
+  }, [dataset]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('playground_params', JSON.stringify(params));
+    } catch (error) {
+      console.error('Failed to save params to localStorage:', error);
+    }
+  }, [params]);
 
   // Listen for URL hash changes (browser back/forward buttons)
   useEffect(() => {

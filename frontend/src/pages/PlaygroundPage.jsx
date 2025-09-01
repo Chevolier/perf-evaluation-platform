@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   Row, 
   Col, 
@@ -47,12 +47,51 @@ const PlaygroundPage = ({
   const [inferenceResults, setInferenceResults] = useState({});
   const [isInferring, setIsInferring] = useState(false);
   const [modelSelectorVisible, setModelSelectorVisible] = useState(false);
-  const [inputMode, setInputMode] = useState('dropdown'); // 'dropdown' or 'manual'
-  const [manualConfig, setManualConfig] = useState({
-    api_url: '',
-    model_name: ''
+  
+  // Load playground internal state from localStorage
+  const [inputMode, setInputMode] = useState(() => {
+    try {
+      const saved = localStorage.getItem('playground_inputMode');
+      return saved ? JSON.parse(saved) : 'dropdown';
+    } catch (error) {
+      console.error('Failed to load input mode from localStorage:', error);
+      return 'dropdown';
+    }
+  });
+  
+  const [manualConfig, setManualConfig] = useState(() => {
+    try {
+      const saved = localStorage.getItem('playground_manualConfig');
+      return saved ? JSON.parse(saved) : {
+        api_url: '',
+        model_name: ''
+      };
+    } catch (error) {
+      console.error('Failed to load manual config from localStorage:', error);
+      return {
+        api_url: '',
+        model_name: ''
+      };
+    }
   });
   const fileInputRef = useRef(null);
+
+  // Save playground internal state to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('playground_inputMode', JSON.stringify(inputMode));
+    } catch (error) {
+      console.error('Failed to save input mode to localStorage:', error);
+    }
+  }, [inputMode]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('playground_manualConfig', JSON.stringify(manualConfig));
+    } catch (error) {
+      console.error('Failed to save manual config to localStorage:', error);
+    }
+  }, [manualConfig]);
 
   // 处理文件上传
   const handleFileUpload = async (file, fileList) => {

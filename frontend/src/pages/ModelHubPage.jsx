@@ -28,14 +28,48 @@ const { Title, Text, Paragraph } = Typography;
 
 const ModelHubPage = () => {
   const [loading, setLoading] = useState(false);
-  const [modelStatus, setModelStatus] = useState({});
-  const [selectedModels, setSelectedModels] = useState([]);
-  const [deploymentConfig, setDeploymentConfig] = useState({
-    method: 'SageMaker Endpoint',
-    framework: 'vllm',
-    machineType: 'g5.2xlarge',
-    tpSize: 1,
-    dpSize: 1
+  
+  // Load state from localStorage
+  const [modelStatus, setModelStatus] = useState(() => {
+    try {
+      const saved = localStorage.getItem('modelHub_modelStatus');
+      return saved ? JSON.parse(saved) : {};
+    } catch (error) {
+      console.error('Failed to load model status from localStorage:', error);
+      return {};
+    }
+  });
+  
+  const [selectedModels, setSelectedModels] = useState(() => {
+    try {
+      const saved = localStorage.getItem('modelHub_selectedModels');
+      return saved ? JSON.parse(saved) : [];
+    } catch (error) {
+      console.error('Failed to load selected models from localStorage:', error);
+      return [];
+    }
+  });
+  
+  const [deploymentConfig, setDeploymentConfig] = useState(() => {
+    try {
+      const saved = localStorage.getItem('modelHub_deploymentConfig');
+      return saved ? JSON.parse(saved) : {
+        method: 'SageMaker Endpoint',
+        framework: 'vllm',
+        machineType: 'g5.2xlarge',
+        tpSize: 1,
+        dpSize: 1
+      };
+    } catch (error) {
+      console.error('Failed to load deployment config from localStorage:', error);
+      return {
+        method: 'SageMaker Endpoint',
+        framework: 'vllm',
+        machineType: 'g5.2xlarge',
+        tpSize: 1,
+        dpSize: 1
+      };
+    }
   });
   // const [deployingModels, setDeployingModels] = useState(new Set());
   // const deployingModelsRef = useRef(new Set());
@@ -169,6 +203,33 @@ const ModelHubPage = () => {
       }
     });
   };
+
+  // Save modelStatus to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('modelHub_modelStatus', JSON.stringify(modelStatus));
+    } catch (error) {
+      console.error('Failed to save model status to localStorage:', error);
+    }
+  }, [modelStatus]);
+
+  // Save selectedModels to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('modelHub_selectedModels', JSON.stringify(selectedModels));
+    } catch (error) {
+      console.error('Failed to save selected models to localStorage:', error);
+    }
+  }, [selectedModels]);
+
+  // Save deploymentConfig to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('modelHub_deploymentConfig', JSON.stringify(deploymentConfig));
+    } catch (error) {
+      console.error('Failed to save deployment config to localStorage:', error);
+    }
+  }, [deploymentConfig]);
 
   useEffect(() => {
     const initData = async () => {

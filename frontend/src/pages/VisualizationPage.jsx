@@ -35,8 +35,27 @@ const VisualizationPage = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [resultsTree, setResultsTree] = useState([]);
-  const [selectedResults, setSelectedResults] = useState([]);
-  const [resultData, setResultData] = useState({});
+  
+  // Load visualization state from localStorage
+  const [selectedResults, setSelectedResults] = useState(() => {
+    try {
+      const saved = localStorage.getItem('visualization_selectedResults');
+      return saved ? JSON.parse(saved) : [];
+    } catch (error) {
+      console.error('Failed to load selected results from localStorage:', error);
+      return [];
+    }
+  });
+  
+  const [resultData, setResultData] = useState(() => {
+    try {
+      const saved = localStorage.getItem('visualization_resultData');
+      return saved ? JSON.parse(saved) : {};
+    } catch (error) {
+      console.error('Failed to load result data from localStorage:', error);
+      return {};
+    }
+  });
 
   // Fetch all results from outputs directory
   const fetchResultsStructure = async () => {
@@ -573,6 +592,23 @@ const VisualizationPage = () => {
     }
     return '';
   };
+
+  // Save visualization state to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('visualization_selectedResults', JSON.stringify(selectedResults));
+    } catch (error) {
+      console.error('Failed to save selected results to localStorage:', error);
+    }
+  }, [selectedResults]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('visualization_resultData', JSON.stringify(resultData));
+    } catch (error) {
+      console.error('Failed to save result data to localStorage:', error);
+    }
+  }, [resultData]);
 
   useEffect(() => {
     fetchResultsStructure();
