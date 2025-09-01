@@ -678,64 +678,112 @@ const VisualizationPage = () => {
       doc.text('Performance Metrics Tables', margin, currentY);
       currentY += 12;
 
-      selectedResults.forEach((resultKey, index) => {
+      selectedResults.forEach((resultKey) => {
         const result = resultData[resultKey];
         if (result && result.data?.performance_data) {
           const performanceData = result.data.performance_data;
           
           // Check if we need a new page for the table
-          const tableHeight = (performanceData.length + 3) * 6 + 20; // Estimate table height
+          const tableHeight = (performanceData.length + 4) * 6 + 25; // Estimate table height with borders
           if (currentY + tableHeight > pageHeight - margin) {
             doc.addPage();
             currentY = margin;
           }
 
-          // Table header
+          // Table header with background
           doc.setFontSize(12);
           doc.setFont('helvetica', 'bold');
           doc.text(`${result.model} - ${result.session_id} Performance Metrics`, margin, currentY);
-          currentY += 10;
+          currentY += 12;
+
+          // Table setup
+          const headers = ['Concurrency', 'RPS', 'Gen Tput', 'Total Tput', 'Avg Lat', 'Avg TTFT', 'Avg TPOT'];
+          const colWidths = [20, 20, 20, 22, 20, 20, 22];
+          const tableWidth = colWidths.reduce((sum, width) => sum + width, 0);
+          const tableStartX = margin;
+          const tableStartY = currentY;
+
+          // Draw table border
+          doc.setDrawColor(0, 0, 0);
+          doc.setLineWidth(0.5);
+          doc.rect(tableStartX, tableStartY - 2, tableWidth, 8); // Header background rectangle
+          
+          // Fill header background (light gray)
+          doc.setFillColor(240, 240, 240);
+          doc.rect(tableStartX, tableStartY - 2, tableWidth, 8, 'F');
+          
+          // Draw header border again (on top of fill)
+          doc.setDrawColor(0, 0, 0);
+          doc.rect(tableStartX, tableStartY - 2, tableWidth, 8);
 
           // Table column headers
           doc.setFontSize(8);
           doc.setFont('helvetica', 'bold');
-          const headers = ['Concurrency', 'RPS', 'Gen Tput', 'Total Tput', 'Avg Lat', 'Avg TTFT', 'Avg TPOT'];
-          const colWidths = [20, 20, 20, 22, 20, 20, 22];
-          let xPos = margin;
+          doc.setTextColor(0, 0, 0);
+          let xPos = tableStartX + 2;
           
           headers.forEach((header, i) => {
-            doc.text(header, xPos, currentY);
+            doc.text(header, xPos, currentY + 3);
+            
+            // Draw vertical lines between columns
+            if (i < headers.length - 1) {
+              const lineX = xPos + colWidths[i] - 2;
+              doc.line(lineX, tableStartY - 2, lineX, tableStartY + 6);
+            }
             xPos += colWidths[i];
           });
-          currentY += 6;
-
-          // Draw header line
-          doc.line(margin, currentY, pageWidth - margin, currentY);
-          currentY += 2;
+          currentY += 8;
 
           // Table data rows
           doc.setFont('helvetica', 'normal');
+          let rowIndex = 0;
+          
           performanceData.forEach(row => {
             // Check if we need a new page mid-table
-            if (currentY > pageHeight - 30) {
+            if (currentY > pageHeight - 35) {
               doc.addPage();
               currentY = margin;
               
-              // Repeat headers on new page
+              // Repeat table header on new page
+              doc.setFontSize(12);
+              doc.setFont('helvetica', 'bold');
+              doc.text(`${result.model} - ${result.session_id} Performance Metrics (continued)`, margin, currentY);
+              currentY += 12;
+              
+              // Repeat headers
+              const newTableStartY = currentY;
+              doc.setFillColor(240, 240, 240);
+              doc.rect(tableStartX, newTableStartY - 2, tableWidth, 8, 'F');
+              doc.setDrawColor(0, 0, 0);
+              doc.rect(tableStartX, newTableStartY - 2, tableWidth, 8);
+              
               doc.setFontSize(8);
               doc.setFont('helvetica', 'bold');
-              xPos = margin;
+              xPos = tableStartX + 2;
               headers.forEach((header, i) => {
-                doc.text(header, xPos, currentY);
+                doc.text(header, xPos, currentY + 3);
+                if (i < headers.length - 1) {
+                  const lineX = xPos + colWidths[i] - 2;
+                  doc.line(lineX, newTableStartY - 2, lineX, newTableStartY + 6);
+                }
                 xPos += colWidths[i];
               });
-              currentY += 6;
-              doc.line(margin, currentY, pageWidth - margin, currentY);
-              currentY += 2;
+              currentY += 8;
               doc.setFont('helvetica', 'normal');
+              rowIndex = 0;
             }
 
-            xPos = margin;
+            // Alternate row colors
+            if (rowIndex % 2 === 1) {
+              doc.setFillColor(248, 248, 248);
+              doc.rect(tableStartX, currentY - 2, tableWidth, 6, 'F');
+            }
+
+            // Draw row border
+            doc.setDrawColor(0, 0, 0);
+            doc.rect(tableStartX, currentY - 2, tableWidth, 6);
+
+            xPos = tableStartX + 2;
             const values = [
               row.Concurrency || 0,
               (row.RPS_req_s || 0).toFixed(2),
@@ -747,14 +795,21 @@ const VisualizationPage = () => {
             ];
 
             values.forEach((value, i) => {
-              doc.text(String(value), xPos, currentY);
+              doc.text(String(value), xPos, currentY + 2);
+              
+              // Draw vertical lines between columns
+              if (i < values.length - 1) {
+                const lineX = xPos + colWidths[i] - 2;
+                doc.line(lineX, currentY - 2, lineX, currentY + 4);
+              }
               xPos += colWidths[i];
             });
             currentY += 6;
+            rowIndex++;
           });
 
           // Add spacing after table
-          currentY += 10;
+          currentY += 15;
         }
       });
 
