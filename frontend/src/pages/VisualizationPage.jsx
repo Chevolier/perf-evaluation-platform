@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Card,
   Row,
@@ -970,9 +970,41 @@ const VisualizationPage = () => {
     }
   };
 
+  // Handle page refresh (Command+R on Mac, F5 on Windows/Linux)
+  const handlePageRefresh = useCallback((event) => {
+    // Check for refresh key combinations
+    if ((event.metaKey && event.key === 'r') || event.key === 'F5') {
+      event.preventDefault();
+      
+      // Clear all localStorage data
+      localStorage.removeItem('visualization_selectedResults');
+      localStorage.removeItem('visualization_resultData');
+      
+      // Reset all state to defaults
+      setSelectedResults([]);
+      setResultData({});
+      setLoading(false);
+      setDownloading(false);
+      setError(null);
+      setResultsTree([]);
+      
+      // Refresh the page
+      window.location.reload();
+    }
+  }, []);
+
   useEffect(() => {
     fetchResultsStructure();
   }, []);
+
+  // Add keyboard event listener for refresh
+  useEffect(() => {
+    document.addEventListener('keydown', handlePageRefresh);
+    
+    return () => {
+      document.removeEventListener('keydown', handlePageRefresh);
+    };
+  }, [handlePageRefresh]);
 
   return (
     <div style={{ padding: '24px', background: '#f0f2f5', minHeight: '100vh' }}>

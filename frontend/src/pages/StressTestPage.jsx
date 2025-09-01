@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Card,
   Typography,
@@ -333,18 +333,63 @@ const StressTestPage = () => {
     }
   };
 
+  // Handle page refresh (Command+R on Mac, F5 on Windows/Linux)
+  const handlePageRefresh = useCallback((event) => {
+    // Check for refresh key combinations
+    if ((event.metaKey && event.key === 'r') || event.key === 'F5') {
+      event.preventDefault();
+      
+      // Clear all localStorage data
+      localStorage.removeItem('stressTest_sessions');
+      localStorage.removeItem('stressTest_currentSessionId');
+      
+      // Clear polling interval
+      if (pollingInterval) {
+        clearInterval(pollingInterval);
+        setPollingInterval(null);
+      }
+      
+      // Reset all state to defaults
+      setTestSessions({});
+      setCurrentSessionId(null);
+      setLoading(false);
+      setInputMode('dropdown');
+      
+      // Reset form to default values
+      form.resetFields();
+      form.setFieldsValue({
+        num_requests: "50, 100, 200",
+        concurrency: "1, 5, 10",
+        input_tokens: 32,
+        output_tokens: 32,
+        instance_type: "g5.2xlarge",
+        framework: "vllm",
+        tp_size: 1,
+        dp_size: 1
+      });
+      
+      // Refresh the page
+      window.location.reload();
+    }
+  }, [pollingInterval, form]);
+
   useEffect(() => {
     fetchModels();
     // Validate existing sessions on component mount
     if (Object.keys(testSessions).length > 0) {
       validateSessions();
     }
+    
+    // Add keyboard event listener for refresh
+    document.addEventListener('keydown', handlePageRefresh);
+    
     return () => {
       if (pollingInterval) {
         clearInterval(pollingInterval);
       }
+      document.removeEventListener('keydown', handlePageRefresh);
     };
-  }, []);
+  }, [handlePageRefresh]);
 
   // 渲染综合性能摘要表格
   const renderComprehensiveSummary = (results) => {

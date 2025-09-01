@@ -268,6 +268,45 @@ const ModelHubPage = () => {
     // message.info(`${modelKey} 清理功能开发中...`);
   }, []);
 
+  // Handle page refresh (Command+R on Mac, F5 on Windows/Linux)
+  const handlePageRefresh = useCallback((event) => {
+    // Check for refresh key combinations
+    if ((event.metaKey && event.key === 'r') || event.key === 'F5') {
+      event.preventDefault();
+      
+      // Clear all localStorage data
+      localStorage.removeItem('modelHub_modelStatus');
+      localStorage.removeItem('modelHub_selectedModels');
+      localStorage.removeItem('modelHub_deploymentConfig');
+      
+      // Reset all state to defaults
+      setModelStatus({});
+      setSelectedModels([]);
+      setDeploymentConfig({
+        method: 'SageMaker Endpoint',
+        framework: 'vllm',
+        machineType: 'g5.2xlarge',
+        tpSize: 1,
+        dpSize: 1
+      });
+      setModelCategories(categoryTemplates);
+      setInitialLoading(true);
+      setStatusLoading(false);
+      
+      // Refresh the page
+      window.location.reload();
+    }
+  }, [categoryTemplates]);
+
+  // Add keyboard event listener for refresh
+  useEffect(() => {
+    document.addEventListener('keydown', handlePageRefresh);
+    
+    return () => {
+      document.removeEventListener('keydown', handlePageRefresh);
+    };
+  }, [handlePageRefresh]);
+
   const getStatusTag = useCallback((model) => {
     if (model.alwaysAvailable) {
       return <Tag color="success" icon={<CheckCircleOutlined />}>可用</Tag>;

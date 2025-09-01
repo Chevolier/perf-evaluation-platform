@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { 
   Row, 
   Col, 
@@ -178,6 +178,76 @@ const PlaygroundPage = ({
   const removeFromModelNameHistory = (modelName) => {
     setModelNameHistory(prev => prev.filter(item => item !== modelName));
   };
+
+  // Handle page refresh (Command+R on Mac, F5 on Windows/Linux)
+  const handlePageRefresh = useCallback((event) => {
+    // Check for refresh key combinations
+    if ((event.metaKey && event.key === 'r') || event.key === 'F5') {
+      event.preventDefault();
+      
+      // Clear all localStorage data
+      localStorage.removeItem('playground_inferenceResults');
+      localStorage.removeItem('playground_inputMode');
+      localStorage.removeItem('playground_manualConfig');
+      localStorage.removeItem('playground_apiUrlHistory');
+      localStorage.removeItem('playground_modelNameHistory');
+      
+      // Reset all state to defaults
+      setInferenceResults({});
+      setIsInferring(false);
+      setInputMode('dropdown');
+      setManualConfig({
+        api_url: '',
+        model_name: ''
+      });
+      setApiUrlHistory([]);
+      setModelNameHistory([]);
+      
+      // Reset dataset and params via props if they have default reset functions
+      if (onDatasetChange) {
+        onDatasetChange({
+          prompt: '',
+          files: [],
+          type: 'image'
+        });
+      }
+      if (onParamsChange) {
+        onParamsChange({
+          max_tokens: 150,
+          temperature: 0.7
+        });
+      }
+      if (onModelChange) {
+        onModelChange([]);
+      }
+      
+      // Clear file input
+      if (fileInputRef.current) {
+        try {
+          const input = fileInputRef.current.input || 
+                       fileInputRef.current.querySelector('input[type="file"]') ||
+                       fileInputRef.current;
+          if (input && input.value !== undefined) {
+            input.value = '';
+          }
+        } catch (error) {
+          console.log('Unable to clear file input:', error);
+        }
+      }
+      
+      // Refresh the page
+      window.location.reload();
+    }
+  }, [onDatasetChange, onParamsChange, onModelChange, fileInputRef]);
+
+  // Add keyboard event listener for refresh
+  useEffect(() => {
+    document.addEventListener('keydown', handlePageRefresh);
+    
+    return () => {
+      document.removeEventListener('keydown', handlePageRefresh);
+    };
+  }, [handlePageRefresh]);
 
   // 处理文件上传
   const handleFileUpload = async (file, fileList) => {
