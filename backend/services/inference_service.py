@@ -570,8 +570,28 @@ class InferenceService:
             # Handle OpenAI-compatible response format
             if 'choices' in response_data and response_data['choices']:
                 choice = response_data['choices'][0]
-                if 'message' in choice and 'content' in choice['message']:
-                    content = choice['message']['content']
+                if 'message' in choice:
+                    message = choice['message']
+                    # Check for reasoning_content first (manual API Qwen models)
+                    if 'reasoning_content' in message and message['reasoning_content']:
+                        reasoning = message['reasoning_content'].strip()
+                        main_content = message.get('content', '').strip() if message.get('content') else ''
+                        
+                        # Combine reasoning and main content
+                        if reasoning and main_content:
+                            content = f"**Reasoning:**\n{reasoning}\n\n**Response:**\n{main_content}"
+                        elif reasoning:
+                            # If only reasoning is available, present it as the response
+                            # This happens when the model hits token limits during generation
+                            content = f"**Reasoning:**\n{reasoning}\n\n**Note:** The model's response was cut off due to token limits. The reasoning shows the model's thought process before generating the final answer."
+                        elif main_content:
+                            content = main_content
+                        else:
+                            content = "No content available"
+                    elif 'content' in message and message['content']:
+                        content = message['content']
+                    else:
+                        content = str(message)
                 elif 'text' in choice:
                     content = choice['text']
                 else:
