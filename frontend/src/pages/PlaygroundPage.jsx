@@ -24,7 +24,10 @@ import {
   ClearOutlined,
   FileImageOutlined,
   VideoCameraOutlined,
-  RobotOutlined
+  RobotOutlined,
+  SettingOutlined,
+  LinkOutlined,
+  RocketOutlined
 } from '@ant-design/icons';
 import PlaygroundResultsDisplay from '../components/PlaygroundResultsDisplay';
 import PlaygroundModelSelector from '../components/PlaygroundModelSelector';
@@ -44,6 +47,11 @@ const PlaygroundPage = ({
   const [inferenceResults, setInferenceResults] = useState({});
   const [isInferring, setIsInferring] = useState(false);
   const [modelSelectorVisible, setModelSelectorVisible] = useState(false);
+  const [inputMode, setInputMode] = useState('dropdown'); // 'dropdown' or 'manual'
+  const [manualConfig, setManualConfig] = useState({
+    api_url: '',
+    model_name: ''
+  });
   const fileInputRef = useRef(null);
 
   // 处理文件上传
@@ -207,9 +215,24 @@ const PlaygroundPage = ({
 
   // 开始推理
   const handleStartInference = async () => {
-    if (selectedModels.length === 0) {
-      message.warning('请先选择至少一个模型');
-      return;
+    // Validation based on input mode
+    if (inputMode === 'dropdown') {
+      if (selectedModels.length === 0) {
+        message.warning('请先选择至少一个模型');
+        return;
+      }
+    } else {
+      if (!manualConfig.api_url.trim() || !manualConfig.model_name.trim()) {
+        message.warning('请填写API URL和模型名称');
+        return;
+      }
+      // Validate URL format
+      try {
+        new URL(manualConfig.api_url);
+      } catch (e) {
+        message.warning('请输入有效的API URL');
+        return;
+      }
     }
 
     if (!dataset.prompt.trim()) {
@@ -221,13 +244,22 @@ const PlaygroundPage = ({
     setInferenceResults({});
 
     const requestData = {
-      models: selectedModels,
       text: dataset.prompt,
       frames: dataset.files,
       mediaType: dataset.type,
       max_tokens: params.max_tokens,
       temperature: params.temperature
     };
+
+    // Handle different input modes
+    if (inputMode === 'dropdown') {
+      requestData.models = selectedModels;
+    } else {
+      requestData.manual_config = {
+        api_url: manualConfig.api_url,
+        model_name: manualConfig.model_name
+      };
+    }
 
     try {
       console.log('🚀 Starting inference request:', requestData);
@@ -324,39 +356,103 @@ const PlaygroundPage = ({
           <Space direction="vertical" size="large" style={{ width: '100%' }}>
             {/* 模型选择区域 */}
             <Card title="选择模型" size="small">
-              {selectedModels.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '20px' }}>
-                  <Text type="secondary">尚未选择任何模型</Text>
-                  <div style={{ marginTop: 12 }}>
-                    <Button 
-                      type="primary" 
-                      icon={<RobotOutlined />}
-                      onClick={() => setModelSelectorVisible(true)}
-                    >
-                      选择模型
-                    </Button>
-                  </div>
-                </div>
-              ) : (
+              <Space direction="vertical" style={{ width: '100%' }}>
+                {/* 模型输入方式选择 */}
                 <div>
-                  <div style={{ marginBottom: 12 }}>
-                    <Text strong>已选择 {selectedModels.length} 个模型：</Text>
-                  </div>
-                  <div style={{ marginBottom: 12 }}>
-                    {selectedModels.map(model => (
-                      <Tag key={model} color="blue" style={{ margin: '2px' }}>
-                        {model}
-                      </Tag>
-                    ))}
-                  </div>
-                  <Button 
-                    size="small" 
-                    onClick={() => setModelSelectorVisible(true)}
+                  <Text strong style={{ marginBottom: 8, display: 'block' }}>模型输入方式：</Text>
+                  <Radio.Group 
+                    value={inputMode} 
+                    onChange={(e) => {
+                      setInputMode(e.target.value);
+                      // Clear configurations when switching modes
+                      if (e.target.value === 'manual') {
+                        setManualConfig({ api_url: '', model_name: '' });
+                      }
+                    }}
                   >
-                    重新选择
-                  </Button>
+                    <Radio value="dropdown">
+                      <Space>
+                        <SettingOutlined />
+                        从列表选择
+                      </Space>
+                    </Radio>
+                    <Radio value="manual">
+                      <Space>
+                        <LinkOutlined />
+                        手动输入
+                      </Space>
+                    </Radio>
+                  </Radio.Group>
                 </div>
-              )}
+
+                {/* 条件渲染不同的输入方式 */}
+                {inputMode === 'dropdown' ? (
+                  <>
+                    {selectedModels.length === 0 ? (
+                      <div style={{ textAlign: 'center', padding: '20px' }}>
+                        <Text type="secondary">尚未选择任何模型</Text>
+                        <div style={{ marginTop: 12 }}>
+                          <Button 
+                            type="primary" 
+                            icon={<RobotOutlined />}
+                            onClick={() => setModelSelectorVisible(true)}
+                          >
+                            选择模型
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div>
+                        <div style={{ marginBottom: 12 }}>
+                          <Text strong>已选择 {selectedModels.length} 个模型：</Text>
+                        </div>
+                        <div style={{ marginBottom: 12 }}>
+                          {selectedModels.map(model => (
+                            <Tag key={model} color="blue" style={{ margin: '2px' }}>
+                              {model}
+                            </Tag>
+                          ))}
+                        </div>
+                        <Button 
+                          size="small" 
+                          onClick={() => setModelSelectorVisible(true)}
+                        >
+                          重新选择
+                        </Button>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <Space direction="vertical" style={{ width: '100%' }}>
+                    <div>
+                      <Text strong>API URL：</Text>
+                      <Input
+                        value={manualConfig.api_url}
+                        onChange={(e) => setManualConfig({ ...manualConfig, api_url: e.target.value })}
+                        placeholder="http://your-api-host.com/v1/chat/completions"
+                        prefix={<LinkOutlined />}
+                        style={{ marginTop: 4 }}
+                      />
+                      <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
+                        请输入完整的chat completions端点URL
+                      </Text>
+                    </div>
+                    <div>
+                      <Text strong>模型名称：</Text>
+                      <Input
+                        value={manualConfig.model_name}
+                        onChange={(e) => setManualConfig({ ...manualConfig, model_name: e.target.value })}
+                        placeholder="gpt-3.5-turbo"
+                        prefix={<RocketOutlined />}
+                        style={{ marginTop: 4 }}
+                      />
+                      <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
+                        请输入准确的模型名称
+                      </Text>
+                    </div>
+                  </Space>
+                )}
+              </Space>
             </Card>
 
             {/* 文件上传 */}
@@ -481,7 +577,7 @@ const PlaygroundPage = ({
               icon={<PlayCircleOutlined />}
               onClick={handleStartInference}
               loading={isInferring}
-              disabled={selectedModels.length === 0}
+              disabled={inputMode === 'dropdown' ? selectedModels.length === 0 : (!manualConfig.api_url.trim() || !manualConfig.model_name.trim())}
               style={{ width: '100%' }}
             >
               {isInferring ? '推理中...' : '开始推理'}

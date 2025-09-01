@@ -30,12 +30,23 @@ class InferenceService:
             JSON strings with inference results
         """
         models = data.get('models', [])
-        if not models:
-            yield f"data: {json.dumps({'error': 'No models specified', 'status': 'error'})}\n\n"
+        manual_config = data.get('manual_config')
+        
+        if not models and not manual_config:
+            yield f"data: {json.dumps({'error': 'No models or manual configuration specified', 'status': 'error'})}\n\n"
             return
         
         result_queue = queue.Queue()
         threads = []
+        
+        # Handle manual configuration
+        if manual_config:
+            thread = threading.Thread(
+                target=self._process_manual_api,
+                args=(manual_config, data, result_queue)
+            )
+            threads.append(thread)
+            thread.start()
         
         # Create threads for each model
         for model in models:
@@ -472,4 +483,130 @@ class InferenceService:
                 'model': model,
                 'status': 'error',
                 'message': str(e)
+            })
+    
+    def _process_manual_api(self, manual_config: Dict[str, Any], data: Dict[str, Any], result_queue: queue.Queue) -> None:
+        """Process inference for a manually configured API endpoint.
+        
+        Args:
+            manual_config: Manual configuration containing api_url and model_name
+            data: Request data
+            result_queue: Queue to put results
+        """
+        try:
+            import requests
+            
+            start_time = datetime.now()
+            
+            api_url = manual_config.get('api_url')
+            model_name = manual_config.get('model_name')
+            
+            if not api_url or not model_name:
+                raise ValueError("Both api_url and model_name are required in manual_config")
+            
+            # Prepare request data
+            text_prompt = data.get('text', '')
+            frames = data.get('frames', [])
+            max_tokens = data.get('max_tokens', 1000)
+            temperature = data.get('temperature', 0.7)
+            
+            # Build messages array
+            messages = []
+            content_parts = []
+            
+            # Add text content
+            if text_prompt:
+                content_parts.append({
+                    "type": "text",
+                    "text": text_prompt
+                })
+            
+            # Add image content if frames are provided
+            if frames:
+                for frame_base64 in frames:
+                    content_parts.append({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{frame_base64}"
+                        }
+                    })
+            
+            messages.append({
+                "role": "user",
+                "content": content_parts
+            })
+            
+            # Prepare request payload
+            request_payload = {
+                "model": model_name,
+                "messages": messages,
+                "max_tokens": max_tokens,
+                "temperature": temperature
+            }
+            
+            logger.info(f"Calling manual API {api_url} with model {model_name}")
+            logger.debug(f"Request payload: {request_payload}")
+            
+            # Make API call
+            response = requests.post(
+                api_url,
+                json=request_payload,
+                headers={
+                    "Content-Type": "application/json"
+                },
+                timeout=120  # 2 minute timeout
+            )
+            
+            if not response.ok:
+                raise ValueError(f"API call failed with status {response.status_code}: {response.text}")
+            
+            response_data = response.json()
+            logger.info(f"Manual API response for {model_name}: {response_data}")
+            
+            # Extract content and usage from response
+            content = ""
+            usage = {}
+            
+            # Handle OpenAI-compatible response format
+            if 'choices' in response_data and response_data['choices']:
+                choice = response_data['choices'][0]
+                if 'message' in choice and 'content' in choice['message']:
+                    content = choice['message']['content']
+                elif 'text' in choice:
+                    content = choice['text']
+                else:
+                    content = str(choice)
+            else:
+                # Fallback: try to extract any text content
+                content = str(response_data)
+            
+            # Extract usage information if available
+            if 'usage' in response_data:
+                usage = {
+                    'input_tokens': response_data['usage'].get('prompt_tokens', 0),
+                    'output_tokens': response_data['usage'].get('completion_tokens', 0),
+                    'total_tokens': response_data['usage'].get('total_tokens', 0)
+                }
+            
+            result = {
+                'model': f"{model_name} (Manual API)",
+                'status': 'success',
+                'result': {
+                    'content': content,
+                    'usage': usage,
+                    'raw_response': response_data
+                },
+                'duration_ms': (datetime.now() - start_time).total_seconds() * 1000,
+                'api_url': api_url
+            }
+            
+            result_queue.put(result)
+            
+        except Exception as e:
+            logger.error(f"Error processing manual API {manual_config}: {e}")
+            result_queue.put({
+                'model': f"{manual_config.get('model_name', 'Unknown')} (Manual API)",
+                'status': 'error',
+                'message': str(e),
+                'api_url': manual_config.get('api_url', 'Unknown')
             })
