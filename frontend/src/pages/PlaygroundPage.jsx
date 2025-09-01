@@ -16,7 +16,8 @@ import {
   Empty,
   Alert,
   Tag,
-  Modal
+  Modal,
+  Select
 } from 'antd';
 import { 
   UploadOutlined, 
@@ -27,7 +28,8 @@ import {
   RobotOutlined,
   SettingOutlined,
   LinkOutlined,
-  RocketOutlined
+  RocketOutlined,
+  CloseOutlined
 } from '@ant-design/icons';
 import PlaygroundResultsDisplay from '../components/PlaygroundResultsDisplay';
 import PlaygroundModelSelector from '../components/PlaygroundModelSelector';
@@ -84,6 +86,27 @@ const PlaygroundPage = ({
       };
     }
   });
+
+  // Load history for API URLs and model names
+  const [apiUrlHistory, setApiUrlHistory] = useState(() => {
+    try {
+      const saved = localStorage.getItem('playground_apiUrlHistory');
+      return saved ? JSON.parse(saved) : [];
+    } catch (error) {
+      console.error('Failed to load API URL history from localStorage:', error);
+      return [];
+    }
+  });
+
+  const [modelNameHistory, setModelNameHistory] = useState(() => {
+    try {
+      const saved = localStorage.getItem('playground_modelNameHistory');
+      return saved ? JSON.parse(saved) : [];
+    } catch (error) {
+      console.error('Failed to load model name history from localStorage:', error);
+      return [];
+    }
+  });
   const fileInputRef = useRef(null);
 
   // Save playground internal state to localStorage
@@ -110,6 +133,51 @@ const PlaygroundPage = ({
       console.error('Failed to save manual config to localStorage:', error);
     }
   }, [manualConfig]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('playground_apiUrlHistory', JSON.stringify(apiUrlHistory));
+    } catch (error) {
+      console.error('Failed to save API URL history to localStorage:', error);
+    }
+  }, [apiUrlHistory]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('playground_modelNameHistory', JSON.stringify(modelNameHistory));
+    } catch (error) {
+      console.error('Failed to save model name history to localStorage:', error);
+    }
+  }, [modelNameHistory]);
+
+  // Helper functions to manage history
+  const addToApiUrlHistory = (url) => {
+    if (!url.trim()) return;
+    
+    setApiUrlHistory(prev => {
+      const newHistory = prev.filter(item => item !== url.trim());
+      newHistory.unshift(url.trim());
+      return newHistory.slice(0, 10); // Keep only the latest 10 entries
+    });
+  };
+
+  const addToModelNameHistory = (modelName) => {
+    if (!modelName.trim()) return;
+    
+    setModelNameHistory(prev => {
+      const newHistory = prev.filter(item => item !== modelName.trim());
+      newHistory.unshift(modelName.trim());
+      return newHistory.slice(0, 10); // Keep only the latest 10 entries
+    });
+  };
+
+  const removeFromApiUrlHistory = (url) => {
+    setApiUrlHistory(prev => prev.filter(item => item !== url));
+  };
+
+  const removeFromModelNameHistory = (modelName) => {
+    setModelNameHistory(prev => prev.filter(item => item !== modelName));
+  };
 
   // 处理文件上传
   const handleFileUpload = async (file, fileList) => {
@@ -300,6 +368,12 @@ const PlaygroundPage = ({
     setIsInferring(true);
     setInferenceResults({});
 
+    // Add to history if using manual input
+    if (inputMode === 'manual') {
+      addToApiUrlHistory(manualConfig.api_url);
+      addToModelNameHistory(manualConfig.model_name);
+    }
+
     const requestData = {
       text: dataset.prompt,
       frames: dataset.files,
@@ -483,28 +557,132 @@ const PlaygroundPage = ({
                   <Space direction="vertical" style={{ width: '100%' }}>
                     <div>
                       <Text strong>API URL：</Text>
-                      <Input
-                        value={manualConfig.api_url}
-                        onChange={(e) => setManualConfig({ ...manualConfig, api_url: e.target.value })}
+                      <Select
+                        mode="tags"
+                        value={manualConfig.api_url ? [manualConfig.api_url] : []}
+                        onChange={(values) => {
+                          const newValue = values.length > 0 ? values[values.length - 1] : '';
+                          setManualConfig({ ...manualConfig, api_url: newValue });
+                        }}
                         placeholder="http://your-api-host.com/v1/chat/completions"
-                        prefix={<LinkOutlined />}
-                        style={{ marginTop: 4 }}
+                        style={{ marginTop: 4, width: '100%' }}
+                        maxTagCount={1}
+                        dropdownRender={(menu) => (
+                          <div>
+                            {apiUrlHistory.length > 0 && (
+                              <div style={{ padding: '8px 0' }}>
+                                <div style={{ padding: '0 12px 8px', fontSize: '12px', color: '#999' }}>
+                                  历史记录：
+                                </div>
+                                {apiUrlHistory.map((url, index) => (
+                                  <div
+                                    key={index}
+                                    style={{
+                                      padding: '6px 12px',
+                                      cursor: 'pointer',
+                                      display: 'flex',
+                                      justifyContent: 'space-between',
+                                      alignItems: 'center',
+                                      borderRadius: '4px',
+                                      margin: '2px 8px'
+                                    }}
+                                    className="history-item"
+                                    onMouseEnter={(e) => e.target.style.backgroundColor = '#f5f5f5'}
+                                    onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
+                                  >
+                                    <span
+                                      onClick={() => setManualConfig({ ...manualConfig, api_url: url })}
+                                      style={{ flex: 1, fontSize: '13px' }}
+                                    >
+                                      {url}
+                                    </span>
+                                    <CloseOutlined
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        removeFromApiUrlHistory(url);
+                                      }}
+                                      style={{ 
+                                        fontSize: '10px', 
+                                        color: '#999', 
+                                        marginLeft: '8px',
+                                        padding: '2px'
+                                      }}
+                                    />
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            {menu}
+                          </div>
+                        )}
                       />
                       <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
-                        请输入完整的chat completions端点URL
+                        请输入完整的chat completions端点URL，或从历史记录中选择
                       </Text>
                     </div>
                     <div>
                       <Text strong>模型名称：</Text>
-                      <Input
-                        value={manualConfig.model_name}
-                        onChange={(e) => setManualConfig({ ...manualConfig, model_name: e.target.value })}
+                      <Select
+                        mode="tags"
+                        value={manualConfig.model_name ? [manualConfig.model_name] : []}
+                        onChange={(values) => {
+                          const newValue = values.length > 0 ? values[values.length - 1] : '';
+                          setManualConfig({ ...manualConfig, model_name: newValue });
+                        }}
                         placeholder="gpt-3.5-turbo"
-                        prefix={<RocketOutlined />}
-                        style={{ marginTop: 4 }}
+                        style={{ marginTop: 4, width: '100%' }}
+                        maxTagCount={1}
+                        dropdownRender={(menu) => (
+                          <div>
+                            {modelNameHistory.length > 0 && (
+                              <div style={{ padding: '8px 0' }}>
+                                <div style={{ padding: '0 12px 8px', fontSize: '12px', color: '#999' }}>
+                                  历史记录：
+                                </div>
+                                {modelNameHistory.map((modelName, index) => (
+                                  <div
+                                    key={index}
+                                    style={{
+                                      padding: '6px 12px',
+                                      cursor: 'pointer',
+                                      display: 'flex',
+                                      justifyContent: 'space-between',
+                                      alignItems: 'center',
+                                      borderRadius: '4px',
+                                      margin: '2px 8px'
+                                    }}
+                                    className="history-item"
+                                    onMouseEnter={(e) => e.target.style.backgroundColor = '#f5f5f5'}
+                                    onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
+                                  >
+                                    <span
+                                      onClick={() => setManualConfig({ ...manualConfig, model_name: modelName })}
+                                      style={{ flex: 1, fontSize: '13px' }}
+                                    >
+                                      {modelName}
+                                    </span>
+                                    <CloseOutlined
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        removeFromModelNameHistory(modelName);
+                                      }}
+                                      style={{ 
+                                        fontSize: '10px', 
+                                        color: '#999', 
+                                        marginLeft: '8px',
+                                        padding: '2px'
+                                      }}
+                                    />
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            {menu}
+                          </div>
+                        )}
                       />
                       <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
-                        请输入准确的模型名称
+                        请输入准确的模型名称，或从历史记录中选择
                       </Text>
                     </div>
                   </Space>
