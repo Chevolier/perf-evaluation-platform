@@ -289,6 +289,9 @@ class InferenceService:
             if not model_info:
                 raise ValueError(f"Model {model} not found in registry")
             
+            # Get model path for EMD lookup
+            model_path = model_info.get('model_path', model)
+            
             # Prepare request data for EMD
             text_prompt = data.get('text', '')
             frames = data.get('frames', [])
@@ -380,15 +383,18 @@ class InferenceService:
                         stack_status = model_entry.get("stack_status", "")
                         
                         if model_id and model_path in model_id and "CREATE_COMPLETE" in stack_status:
-                            # Try to construct the endpoint name from EMD conventions
-                            # Based on actual EMD output: EMD-Model-{model}-{tag}-endpoint
-                            actual_endpoint_name = f"EMD-Model-{model}-{model_tag}-endpoint"
+                            # Construct the endpoint name from EMD conventions using actual model_id
+                            # Convert model_id to lowercase and replace special chars with hyphens
+                            model_name_for_endpoint = model_id.lower().replace('_', '-').replace('.', '-')
+                            actual_endpoint_name = f"EMD-Model-{model_name_for_endpoint}-{model_tag}-endpoint"
+                            logger.info(f"Constructed endpoint name: {actual_endpoint_name} from model_id: {model_id}")
                             break
                     
                     if not actual_endpoint_name:
                         raise ValueError(f"Could not determine endpoint name for {model}")
                     
                     logger.info(f"Trying actual EMD endpoint: {actual_endpoint_name}")
+                    print(f"🔍 DEBUG: Attempting to invoke endpoint: {actual_endpoint_name}")
                     
                     # Use boto3 SageMaker Runtime client with actual endpoint name
                     runtime_client = boto3.client('sagemaker-runtime', region_name='us-west-2')
