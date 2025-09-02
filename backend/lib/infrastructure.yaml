@@ -1,0 +1,392 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Create EKS Auto Mode cluster with VPC and required resources"
+
+Parameters:
+  ClusterName:
+    Type: String
+    Default: eks-automode-cluster
+    Description: Name of the EKS Auto Mode cluster
+
+Resources:
+  # VPC for EKS cluster
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ClusterName}-vpc"
+
+  # Internet Gateway
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub "${ClusterName}-igw"
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+
+  # Public Subnets
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: 10.0.1.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ClusterName}-public-subnet-1"
+        - Key: kubernetes.io/role/elb
+          Value: "1"
+        - Key: subnetType
+          Value: public
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      CidrBlock: 10.0.2.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ClusterName}-public-subnet-2"
+        - Key: kubernetes.io/role/elb
+          Value: "1"
+        - Key: subnetType
+          Value: public
+  PublicSubnet3:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [2, !GetAZs ""]
+      CidrBlock: 10.0.3.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ClusterName}-public-subnet-3"
+        - Key: kubernetes.io/role/elb
+          Value: "1"
+        - Key: subnetType
+          Value: public
+
+  # Private Subnets
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: 10.0.11.0/24
+      Tags:
+        - Key: Name
+          Value: !Sub "${ClusterName}-private-subnet-1"
+        - Key: kubernetes.io/role/internal-elb
+          Value: "1"
+        - Key: subnetType
+          Value: private
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      CidrBlock: 10.0.12.0/24
+      Tags:
+        - Key: Name
+          Value: !Sub "${ClusterName}-private-subnet-2"
+        - Key: kubernetes.io/role/internal-elb
+          Value: "1"
+        - Key: subnetType
+          Value: private
+  PrivateSubnet3:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [2, !GetAZs ""]
+      CidrBlock: 10.0.13.0/24
+      Tags:
+        - Key: Name
+          Value: !Sub "${ClusterName}-private-subnet-3"
+        - Key: kubernetes.io/role/internal-elb
+          Value: "1"
+        - Key: subnetType
+          Value: private
+
+  # NAT Gateways
+  NatGateway1EIP:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+
+  NatGateway1:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGateway1EIP.AllocationId
+      SubnetId: !Ref PublicSubnet1
+
+  # Route Tables
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${ClusterName}-public-routes"
+
+  DefaultPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet1
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet2
+
+  PrivateRouteTable1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${ClusterName}-private-routes-1"
+
+  DefaultPrivateRoute1:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway1
+
+  PrivateSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      SubnetId: !Ref PrivateSubnet1
+
+  PrivateRouteTable2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${ClusterName}-private-routes-2"
+
+  DefaultPrivateRoute2:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable2
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway1
+
+  PrivateSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable2
+      SubnetId: !Ref PrivateSubnet2
+
+  PrivateRouteTable3:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${ClusterName}-private-routes-3"
+
+  DefaultPrivateRoute3:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable3
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway1
+
+  PrivateSubnet3RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable3
+      SubnetId: !Ref PrivateSubnet3
+
+  # EKS Cluster Service Role
+  EKSClusterRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - eks.amazonaws.com
+            Action:
+              - sts:AssumeRole
+              - sts:TagSession
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEKSComputePolicy
+        - arn:aws:iam::aws:policy/AmazonEKSBlockStoragePolicy
+        - arn:aws:iam::aws:policy/AmazonEKSLoadBalancingPolicy
+        - arn:aws:iam::aws:policy/AmazonEKSNetworkingPolicy
+        - arn:aws:iam::aws:policy/AmazonEKSClusterPolicy
+
+  ApplicationSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: application security group
+      VpcId: !Ref VPC
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: ApplicationSecurityGroup
+
+  ApplicationSecurityGroupInboundRule:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ApplicationSecurityGroup
+      IpProtocol: "-1"
+      SourceSecurityGroupId: !Ref ApplicationSecurityGroup
+
+  EKSClusterSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: application security group
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: "-1"
+          SourceSecurityGroupId: !Ref ApplicationSecurityGroup
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: EKSClusterSecurityGroup
+
+  # EKS Auto Mode Cluster
+  EKSCluster:
+    Type: AWS::EKS::Cluster
+    Properties:
+      Name: !Ref ClusterName
+      RoleArn: !GetAtt EKSClusterRole.Arn
+      ResourcesVpcConfig:
+        SecurityGroupIds:
+          - !Ref EKSClusterSecurityGroup
+        SubnetIds:
+          - !Ref PublicSubnet1
+          - !Ref PublicSubnet2
+          - !Ref PublicSubnet3
+        EndpointPublicAccess: true
+        EndpointPrivateAccess: true
+        PublicAccessCidrs:
+          - 0.0.0.0/0
+      ComputeConfig:
+        Enabled: true
+      StorageConfig:
+        BlockStorage:
+          Enabled: true
+      KubernetesNetworkConfig:
+        ElasticLoadBalancing:
+          Enabled: true
+      AccessConfig:
+        AuthenticationMode: API
+        BootstrapClusterCreatorAdminPermissions: true
+
+  # Node Role for Auto Mode
+  EKSNodeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEKSWorkerNodeMinimalPolicy
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPullOnly
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforSSM
+
+  EKSAutoNodeRoleAccessEntry:
+    Type: AWS::EKS::AccessEntry
+    Properties:
+      ClusterName: !Ref ClusterName
+      PrincipalArn: !GetAtt EKSNodeRole.Arn
+      Type: "EC2"
+      AccessPolicies:
+        - AccessScope:
+            Type: cluster
+          PolicyArn: arn:aws:eks::aws:cluster-access-policy/AmazonEKSAutoNodePolicy
+    DependsOn:
+      - EKSCluster
+
+Outputs:
+  ClusterName:
+    Description: EKS Auto Mode cluster name
+    Value: !Ref EKSCluster
+    Export:
+      Name: !Sub "${AWS::StackName}-ClusterName"
+
+  ClusterEndpoint:
+    Description: EKS cluster endpoint
+    Value: !GetAtt EKSCluster.Endpoint
+    Export:
+      Name: !Sub "${AWS::StackName}-ClusterEndpoint"
+
+  ClusterArn:
+    Description: EKS cluster ARN
+    Value: !GetAtt EKSCluster.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-ClusterArn"
+
+  EKSClusterRole:
+    Description: EKS cluster role ARN
+    Value: !GetAtt EKSClusterRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-ClusterRoleArn"
+
+  EKSClusterNodeRole:
+    Description: EKS cluster node role ARN
+    Value: !GetAtt EKSNodeRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-ClusterNodeRoleArn"
+
+  VpcId:
+    Description: VPC ID
+    Value: !Ref VPC
+    Export:
+      Name: !Sub "${AWS::StackName}-VpcId"
+
+  Region:
+    Description: current aws region
+    Value: !Ref "AWS::Region"
+
+  KubeconfigCommand:
+    Description: Command to update kubeconfig
+    Value: !Sub "aws eks update-kubeconfig --region ${AWS::Region} --name ${EKSCluster}"
+
+  ApplicationSecurityGroup:
+    Description: Application security group
+    Value: !Ref ApplicationSecurityGroup
+    Export:
+      Name: !Sub "${AWS::StackName}-ApplicationSecurityGroup"
