@@ -5,40 +5,12 @@ from typing import Dict, Any
 
 # EMD (Elastic Model Deployment) Models Configuration
 EMD_MODELS = {
-    "qwen2-vl-7b": {
-        "name": "Qwen2-VL-7B-Instruct",
-        "description": "通义千问视觉语言模型，7B参数",
-        "model_path": "Qwen2-VL-7B-Instruct",  # Use EMD supported model ID
-        "supports_multimodal": True,
-        "supports_streaming": True
-    },
-    "qwen2.5-vl-32b": {
-        "name": "Qwen2.5-VL-32B-Instruct",
-        "description": "通义千问视觉语言模型，32B参数",
-        "model_path": "Qwen2.5-VL-32B-Instruct",  # Use EMD supported model ID
-        "supports_multimodal": True,
-        "supports_streaming": True
-    },
-    "qwen2.5-0.5b": {
-        "name": "Qwen2.5-0.5B-Instruct",
-        "description": "轻量级文本模型，适合快速推理",
-        "model_path": "Qwen2.5-0.5B-Instruct",  # Use EMD supported model ID
+    "qwen2.5-7b-instruct": {
+        "name": "Qwen2.5-7B-Instruct",
+        "description": "Qwen2.5模型",
+        "model_path": "Qwen2.5-7B-Instruct",  # Use EMD supported model ID
         "supports_multimodal": False,
         "supports_streaming": True
-    },
-    "gemma-3-4b": {
-        "name": "Gemma-3-4B-IT",
-        "description": "Google开源语言模型",
-        "model_path": "gemma-3-4b-it",  # Use EMD supported model ID
-        "supports_multimodal": False,
-        "supports_streaming": True
-    },
-    "ui-tars-1.5-7b": {
-        "name": "UI-TARS-1.5-7B",
-        "description": "用户界面理解专用模型",
-        "model_path": "UI-TARS-1.5-7B",  # Use EMD supported model ID
-        "supports_multimodal": True,
-        "supports_streaming": False
     },
     "qwen3-0.6b": {
         "name": "Qwen3-0.6B",
@@ -53,7 +25,35 @@ EMD_MODELS = {
         "model_path": "Qwen3-8B",  # Already correct
         "supports_multimodal": False,
         "supports_streaming": True
-    }
+    },
+    "qwen2-vl-7b": {
+        "name": "Qwen2-VL-7B-Instruct",
+        "description": "通义千问视觉语言模型，7B参数",
+        "model_path": "Qwen2-VL-7B-Instruct",  # Use EMD supported model ID
+        "supports_multimodal": True,
+        "supports_streaming": True
+    },
+    "qwen2.5-vl-32b": {
+        "name": "Qwen2.5-VL-32B-Instruct",
+        "description": "通义千问视觉语言模型，32B参数",
+        "model_path": "Qwen2.5-VL-32B-Instruct",  # Use EMD supported model ID
+        "supports_multimodal": True,
+        "supports_streaming": True
+    },
+    # "gemma-3-4b": {
+    #     "name": "Gemma-3-4B-IT",
+    #     "description": "Google开源语言模型",
+    #     "model_path": "gemma-3-4b-it",  # Use EMD supported model ID
+    #     "supports_multimodal": False,
+    #     "supports_streaming": True
+    # },
+    # "ui-tars-1.5-7b": {
+    #     "name": "UI-TARS-1.5-7B",
+    #     "description": "用户界面理解专用模型",
+    #     "model_path": "UI-TARS-1.5-7B",  # Use EMD supported model ID
+    #     "supports_multimodal": True,
+    #     "supports_streaming": False
+    # },
 }
 
 
