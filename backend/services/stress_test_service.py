@@ -1148,7 +1148,12 @@ except Exception as e:
         """
         # Extract base model name by removing the tag (everything after the last "/")
         if "/" in model_name:
-            base_model = model_name.split("/")[0]
+            name_parts = model_name.split("/")
+            base_model = ''
+            for part in name_parts:
+                if re.search(r'\d+[Bb]', part):
+                    base_model = part
+                    break  
         else:
             base_model = model_name
         
@@ -1161,6 +1166,7 @@ except Exception as e:
         output_dir.mkdir(parents=True, exist_ok=True)
         
         logger.info(f"Created custom API output directory: {output_dir}")
+        print(f"Created custom API output directory: {output_dir}")
         return str(output_dir)
     
     def _process_paired_combination_results(self, paired_results: list, test_params: dict, session_id: str) -> dict:
@@ -1954,6 +1960,7 @@ except Exception as e:
             tokenizer_path = self._get_tokenizer_path(model_name)
             logger.info(f"[DEBUG] Using tokenizer path: {tokenizer_path}")
             
+            print(f"custom_api, model_name: {model_name}")
             # Create output directory using the same structure as regular model tests
             output_dir = self._create_custom_api_output_dir(model_name, session_id)
             
