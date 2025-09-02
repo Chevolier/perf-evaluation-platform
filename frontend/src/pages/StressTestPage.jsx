@@ -1208,25 +1208,19 @@ const StressTestPage = () => {
                         rules={[{ required: true, message: '请选择实例类型' }]}
                       >
                         <Select placeholder="选择实例类型">
-                          <Option value="ml.g5.xlarge">ml.g5.xlarge</Option>
-                          <Option value="ml.g5.2xlarge">ml.g5.2xlarge</Option>
-                          <Option value="ml.g5.4xlarge">ml.g5.4xlarge</Option>
-                          <Option value="ml.g5.8xlarge">ml.g5.8xlarge</Option>
-                          <Option value="ml.g5.12xlarge">ml.g5.12xlarge</Option>
-                          <Option value="ml.g5.16xlarge">ml.g5.16xlarge</Option>
-                          <Option value="ml.g5.24xlarge">ml.g5.24xlarge</Option>
-                          <Option value="ml.g5.48xlarge">ml.g5.48xlarge</Option>
-                          <Option value="ml.p4d.24xlarge">ml.p4d.24xlarge</Option>
-                          <Option value="ml.p4de.24xlarge">ml.p4de.24xlarge</Option>
-                          <Option value="ml.p5.48xlarge">ml.p5.48xlarge</Option>
                           <Option value="g5.xlarge">g5.xlarge</Option>
                           <Option value="g5.2xlarge">g5.2xlarge</Option>
                           <Option value="g5.4xlarge">g5.4xlarge</Option>
-                          <Option value="g5.8xlarge">g5.8xlarge</Option>
                           <Option value="g5.12xlarge">g5.12xlarge</Option>
-                          <Option value="g5.16xlarge">g5.16xlarge</Option>
-                          <Option value="g5.24xlarge">g5.24xlarge</Option>
                           <Option value="g5.48xlarge">g5.48xlarge</Option>
+                          <Option value="g6e.xlarge">g6e.xlarge</Option>
+                          <Option value="g6e.4xlarge">g6e.4xlarge</Option>
+                          <Option value="g6e.12xlarge">g6e.12xlarge</Option>
+                          <Option value="p4d.24xlarge">p4d.24xlarge</Option>
+                          <Option value="p4de.24xlarge">p4de.24xlarge</Option>
+                          <Option value="p5.48xlarge">p5.48xlarge</Option>
+                          <Option value="p5e.48xlarge">p5e.48xlarge</Option>
+                          <Option value="p5en.48xlarge">p5en.48xlarge</Option>
                         </Select>
                       </Form.Item>
                     </Col>

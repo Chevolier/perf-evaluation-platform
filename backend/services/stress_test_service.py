@@ -10,6 +10,7 @@ import os
 from datetime import datetime
 from typing import Dict, Any, Optional
 from pathlib import Path
+import re
 
 from ..utils import get_logger
 
@@ -2178,7 +2179,12 @@ except Exception as e:
         """
         # Extract base model name by removing the tag (everything after the last "/")
         if "/" in model_name:
-            base_model = model_name.split("/")[0]
+            name_parts = model_name.split("/")
+            base_model = ''
+            for part in name_parts:
+                if re.search(r'\d+[Bb]', part):
+                    base_model = part
+                    break        
         else:
             base_model = model_name
         

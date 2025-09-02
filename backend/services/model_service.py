@@ -121,7 +121,7 @@ class ModelService:
             # Call get_model_status() without parameters to get all models
             status = get_model_status()
             logger.info(f"EMD SDK get_model_status returned: {status}")
-            print(f"🔍 DEBUG: EMD status check result: {status}")
+            # print(f"🔍 DEBUG: EMD status check result: {status}")
             
             # Create reverse mapping from model_path to model_key
             reverse_mapping = {}
@@ -193,7 +193,7 @@ class ModelService:
                 "inprogress": inprogress,
                 "failed": failed
             }
-            print(f"🔍 DEBUG: Processed EMD status - deployed: {deployed}, inprogress: {inprogress}, failed: {failed}")
+            # print(f"🔍 DEBUG: Processed EMD status - deployed: {deployed}, inprogress: {inprogress}, failed: {failed}")
             return result
             
         except Exception as e:
