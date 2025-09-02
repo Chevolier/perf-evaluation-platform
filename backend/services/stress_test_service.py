@@ -2225,14 +2225,14 @@ except Exception as e:
         if session_id in self.test_sessions:
             self.test_sessions[session_id].update(updates)
     
-    def generate_pdf_report(self, session_id: str) -> Optional[bytes]:
-        """Generate comprehensive PDF report for a completed test session.
+    def generate_pdf_report_and_zip_session(self, session_id: str) -> Optional[bytes]:
+        """Generate comprehensive PDF report and zip the entire session folder.
         
         Args:
             session_id: Session ID
             
         Returns:
-            PDF content as bytes or None if not found/not completed
+            Zipped session folder as bytes or None if not found/not completed
         """
         try:
             # First try to get session from memory
@@ -2245,11 +2245,86 @@ except Exception as e:
                     logger.error(f"Cannot find completed session {session_id} for PDF generation")
                     return None
             
-            # Generate comprehensive PDF using reportlab
-            return self._generate_comprehensive_pdf(session, session_id)
+            # Find the session output directory
+            output_directory = session.get('output_directory')
+            if not output_directory:
+                # Try to find session directory by searching through model directories
+                project_root = Path(__file__).parent.parent.parent
+                outputs_dir = project_root / 'outputs'
+                session_dir = None
+                
+                if outputs_dir.exists():
+                    for model_dir in outputs_dir.iterdir():
+                        if model_dir.is_dir():
+                            potential_session_dir = model_dir / session_id
+                            if potential_session_dir.exists():
+                                session_dir = potential_session_dir
+                                output_directory = str(session_dir)
+                                break
+                
+                if not output_directory:
+                    logger.error(f"Cannot find output directory for session {session_id}")
+                    return None
+            
+            # Generate comprehensive PDF and save it to the session folder
+            pdf_content = self._generate_comprehensive_pdf(session, session_id)
+            if pdf_content:
+                pdf_path = Path(output_directory) / f"stress_test_report_{session_id}.pdf"
+                with open(pdf_path, 'wb') as f:
+                    f.write(pdf_content)
+                logger.info(f"PDF report saved to: {pdf_path}")
+            else:
+                logger.warning(f"Failed to generate PDF for session {session_id}, but continuing with zip")
+            
+            # Create zip file containing the entire session folder
+            return self._create_session_zip(output_directory, session_id)
             
         except Exception as e:
-            logger.error(f"Error generating PDF report for session {session_id}: {e}")
+            logger.error(f"Error generating PDF report and zip for session {session_id}: {e}")
+            return None
+    
+    def _create_session_zip(self, session_directory: str, session_id: str) -> Optional[bytes]:
+        """Create a zip file containing the entire session folder.
+        
+        Args:
+            session_directory: Path to the session directory
+            session_id: Session ID for logging
+            
+        Returns:
+            Zip file content as bytes
+        """
+        import zipfile
+        import io
+        import os
+        
+        try:
+            session_path = Path(session_directory)
+            if not session_path.exists():
+                logger.error(f"Session directory does not exist: {session_directory}")
+                return None
+            
+            # Create zip file in memory
+            zip_buffer = io.BytesIO()
+            
+            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                # Walk through all files in the session directory
+                for root, dirs, files in os.walk(session_directory):
+                    for file in files:
+                        file_path = os.path.join(root, file)
+                        # Calculate relative path from session directory
+                        relative_path = os.path.relpath(file_path, session_directory)
+                        # Add file to zip with relative path
+                        zip_file.write(file_path, relative_path)
+                        logger.info(f"Added to zip: {relative_path}")
+            
+            zip_buffer.seek(0)
+            zip_content = zip_buffer.getvalue()
+            
+            logger.info(f"Created zip file for session {session_id}, size: {len(zip_content)} bytes")
+            return zip_content
+            
+        except Exception as e:
+            logger.error(f"Error creating zip file for session {session_id}: {e}")
             return None
     
     def _generate_performance_charts(self, performance_table: list, session_id: str) -> list:

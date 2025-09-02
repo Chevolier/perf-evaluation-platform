@@ -262,12 +262,12 @@ const StressTestPage = () => {
         const a = document.createElement('a');
         a.style.display = 'none';
         a.href = url;
-        a.download = `stress_test_report_${sessionId}.pdf`;
+        a.download = `stress_test_session_${sessionId}.zip`;
         document.body.appendChild(a);
         a.click();
         window.URL.revokeObjectURL(url);
         document.body.removeChild(a);
-        message.success('报告下载成功');
+        message.success('测试结果已下载，包含完整会话数据和PDF报告');
       } else {
         message.error('下载报告失败');
       }
@@ -1458,7 +1458,7 @@ const StressTestPage = () => {
                         icon={<DownloadOutlined />}
                         onClick={() => downloadReport(currentSessionId)}
                       >
-                        下载报告
+                        下载完整结果
                       </Button>
                     )}
                   </Col>
