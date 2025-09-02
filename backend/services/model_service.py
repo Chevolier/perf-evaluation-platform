@@ -129,9 +129,9 @@ class ModelService:
                 model_path = model_info.get("model_path", model_key)
                 reverse_mapping[model_path] = model_key
             
-            print(f"🔍 DEBUG: Reverse mapping: {reverse_mapping}")
-            print(f"🔍 DEBUG: Models in EMD status - completed: {[m.get('model_id') for m in status.get('completed', [])]}")
-            print(f"🔍 DEBUG: Models in EMD status - inprogress: {[m.get('model_id') for m in status.get('inprogress', [])]}")
+            # print(f"🔍 DEBUG: Reverse mapping: {reverse_mapping}")
+            # print(f"🔍 DEBUG: Models in EMD status - completed: {[m.get('model_id') for m in status.get('completed', [])]}")
+            # print(f"🔍 DEBUG: Models in EMD status - inprogress: {[m.get('model_id') for m in status.get('inprogress', [])]}")
             
             deployed = {}
             inprogress = {}
