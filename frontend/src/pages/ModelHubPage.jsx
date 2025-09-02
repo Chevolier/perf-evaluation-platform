@@ -31,30 +31,13 @@ const ModelHubPage = () => {
   const [initialLoading, setInitialLoading] = useState(true);
   const [statusLoading, setStatusLoading] = useState(false);
   
-  // Add cache for API responses
-  const [apiCache, setApiCache] = useState(() => {
-    try {
-      const cached = localStorage.getItem('modelHub_apiCache');
-      const parsed = cached ? JSON.parse(cached) : {};
-      // Check if cache is still valid (5 minutes)
-      if (parsed.timestamp && Date.now() - parsed.timestamp < 300000) {
-        return parsed;
-      }
-    } catch (error) {
-      console.error('Failed to load API cache:', error);
-    }
-    return { timestamp: 0, modelList: null, modelStatus: null };
-  });
   
-  // Load state from localStorage
+  // Always start with empty model status to force fresh fetch
   const [modelStatus, setModelStatus] = useState(() => {
-    try {
-      const saved = localStorage.getItem('modelHub_modelStatus');
-      return saved ? JSON.parse(saved) : {};
-    } catch (error) {
-      console.error('Failed to load model status from localStorage:', error);
-      return {};
-    }
+    // Clear any cached status to ensure fresh data on every load
+    localStorage.removeItem('modelHub_modelStatus');
+    localStorage.removeItem('modelHub_cacheTimestamp');
+    return {};
   });
   
   const [selectedModels, setSelectedModels] = useState(() => {
@@ -204,13 +187,12 @@ const ModelHubPage = () => {
     });
   }, []);
 
-  // Optimized batch localStorage saves with debouncing
+  // Save only non-status data to localStorage (keep selected models and config)
   useEffect(() => {
     const timeoutId = setTimeout(() => {
       try {
-        // Batch all localStorage operations to avoid blocking
+        // Only save selected models and deployment config, not status (always fetch fresh)
         const batch = {
-          modelHub_modelStatus: JSON.stringify(modelStatus),
           modelHub_selectedModels: JSON.stringify(selectedModels),
           modelHub_deploymentConfig: JSON.stringify(deploymentConfig)
         };
@@ -237,57 +219,12 @@ const ModelHubPage = () => {
     }, 300); // Debounce localStorage writes
     
     return () => clearTimeout(timeoutId);
-  }, [modelStatus, selectedModels, deploymentConfig]);
+  }, [selectedModels, deploymentConfig]);
 
-  // Optimized data fetching with parallel API calls and immediate UI rendering
+  // Always fetch fresh data - no caching to ensure correct status
   const fetchModelData = useCallback(async () => {
     try {
-      // Check cache first
-      const now = Date.now();
-      if (apiCache.timestamp && now - apiCache.timestamp < 300000 && apiCache.modelList) {
-        console.log('🚀 Using cached model data');
-        
-        // Use cached data immediately
-        const bedrockModels = apiCache.modelList.bedrock ? 
-          Object.entries(apiCache.modelList.bedrock).map(([key, info]) => ({
-            key,
-            name: info.name,
-            description: info.description,
-            alwaysAvailable: true
-          })) : [];
-          
-        const emdModels = apiCache.modelList.emd ? 
-          Object.entries(apiCache.modelList.emd).map(([key, info]) => ({
-            key,
-            name: info.name,
-            description: info.description,
-            alwaysAvailable: false
-          })) : [];
-          
-        setModelCategories({
-          bedrock: {
-            ...categoryTemplates.bedrock,
-            models: bedrockModels
-          },
-          emd: {
-            ...categoryTemplates.emd,
-            models: emdModels
-          }
-        });
-        
-        if (apiCache.modelStatus) {
-          setModelStatus(prev => ({
-            ...prev,
-            ...apiCache.modelStatus
-          }));
-        }
-        
-        setInitialLoading(false);
-        return;
-      }
-      
-      // Make both API calls in parallel for faster loading
-      const deployableModelKeys = modelCategories.emd?.models?.map(m => m.key) || [];
+      console.log('🚀 Fetching fresh model data (no cache)');
       
       // Add timeout handling to prevent hanging on throttled requests
       const fetchWithTimeout = (url, options = {}, timeout = 10000) => {
@@ -299,21 +236,16 @@ const ModelHubPage = () => {
         ]);
       };
       
-      const [modelListResponse, statusResponse] = await Promise.allSettled([
-        fetchWithTimeout('/api/model-list', {}, 15000),
-        deployableModelKeys.length > 0 ? fetchWithTimeout('/api/check-model-status', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ models: deployableModelKeys })
-        }, 10000) : Promise.resolve({ ok: false })
-      ]);
+      // First fetch model list to get the available models
+      console.log('🔍 DEBUG: Fetching model list first...');
+      const modelListResponse = await fetchWithTimeout('/api/model-list', {}, 15000);
       
       let modelListData = null;
-      let statusData = null;
+      let deployableModelKeys = [];
       
       // Process model list response
-      if (modelListResponse.status === 'fulfilled' && modelListResponse.value.ok) {
-        const data = await modelListResponse.value.json();
+      if (modelListResponse.ok) {
+        const data = await modelListResponse.json();
         
         if (data.status === 'success' && data.models) {
           modelListData = data.models;
@@ -335,6 +267,10 @@ const ModelHubPage = () => {
               alwaysAvailable: false
             })) : [];
             
+          // Extract deployable model keys for status check
+          deployableModelKeys = emdModels.map(m => m.key);
+          console.log('🔍 DEBUG: deployableModelKeys extracted:', deployableModelKeys);
+            
           // Batch UI updates to reduce re-renders
           React.startTransition(() => {
             setModelCategories({
@@ -348,66 +284,67 @@ const ModelHubPage = () => {
               }
             });
             
-            // Stop initial loading immediately
-            setInitialLoading(false);
+            // Keep loading state until status is fetched
+            // setInitialLoading(false); // Don't stop loading yet
           });
         }
       }
       
-      // Process status response (if available)
-      if (statusResponse.status === 'fulfilled' && statusResponse.value.ok) {
+      // Now fetch status for deployable models
+      console.log('🔍 DEBUG: Fetching status for deployable models:', deployableModelKeys);
+      if (deployableModelKeys.length > 0) {
         try {
-          const data = await statusResponse.value.json();
-          if (data.model_status) {
-            statusData = data.model_status;
-            setModelStatus(prev => ({
-              ...prev,
-              ...data.model_status
-            }));
+          const statusResponse = await fetchWithTimeout('/api/check-model-status', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ models: deployableModelKeys })
+          }, 10000);
+          
+          if (statusResponse.ok) {
+            const data = await statusResponse.json();
+            console.log('🔍 DEBUG: Status response data:', data);
+            if (data.model_status) {
+              setModelStatus(prev => ({
+                ...prev,
+                ...data.model_status
+              }));
+            }
+            // Status check completed successfully
+            setInitialLoading(false);
+          } else {
+            console.warn('Status response not ok:', statusResponse.status);
+            // Status check failed but completed
+            setInitialLoading(false);
           }
         } catch (error) {
-          console.warn('Status parsing failed:', error);
+          console.error('Status fetch failed:', error);
+          // Handle failed status check - set default not_deployed status
+          const fallbackStatus = {};
+          deployableModelKeys.forEach(modelKey => {
+            fallbackStatus[modelKey] = {
+              status: 'not_deployed',
+              message: 'Status check failed - may need to refresh'
+            };
+          });
+          setModelStatus(prev => ({
+            ...prev,
+            ...fallbackStatus
+          }));
+          // Status check failed but completed
+          setInitialLoading(false);
         }
-      } else if (statusResponse.status === 'rejected' || 
-                 (statusResponse.value && !statusResponse.value.ok)) {
-        // Handle failed status check - set default not_deployed status
-        console.warn('Status check failed or timed out, setting default status');
-        const emdModels = modelListData?.emd ? Object.keys(modelListData.emd) : [];
-        const fallbackStatus = {};
-        emdModels.forEach(modelKey => {
-          fallbackStatus[modelKey] = {
-            status: 'not_deployed',
-            message: 'Status check failed - may need to refresh'
-          };
-        });
-        setModelStatus(prev => ({
-          ...prev,
-          ...fallbackStatus
-        }));
-        statusData = fallbackStatus;
+      } else {
+        // No deployable models, stop loading
+        setInitialLoading(false);
       }
       
-      // Update cache with successful responses
-      if (modelListData || statusData) {
-        const newCache = {
-          timestamp: Date.now(),
-          modelList: modelListData || apiCache.modelList,
-          modelStatus: statusData || apiCache.modelStatus
-        };
-        setApiCache(newCache);
-        
-        try {
-          localStorage.setItem('modelHub_apiCache', JSON.stringify(newCache));
-        } catch (error) {
-          console.warn('Failed to cache API response:', error);
-        }
-      }
+      // No caching - always use fresh data
     } catch (error) {
       console.error('Failed to fetch model data:', error);
     } finally {
       setInitialLoading(false);
     }
-  }, [categoryTemplates, apiCache]);
+  }, [categoryTemplates]);
 
   useEffect(() => {
     fetchModelData();
@@ -420,45 +357,7 @@ const ModelHubPage = () => {
     // message.info(`${modelKey} 清理功能开发中...`);
   }, []);
 
-  // Clear cache and refresh data
-  const handleClearCache = useCallback(() => {
-    // Clear all localStorage data
-    localStorage.removeItem('modelHub_modelStatus');
-    localStorage.removeItem('modelHub_selectedModels');
-    localStorage.removeItem('modelHub_deploymentConfig');
-    localStorage.removeItem('modelHub_apiCache');
-    
-    // Batch state resets to reduce re-renders
-    React.startTransition(() => {
-      setModelStatus({});
-      setSelectedModels([]);
-      setApiCache({ timestamp: 0, modelList: null, modelStatus: null });
-      setInitialLoading(true);
-    });
-    
-    // Force refresh data
-    fetchModelData();
-  }, [fetchModelData]);
 
-  // Handle page refresh (Command+R on Mac, F5 on Windows/Linux)
-  const handlePageRefresh = useCallback((event) => {
-    // Check for refresh key combinations
-    if ((event.metaKey && event.key === 'r') || event.key === 'F5') {
-      event.preventDefault();
-      handleClearCache();
-      // Refresh the page
-      window.location.reload();
-    }
-  }, [handleClearCache]);
-
-  // Add keyboard event listener for refresh
-  useEffect(() => {
-    document.addEventListener('keydown', handlePageRefresh);
-    
-    return () => {
-      document.removeEventListener('keydown', handlePageRefresh);
-    };
-  }, [handlePageRefresh]);
 
   const getStatusTag = useCallback((model) => {
     if (model.alwaysAvailable) {
@@ -597,24 +496,13 @@ const ModelHubPage = () => {
   return (
     <div style={{ padding: '24px', background: '#f5f5f5', minHeight: '100vh' }}>
       <div style={{ marginBottom: 24 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-          <div>
-            <Space>
-              <RobotOutlined style={{ fontSize: '24px', color: '#1890ff' }} />
-              <Title level={2} style={{ margin: 0 }}>模型商店</Title>
-            </Space>
-            <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
-              管理和部署所有可用的推理模型
-            </Text>
-          </div>
-          <Button 
-            onClick={handleClearCache}
-            loading={initialLoading}
-            title="如果模型状态显示不正确，点击刷新状态"
-          >
-            刷新状态
-          </Button>
-        </div>
+        <Space>
+          <RobotOutlined style={{ fontSize: '24px', color: '#1890ff' }} />
+          <Title level={2} style={{ margin: 0 }}>模型商店</Title>
+        </Space>
+        <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
+          管理和部署所有可用的推理模型
+        </Text>
       </div>
 
       {/* Show UI structure immediately, even during initial loading */}
