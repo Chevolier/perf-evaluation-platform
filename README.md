@@ -126,6 +126,20 @@ cd frontend && npm start
 - **Backend API**: http://localhost:5000
 - **Health Check**: http://localhost:5000/health
 
+
+## Local EC2 model deployment
+To use vllm to start a server on an g5.xlarge instance:
+```bash
+vllm serve /home/ec2-user/SageMaker/efs/Models/Qwen3-8B \
+	--gpu-memory-utilization 0.9 \
+	--max_model_len 2048
+```
+You will obtain:
+Api url: http://0.0.0.0:8000/v1/chat/completions
+Model name: /home/ec2-user/SageMaker/efs/Models/Qwen3-8B
+
+Then use the above api url and model name to do stress test.
+
 ## 📖 Platform Overview
 
 ### The frontend has 4 pages:
