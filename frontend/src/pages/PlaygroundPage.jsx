@@ -236,8 +236,8 @@ const PlaygroundPage = ({
       }
       if (onParamsChange) {
         onParamsChange({
-          max_tokens: 150,
-          temperature: 0.7
+          max_tokens: 1024,
+          temperature: 0.6
         });
       }
       if (onModelChange) {
@@ -834,136 +834,6 @@ const PlaygroundPage = ({
             {/* 提示词输入 - 集成上传功能 */}
             <Card title="提示词" size="small">
               <div style={{ position: 'relative' }}>
-                {/* 图片预览区域 - 显示在输入框上方 */}
-                {dataset.files.length > 0 && (
-                  <div style={{ marginBottom: '16px' }}>
-                    <div style={{ 
-                      display: 'flex', 
-                      justifyContent: 'space-between', 
-                      alignItems: 'center',
-                      padding: '8px',
-                      background: '#f6f6f6',
-                      borderRadius: '4px',
-                      marginBottom: '12px'
-                    }}>
-                      <Space>
-                        {getFileIcon()}
-                        <Text>已上传 {dataset.files.length} 个{getFileTypeText()}文件</Text>
-                      </Space>
-                      <Button 
-                        type="text" 
-                        size="small" 
-                        icon={<ClearOutlined />}
-                        onClick={handleClearFiles}
-                      >
-                        清除全部
-                      </Button>
-                    </div>
-                    
-                    {/* 图片预览网格 */}
-                    {originalFiles.length > 0 && (
-                      <div style={{ 
-                        display: 'grid',
-                        gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))',
-                        gap: '12px',
-                        maxHeight: '300px',
-                        overflowY: 'auto',
-                        padding: '8px',
-                        border: '1px solid #f0f0f0',
-                        borderRadius: '6px',
-                        background: '#fafafa'
-                      }}>
-                        {originalFiles.map((fileInfo, index) => (
-                          <div 
-                            key={index} 
-                            style={{ 
-                              position: 'relative',
-                              border: '1px solid #d9d9d9',
-                              borderRadius: '6px',
-                              overflow: 'hidden',
-                              background: '#fff'
-                            }}
-                          >
-                            {fileInfo.isImage ? (
-                              <Image
-                                src={fileInfo.previewUrl}
-                                alt={fileInfo.name}
-                                style={{
-                                  width: '100%',
-                                  height: '80px',
-                                  objectFit: 'cover'
-                                }}
-                                fallback="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMIAAADDCAYAAADQvc6UAAABRWlDQ1BJQ0MgUHJvZmlsZQAAKJFjYGASSSwoyGFhYGDIzSspCnJ3UoiIjFJgf8LAwSDCIMogwMCcmFxc4BgQ4ANUwgCjUcG3awyMIPqyLsis7PPOq3QdDFcvjV3jOD1boQVTPQrgSkktTgbSf4A4LbmgqISBgTEFyFYuLykAsTuAbJEioKOA7DkgdjqEvQHEToKwj4DVhAQ5A9k3gGyB5IxEoBmML4BsnSQk8XQkNtReEOBxcfXxUQg1Mjc0dyHgXNJBSWpFCYh2zi+oLMpMzyhRcASGUqqCZ16yno6CkYGRAQMDKMwhqj/fAIcloxgHQqxAjIHBEugw5sUIsSQpBobtQPdLciLEVJYzMPBHMDBsayhILEqEO4DxG0txmrERhM29nYGBddr//5/DGRjYNRkY/l7////39v///y4Dmn+LgeHANwDrkl1AuO+pmgAAADhlWElmTU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAAqACAAQAAAABAAAAwqADAAQAAAABAAAAwwAAAAD9b/HnAAAHlklEQVR4Ae3dP3Ik1RnG4W+FgYxN"
-                              />
-                            ) : fileInfo.isVideo ? (
-                              <div style={{
-                                width: '100%',
-                                height: '80px',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                background: '#f0f0f0'
-                              }}>
-                                <VideoCameraOutlined style={{ fontSize: '32px', color: '#999' }} />
-                              </div>
-                            ) : (
-                              <div style={{
-                                width: '100%',
-                                height: '80px',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                background: '#f0f0f0'
-                              }}>
-                                <FileImageOutlined style={{ fontSize: '32px', color: '#999' }} />
-                              </div>
-                            )}
-                            
-                            {/* 文件信息 */}
-                            <div style={{ 
-                              padding: '6px',
-                              fontSize: '11px',
-                              color: '#666',
-                              borderTop: '1px solid #f0f0f0'
-                            }}>
-                              <div style={{ 
-                                whiteSpace: 'nowrap',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis'
-                              }}>
-                                {fileInfo.name}
-                              </div>
-                              <div style={{ fontSize: '10px', color: '#999' }}>
-                                {(fileInfo.size / 1024 / 1024).toFixed(1)}MB
-                              </div>
-                            </div>
-                            
-                            {/* 删除按钮 */}
-                            <Button
-                              type="text"
-                              size="small"
-                              icon={<DeleteOutlined />}
-                              onClick={() => handleRemoveFile(index)}
-                              style={{
-                                position: 'absolute',
-                                top: '4px',
-                                right: '4px',
-                                width: '24px',
-                                height: '24px',
-                                background: 'rgba(0,0,0,0.5)',
-                                color: '#fff',
-                                border: 'none',
-                                borderRadius: '50%',
-                                fontSize: '12px'
-                              }}
-                            />
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-                
                 {/* 文本输入区域 */}
                 <div style={{ position: 'relative' }}>
                   <TextArea
@@ -1019,6 +889,156 @@ const PlaygroundPage = ({
                     {/* 右侧字符计数 - 使用内置的showCount会自动显示 */}
                   </div>
                 </div>
+                
+                {/* 图片预览区域 - 显示在输入框下方 */}
+                {dataset.files.length > 0 && (
+                  <div style={{ marginTop: '16px' }}>
+                    <div style={{ 
+                      display: 'flex', 
+                      justifyContent: 'space-between', 
+                      alignItems: 'center',
+                      padding: '8px 0',
+                      marginBottom: '12px'
+                    }}>
+                      <Space>
+                        {getFileIcon()}
+                        <Text style={{ fontSize: '14px', color: '#666' }}>
+                          已上传 {dataset.files.length} 个{getFileTypeText()}文件
+                        </Text>
+                      </Space>
+                      <Button 
+                        type="text" 
+                        size="small" 
+                        icon={<ClearOutlined />}
+                        onClick={handleClearFiles}
+                        style={{ color: '#999' }}
+                      >
+                        清除全部
+                      </Button>
+                    </div>
+                    
+                    {/* 小图片预览行 */}
+                    {originalFiles.length > 0 && (
+                      <div style={{ 
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        gap: '8px',
+                        padding: '12px',
+                        border: '1px solid #f0f0f0',
+                        borderRadius: '8px',
+                        background: '#fafafa'
+                      }}>
+                        {originalFiles.map((fileInfo, index) => (
+                          <div 
+                            key={index} 
+                            style={{ 
+                              position: 'relative',
+                              border: '1px solid #d9d9d9',
+                              borderRadius: '6px',
+                              overflow: 'hidden',
+                              background: '#fff',
+                              cursor: fileInfo.isImage ? 'pointer' : 'default'
+                            }}
+                            onClick={() => {
+                              if (fileInfo.isImage) {
+                                // 使用 Ant Design 的 Image 预览功能
+                                const img = document.createElement('img');
+                                img.src = fileInfo.previewUrl;
+                                img.style.display = 'none';
+                                document.body.appendChild(img);
+                                
+                                // 触发 Ant Design Image 预览
+                                const event = new MouseEvent('click', { bubbles: true });
+                                const imageElement = document.querySelector(`[data-preview-id="preview-${index}"]`);
+                                if (imageElement) {
+                                  imageElement.click();
+                                }
+                              }
+                            }}
+                          >
+                            {fileInfo.isImage ? (
+                              <Image
+                                src={fileInfo.previewUrl}
+                                alt={fileInfo.name}
+                                width={60}
+                                height={60}
+                                style={{
+                                  objectFit: 'cover',
+                                  borderRadius: '4px'
+                                }}
+                                preview={{
+                                  mask: (
+                                    <div style={{
+                                      background: 'rgba(0,0,0,0.5)',
+                                      color: 'white',
+                                      padding: '4px',
+                                      borderRadius: '4px',
+                                      fontSize: '12px'
+                                    }}>
+                                      <EyeOutlined /> 预览
+                                    </div>
+                                  )
+                                }}
+                                data-preview-id={`preview-${index}`}
+                                fallback="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMIAAADDCAYAAADQvc6UAAABRWlDQ1BJQ0MgUHJvZmlsZQAAKJFjYGASSSwoyGFhYGDIzSspCnJ3UoiIjFJgf8LAwSDCIMogwMCcmFxc4BgQ4ANUwgCjUcG3awyMIPqyLsis7PPOq3QdDFcvjV3jOD1boQVTPQrgSkktTgbSf4A4LbmgqISBgTEFyFYuLykAsTuAbJEioKOA7DkgdjqEvQHEToKwj4DVhAQ5A9k3gGyB5IxEoBmML4BsnSQk8XQkNtReEOBxcfXxUQg1Mjc0dyHgXNJBSWpFCYh2zi+oLMpMzyhRcASGUqqCZ16yno6CkYGRAQMDKMwhqj/fAIcloxgHQqxAjIHBEugw5sUIsSQpBobtQPdLciLEVJYzMPBHMDBsayhILEqEO4DxG0txmrERhM29nYGBddr//5/DGRjYNRkY/l7////39v///y4Dmn+LgeHANwDrkl1AuO+pmgAAADhlWElmTU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAAqACAAQAAAABAAAAwqADAAQAAAABAAAAwwAAAAD9b/HnAAAHlklEQVR4Ae3dP3Ik1RnG4W+FgYxN"
+                              />
+                            ) : fileInfo.isVideo ? (
+                              <div style={{
+                                width: '60px',
+                                height: '60px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                background: '#f0f0f0',
+                                borderRadius: '4px'
+                              }}>
+                                <VideoCameraOutlined style={{ fontSize: '20px', color: '#999' }} />
+                              </div>
+                            ) : (
+                              <div style={{
+                                width: '60px',
+                                height: '60px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                background: '#f0f0f0',
+                                borderRadius: '4px'
+                              }}>
+                                <FileImageOutlined style={{ fontSize: '20px', color: '#999' }} />
+                              </div>
+                            )}
+                            
+                            {/* 删除按钮 */}
+                            <Button
+                              type="text"
+                              size="small"
+                              icon={<DeleteOutlined />}
+                              onClick={(e) => {
+                                e.stopPropagation(); // 防止触发图片预览
+                                handleRemoveFile(index);
+                              }}
+                              style={{
+                                position: 'absolute',
+                                top: '2px',
+                                right: '2px',
+                                width: '18px',
+                                height: '18px',
+                                background: 'rgba(0,0,0,0.6)',
+                                color: '#fff',
+                                border: 'none',
+                                borderRadius: '50%',
+                                fontSize: '10px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center'
+                              }}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </Card>
 
