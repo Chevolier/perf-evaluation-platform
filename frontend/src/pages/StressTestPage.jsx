@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Card,
   Typography,
@@ -15,7 +15,9 @@ import {
   message,
   Divider,
   Statistic,
-  Spin
+  Spin,
+  Radio,
+  Input
 } from 'antd';
 import { 
   ThunderboltOutlined,
@@ -26,7 +28,9 @@ import {
   FireOutlined,
   RocketOutlined,
   DashboardOutlined,
-  CloudOutlined
+  CloudOutlined,
+  LinkOutlined,
+  SettingOutlined
 } from '@ant-design/icons';
 import { Line } from '@ant-design/plots';
 
@@ -37,9 +41,30 @@ const StressTestPage = () => {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [models, setModels] = useState([]);
-  const [testSessions, setTestSessions] = useState({});
-  const [currentSessionId, setCurrentSessionId] = useState(null);
+  const [inputMode, setInputMode] = useState('dropdown'); // 'dropdown' or 'manual'
+  
+  // 从localStorage恢复测试会话状态
+  const [testSessions, setTestSessions] = useState(() => {
+    try {
+      const saved = localStorage.getItem('stressTest_sessions');
+      return saved ? JSON.parse(saved) : {};
+    } catch (error) {
+      console.error('Failed to load test sessions from localStorage:', error);
+      return {};
+    }
+  });
+  
+  const [currentSessionId, setCurrentSessionId] = useState(() => {
+    try {
+      return localStorage.getItem('stressTest_currentSessionId') || null;
+    } catch (error) {
+      console.error('Failed to load current session ID from localStorage:', error);
+      return null;
+    }
+  });
+  
   const [pollingInterval, setPollingInterval] = useState(null);
+  const pollingRestored = useRef(false);
 
   // 获取可用模型列表
   const fetchModels = async () => {
@@ -101,19 +126,48 @@ const StressTestPage = () => {
   const startStressTest = async (values) => {
     setLoading(true);
     try {
+      // Parse comma-separated values into arrays of numbers
+      const parseCommaSeparatedNumbers = (str) => {
+        return str.split(',').map(v => parseInt(v.trim())).filter(n => !isNaN(n) && n > 0);
+      };
+
+      const numRequestsArray = parseCommaSeparatedNumbers(values.num_requests);
+      const concurrencyArray = parseCommaSeparatedNumbers(values.concurrency);
+
+      // Validate that both arrays have the same length
+      if (numRequestsArray.length !== concurrencyArray.length) {
+        message.error(`请求总数和并发数的值数量必须相同。当前请求总数有 ${numRequestsArray.length} 个值，并发数有 ${concurrencyArray.length} 个值。`);
+        setLoading(false);
+        return;
+      }
+
+      const requestBody = {
+        params: {
+          num_requests: numRequestsArray,
+          concurrency: concurrencyArray,
+          input_tokens: values.input_tokens,
+          output_tokens: values.output_tokens,
+          temperature: 0.1
+        }
+      };
+
+      // Handle different input modes
+      if (inputMode === 'manual') {
+        requestBody.api_url = values.api_url;
+        requestBody.model_name = values.model_name;
+        // Add deployment configuration for manual input
+        requestBody.params.instance_type = values.instance_type;
+        requestBody.params.inference_framework = values.framework;
+        requestBody.params.tp_size = values.tp_size;
+        requestBody.params.dp_size = values.dp_size;
+      } else {
+        requestBody.model = values.model;
+      }
+
       const response = await fetch('/api/stress-test/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: values.model,
-          params: {
-            num_requests: values.num_requests,
-            concurrency: values.concurrency,
-            input_tokens_range: values.input_tokens_range,
-            output_tokens_range: values.output_tokens_range,
-            temperature: 0.1
-          }
-        })
+        body: JSON.stringify(requestBody)
       });
 
       if (response.ok) {
@@ -125,7 +179,7 @@ const StressTestPage = () => {
             ...prev,
             [sessionId]: {
               status: 'running',
-              model: values.model,
+              model: inputMode === 'manual' ? values.model_name : values.model,
               params: values,
               startTime: new Date().toISOString()
             }
@@ -176,6 +230,19 @@ const StressTestPage = () => {
             clearInterval(interval);
             message.error('压力测试失败：' + (sessionData.error || '未知错误'));
           }
+        } else if (response.status === 404) {
+          // Session not found on backend - clear stale session
+          console.log(`Session ${sessionId} not found on backend, clearing local data`);
+          clearInterval(interval);
+          setTestSessions(prev => {
+            const updated = { ...prev };
+            delete updated[sessionId];
+            return updated;
+          });
+          if (currentSessionId === sessionId) {
+            setCurrentSessionId(null);
+          }
+          message.warning('测试会话已过期，已清除本地缓存');
         }
       } catch (error) {
         console.error('获取测试状态失败:', error);
@@ -210,85 +277,582 @@ const StressTestPage = () => {
     }
   };
 
+  // 保存测试会话到localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('stressTest_sessions', JSON.stringify(testSessions));
+    } catch (error) {
+      console.error('Failed to save test sessions to localStorage:', error);
+    }
+  }, [testSessions]);
+
+  // 保存当前会话ID到localStorage
+  useEffect(() => {
+    try {
+      if (currentSessionId) {
+        localStorage.setItem('stressTest_currentSessionId', currentSessionId);
+      } else {
+        localStorage.removeItem('stressTest_currentSessionId');
+      }
+    } catch (error) {
+      console.error('Failed to save current session ID to localStorage:', error);
+    }
+  }, [currentSessionId]);
+
+  // 恢复正在进行的测试的轮询 - 只在组件挂载时执行一次
+  useEffect(() => {
+    if (!pollingRestored.current && currentSessionId && testSessions[currentSessionId]) {
+      const session = testSessions[currentSessionId];
+      if (session.status === 'running') {
+        startPolling(currentSessionId);
+        pollingRestored.current = true;
+      }
+    }
+  }, [currentSessionId, testSessions]);
+
+  // 验证和清理过期会话
+  const validateSessions = async () => {
+    const sessionIds = Object.keys(testSessions);
+    for (const sessionId of sessionIds) {
+      try {
+        const response = await fetch(`/api/stress-test/status/${sessionId}`);
+        if (response.status === 404) {
+          console.log(`Cleaning up stale session: ${sessionId}`);
+          setTestSessions(prev => {
+            const updated = { ...prev };
+            delete updated[sessionId];
+            return updated;
+          });
+          if (currentSessionId === sessionId) {
+            setCurrentSessionId(null);
+          }
+        }
+      } catch (error) {
+        console.error(`Failed to validate session ${sessionId}:`, error);
+      }
+    }
+  };
+
+  // Handle page refresh (Command+R on Mac, F5 on Windows/Linux)
+  const handlePageRefresh = useCallback((event) => {
+    // Check for refresh key combinations
+    if ((event.metaKey && event.key === 'r') || event.key === 'F5') {
+      event.preventDefault();
+      
+      // Clear all localStorage data
+      localStorage.removeItem('stressTest_sessions');
+      localStorage.removeItem('stressTest_currentSessionId');
+      
+      // Clear polling interval
+      if (pollingInterval) {
+        clearInterval(pollingInterval);
+        setPollingInterval(null);
+      }
+      
+      // Reset all state to defaults
+      setTestSessions({});
+      setCurrentSessionId(null);
+      setLoading(false);
+      setInputMode('dropdown');
+      
+      // Reset form to default values
+      form.resetFields();
+      form.setFieldsValue({
+        num_requests: "50, 100, 200",
+        concurrency: "1, 5, 10",
+        input_tokens: 32,
+        output_tokens: 32,
+        instance_type: "g5.2xlarge",
+        framework: "vllm",
+        tp_size: 1,
+        dp_size: 1
+      });
+      
+      // Refresh the page
+      window.location.reload();
+    }
+  }, [pollingInterval, form]);
+
   useEffect(() => {
     fetchModels();
+    // Validate existing sessions on component mount
+    if (Object.keys(testSessions).length > 0) {
+      validateSessions();
+    }
+    
+    // Add keyboard event listener for refresh
+    document.addEventListener('keydown', handlePageRefresh);
+    
     return () => {
       if (pollingInterval) {
         clearInterval(pollingInterval);
       }
+      document.removeEventListener('keydown', handlePageRefresh);
     };
-  }, []);
+  }, [handlePageRefresh]);
 
-  // 渲染性能指标图表
-  const renderMetricsCharts = (results) => {
-    if (!results || !results.detailed_metrics) return null;
-
-    const metrics = results.detailed_metrics;
+  // 渲染综合性能摘要表格
+  const renderComprehensiveSummary = (results) => {
+    if (!results || !results.is_comprehensive) return null;
     
-    // TTFT分布图
-    const ttftData = metrics.ttft_distribution?.map((value, index) => ({
-      request: index + 1,
-      ttft: value
-    })) || [];
+    const summary = results.comprehensive_summary;
+    const tableData = results.performance_table || [];
+    
+    // Performance table columns
+    const columns = [
+      {
+        title: 'Conc.',
+        dataIndex: 'concurrency',
+        key: 'concurrency',
+        width: 60,
+        align: 'center'
+      },
+      {
+        title: 'RPS',
+        dataIndex: 'rps',
+        key: 'rps',
+        width: 80,
+        align: 'center',
+        render: (value) => value?.toFixed(2) || 'N/A'
+      },
+      {
+        title: 'Avg Lat.(s)',
+        dataIndex: 'avg_latency',
+        key: 'avg_latency',
+        width: 100,
+        align: 'center',
+        render: (value) => value?.toFixed(3) || 'N/A'
+      },
+      {
+        title: 'P99 Lat.(s)',
+        dataIndex: 'p99_latency',
+        key: 'p99_latency',
+        width: 100,
+        align: 'center',
+        render: (value) => value?.toFixed(3) || 'N/A'
+      },
+      {
+        title: 'Gen. toks/s',
+        dataIndex: 'gen_toks_per_sec',
+        key: 'gen_toks_per_sec',
+        width: 100,
+        align: 'center',
+        render: (value) => value?.toFixed(0) || 'N/A'
+      },
+      {
+        title: 'Tot. toks/s',
+        dataIndex: 'total_toks_per_sec',
+        key: 'total_toks_per_sec',
+        width: 100,
+        align: 'center',
+        render: (value) => value?.toFixed(0) || 'N/A'
+      },
+      {
+        title: 'Avg TTFT(s)',
+        dataIndex: 'avg_ttft',
+        key: 'avg_ttft',
+        width: 100,
+        align: 'center',
+        render: (value) => value?.toFixed(3) || 'N/A'
+      },
+      {
+        title: 'P99 TTFT(s)',
+        dataIndex: 'p99_ttft',
+        key: 'p99_ttft',
+        width: 100,
+        align: 'center',
+        render: (value) => value?.toFixed(3) || 'N/A'
+      },
+      {
+        title: 'Avg TPOT(s)',
+        dataIndex: 'avg_tpot',
+        key: 'avg_tpot',
+        width: 100,
+        align: 'center',
+        render: (value) => value?.toFixed(3) || 'N/A'
+      },
+      {
+        title: 'P99 TPOT(s)',
+        dataIndex: 'p99_tpot',
+        key: 'p99_tpot',
+        width: 100,
+        align: 'center',
+        render: (value) => value?.toFixed(3) || 'N/A'
+      },
+      {
+        title: 'Success Rate',
+        dataIndex: 'success_rate',
+        key: 'success_rate',
+        width: 100,
+        align: 'center',
+        render: (value) => `${value?.toFixed(1) || 0}%`
+      }
+    ];
 
-    // 延迟分布图
-    const latencyData = metrics.latency_distribution?.map((value, index) => ({
-      request: index + 1,
-      latency: value
-    })) || [];
+    return (
+      <div>
+        {/* Summary Header */}
+        <Card title="Performance Test Summary Report" size="small" style={{ marginBottom: 16 }}>
+          <Row gutter={[16, 16]}>
+            <Col span={8}>
+              <Statistic
+                title="Total Generated"
+                value={summary?.total_generated_tokens || 0}
+                suffix="tokens"
+                valueStyle={{ color: '#3f8600' }}
+              />
+            </Col>
+            <Col span={8}>
+              <Statistic
+                title="Total Test Time"
+                value={summary?.total_test_time || 0}
+                precision={2}
+                suffix="seconds"
+                valueStyle={{ color: '#1890ff' }}
+              />
+            </Col>
+            <Col span={8}>
+              <Statistic
+                title="Avg Output Rate"
+                value={summary?.avg_output_rate || 0}
+                precision={2}
+                suffix="tokens/sec"
+                valueStyle={{ color: '#722ed1' }}
+              />
+            </Col>
+          </Row>
+        </Card>
+
+        {/* Detailed Performance Metrics Table */}
+        <Card title="Detailed Performance Metrics" size="small" style={{ marginBottom: 16 }}>
+          <Table
+            columns={columns}
+            dataSource={tableData.map((row, index) => ({ ...row, key: index }))}
+            pagination={false}
+            size="small"
+            bordered
+            scroll={{ x: 1000 }}
+            style={{ marginBottom: 16 }}
+          />
+        </Card>
+
+        {/* Best Performance Configuration */}
+        <Card title="Best Performance Configuration" size="small" style={{ marginBottom: 16 }}>
+          <Row gutter={[16, 16]}>
+            <Col span={12}>
+              <div style={{ textAlign: 'center', padding: '16px', background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: '6px' }}>
+                <Text strong style={{ color: '#52c41a', fontSize: '16px' }}>Highest RPS</Text>
+                <div style={{ fontSize: '14px', marginTop: '8px' }}>
+                  {summary?.best_rps?.config || 'N/A'}
+                </div>
+              </div>
+            </Col>
+            <Col span={12}>
+              <div style={{ textAlign: 'center', padding: '16px', background: '#f0f5ff', border: '1px solid #91d5ff', borderRadius: '6px' }}>
+                <Text strong style={{ color: '#1890ff', fontSize: '16px' }}>Lowest Latency</Text>
+                <div style={{ fontSize: '14px', marginTop: '8px' }}>
+                  {summary?.best_latency?.config || 'N/A'}
+                </div>
+              </div>
+            </Col>
+          </Row>
+        </Card>
+
+        {/* Performance Charts */}
+        {renderPerformanceCharts(tableData)}
+      </div>
+    );
+  };
+
+  // 渲染性能指标图表 (for comprehensive results)
+  const renderPerformanceCharts = (tableData) => {
+    if (!tableData || tableData.length === 0) return null;
+
+    // Prepare data for charts - sort by concurrency for better visualization
+    const chartData = [...tableData].sort((a, b) => a.concurrency - b.concurrency);
+    console.log('Performance chart data:', chartData);
+
+    const rpsConfig = {
+      data: chartData,
+      xField: 'concurrency',
+      yField: 'rps',
+      smooth: true,
+      color: '#1890ff',
+      point: { 
+        size: 4,
+        shape: 'circle'
+      },
+      xAxis: {
+        title: {
+          text: 'Concurrency'
+        }
+      },
+      yAxis: {
+        title: {
+          text: 'RPS (req/s)'
+        }
+      }
+    };
+
+    const genThroughputConfig = {
+      data: chartData,
+      xField: 'concurrency',
+      yField: 'gen_toks_per_sec',
+      smooth: true,
+      color: '#52c41a',
+      point: { 
+        size: 4,
+        shape: 'circle'
+      },
+      xAxis: {
+        title: {
+          text: 'Concurrency'
+        }
+      },
+      yAxis: {
+        title: {
+          text: 'Gen. Throughput (tok/s)'
+        }
+      }
+    };
+
+    const totalThroughputConfig = {
+      data: chartData,
+      xField: 'concurrency',
+      yField: 'total_toks_per_sec',
+      smooth: true,
+      color: '#389e0d',
+      point: { 
+        size: 4,
+        shape: 'circle'
+      },
+      xAxis: {
+        title: {
+          text: 'Concurrency'
+        }
+      },
+      yAxis: {
+        title: {
+          text: 'Total Throughput (tok/s)'
+        }
+      }
+    };
+
+    const latencyConfig = {
+      data: chartData,
+      xField: 'concurrency',
+      yField: 'avg_latency',
+      smooth: true,
+      color: '#fa541c',
+      point: { 
+        size: 4,
+        shape: 'circle'
+      },
+      xAxis: {
+        title: {
+          text: 'Concurrency'
+        }
+      },
+      yAxis: {
+        title: {
+          text: 'Average Latency (s)'
+        }
+      }
+    };
+
+    const ttftConfig = {
+      data: chartData,
+      xField: 'concurrency',
+      yField: 'avg_ttft',
+      smooth: true,
+      color: '#722ed1',
+      point: { 
+        size: 4,
+        shape: 'circle'
+      },
+      xAxis: {
+        title: {
+          text: 'Concurrency'
+        }
+      },
+      yAxis: {
+        title: {
+          text: 'Average TTFT (s)'
+        }
+      }
+    };
+
+    const tpotConfig = {
+      data: chartData,
+      xField: 'concurrency',
+      yField: 'avg_tpot',
+      smooth: true,
+      color: '#13c2c2',
+      point: { 
+        size: 4,
+        shape: 'circle'
+      },
+      xAxis: {
+        title: {
+          text: 'Concurrency'
+        }
+      },
+      yAxis: {
+        title: {
+          text: 'Average TPOT (s)'
+        }
+      }
+    };
+
+    return (
+      <Card title="Performance Metrics vs Concurrency" size="small">
+        <Row gutter={[16, 16]}>
+          <Col span={12}>
+            <div style={{ textAlign: 'center', marginBottom: '16px' }}>
+              <Text strong>RPS vs Concurrency</Text>
+            </div>
+            <Line {...rpsConfig} height={200} />
+          </Col>
+          <Col span={12}>
+            <div style={{ textAlign: 'center', marginBottom: '16px' }}>
+              <Text strong>Gen. Throughput vs Concurrency</Text>
+            </div>
+            <Line {...genThroughputConfig} height={200} />
+          </Col>
+          <Col span={12}>
+            <div style={{ textAlign: 'center', marginBottom: '16px' }}>
+              <Text strong>Total Throughput vs Concurrency</Text>
+            </div>
+            <Line {...totalThroughputConfig} height={200} />
+          </Col>
+          <Col span={12}>
+            <div style={{ textAlign: 'center', marginBottom: '16px' }}>
+              <Text strong>Average Latency vs Concurrency</Text>
+            </div>
+            <Line {...latencyConfig} height={200} />
+          </Col>
+          <Col span={12}>
+            <div style={{ textAlign: 'center', marginBottom: '16px' }}>
+              <Text strong>Average TTFT vs Concurrency</Text>
+            </div>
+            <Line {...ttftConfig} height={200} />
+          </Col>
+          <Col span={12}>
+            <div style={{ textAlign: 'center', marginBottom: '16px' }}>
+              <Text strong>Average TPOT vs Concurrency</Text>
+            </div>
+            <Line {...tpotConfig} height={200} />
+          </Col>
+        </Row>
+      </Card>
+    );
+  };
+
+  // 渲染性能指标图表 (fallback for old format)
+  const renderMetricsCharts = (results) => {
+    if (!results || !results.percentiles) return null;
+
+    const percentiles = results.percentiles;
+    const percentileLabels = percentiles['Percentiles'] || [];
+    
+    // 转换百分位标签为数值 (例: "P50" -> 50, "P99" -> 99)
+    const convertPercentileToNumber = (label) => {
+      if (typeof label === 'string' && label.startsWith('P')) {
+        return parseFloat(label.substring(1));
+      }
+      if (typeof label === 'number') {
+        return label;
+      }
+      // 如果无法解析，尝试直接解析数字
+      return parseFloat(label) || 0;
+    };
+
+    // TTFT分布图 - 使用百分位数据，x轴为百分位，y轴为TTFT值
+    const ttftData = percentileLabels.map((label, index) => ({
+      percentile: convertPercentileToNumber(label),
+      ttft: percentiles['TTFT (s)']?.[index] || 0
+    })); // 不需要反转数据顺序
+
+    // 延迟分布图 - 使用百分位数据，x轴为百分位，y轴为延迟值
+    const latencyData = percentileLabels.map((label, index) => ({
+      percentile: convertPercentileToNumber(label),
+      latency: percentiles['Latency (s)']?.[index] || 0
+    })); // 不需要反转数据顺序
 
     const ttftConfig = {
       data: ttftData,
-      xField: 'request',
-      yField: 'ttft',
+      xField: 'percentile', // x轴为百分位
+      yField: 'ttft', // y轴为TTFT值
       smooth: true,
       color: '#1890ff',
       point: { size: 3 },
       tooltip: {
-        formatter: (datum) => ({
-          name: 'TTFT',
-          value: `${datum.ttft?.toFixed(3)}s`
-        })
+        formatter: (datum) => [
+          {
+            name: '百分位',
+            value: `P${datum.percentile}`
+          },
+          {
+            name: 'TTFT',
+            value: `${datum.ttft?.toFixed(3)}s`
+          }
+        ]
+      },
+      xAxis: {
+        title: {
+          text: '百分位'
+        },
+        min: 0,
+        max: 100,
+        tickInterval: 10
+      },
+      yAxis: {
+        title: {
+          text: 'TTFT (秒)'
+        }
       }
     };
 
     const latencyConfig = {
       data: latencyData,
-      xField: 'request',
-      yField: 'latency',
+      xField: 'percentile', // x轴为百分位
+      yField: 'latency', // y轴为延迟值
       smooth: true,
       color: '#52c41a',
       point: { size: 3 },
       tooltip: {
-        formatter: (datum) => ({
-          name: '延迟',
-          value: `${datum.latency?.toFixed(3)}s`
-        })
+        formatter: (datum) => [
+          {
+            name: '百分位',
+            value: `P${datum.percentile}`
+          },
+          {
+            name: '端到端延迟',
+            value: `${datum.latency?.toFixed(3)}s`
+          }
+        ]
+      },
+      xAxis: {
+        title: {
+          text: '百分位'
+        },
+        min: 0,
+        max: 100,
+        tickInterval: 10
+      },
+      yAxis: {
+        title: {
+          text: '端到端延迟 (秒)'
+        }
       }
     };
 
-    // 吞吐量数据
-    const throughputData = metrics.input_tokens?.map((input, index) => ({
-      request: index + 1,
-      input_tokens: input,
-      output_tokens: metrics.output_tokens?.[index] || 0
-    })) || [];
-
-    const throughputConfig = {
-      data: throughputData,
-      xField: 'request',
-      yField: 'input_tokens',
-      seriesField: 'type',
-      smooth: true,
-      color: ['#1890ff', '#52c41a'],
-      point: { size: 2 },
-      tooltip: {
-        formatter: (datum) => ({
-          name: 'Token数量',
-          value: `输入: ${datum.input_tokens}, 输出: ${datum.output_tokens}`
-        })
-      }
-    };
+    // Token使用分布数据 - 使用百分位数据
+    const tokenData = percentileLabels.map((label, index) => ({
+      percentile: convertPercentileToNumber(label),
+      input_tokens: percentiles['Input tokens']?.[index] || 0,
+      output_tokens: percentiles['Output tokens']?.[index] || 0
+    })); // 不需要反转数据顺序
 
     return (
       <Row gutter={[16, 16]}>
@@ -308,25 +872,61 @@ const StressTestPage = () => {
               <div style={{ width: '50%', paddingRight: 8 }}>
                 <h4 style={{ textAlign: 'center', margin: '0 0 16px 0' }}>输入Token</h4>
                 <Line
-                  data={throughputData}
-                  xField="request"
+                  data={tokenData}
+                  xField="percentile"
                   yField="input_tokens"
                   color="#1890ff"
                   smooth={true}
                   point={{ size: 2 }}
                   height={160}
+                  tooltip={{
+                    formatter: (datum) => [
+                      {
+                        name: '百分位',
+                        value: `P${datum.percentile}`
+                      },
+                      {
+                        name: '输入Token',
+                        value: `${datum.input_tokens}`
+                      }
+                    ]
+                  }}
+                  xAxis={{
+                    title: { text: '百分位' }
+                  }}
+                  yAxis={{
+                    title: { text: '输入Token数' }
+                  }}
                 />
               </div>
               <div style={{ width: '50%', paddingLeft: 8 }}>
                 <h4 style={{ textAlign: 'center', margin: '0 0 16px 0' }}>输出Token</h4>
                 <Line
-                  data={throughputData}
-                  xField="request"
+                  data={tokenData}
+                  xField="percentile"
                   yField="output_tokens"
                   color="#52c41a"
                   smooth={true}
                   point={{ size: 2 }}
                   height={160}
+                  tooltip={{
+                    formatter: (datum) => [
+                      {
+                        name: '百分位',
+                        value: `P${datum.percentile}`
+                      },
+                      {
+                        name: '输出Token',
+                        value: `${datum.output_tokens}`
+                      }
+                    ]
+                  }}
+                  xAxis={{
+                    title: { text: '百分位' }
+                  }}
+                  yAxis={{
+                    title: { text: '输出Token数' }
+                  }}
                 />
               </div>
             </div>
@@ -506,7 +1106,7 @@ const StressTestPage = () => {
           <Title level={2} style={{ margin: 0 }}>压力测试</Title>
         </Space>
         <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
-          使用 Evalscope 对部署的模型进行性能评估，测量 TTFT、延迟和 QPS 等关键指标
+           对部署的模型进行性能评估，测量 TTFT、延迟和 QPS 等关键指标
         </Text>
       </div>
 
@@ -519,113 +1119,281 @@ const StressTestPage = () => {
               layout="vertical"
               onFinish={startStressTest}
               initialValues={{
-                num_requests: 50,
-                concurrency: 5,
-                input_tokens_range: [50, 200],
-                output_tokens_range: [100, 500]
+                num_requests: "50, 100, 200",
+                concurrency: "1, 5, 10",
+                input_tokens: 32,
+                output_tokens: 32,
+                instance_type: "g5.2xlarge",
+                framework: "vllm",
+                tp_size: 1,
+                dp_size: 1
               }}
             >
-              <Form.Item
-                name="model"
-                label="选择模型"
-                rules={[{ required: true, message: '请选择要测试的模型' }]}
-              >
-                <Select placeholder="选择模型">
-                  {models.map(model => (
-                    <Option key={model.key} value={model.key}>
-                      <Space>
-                        {model.type === 'bedrock' ? <CloudOutlined /> : <RocketOutlined />}
-                        {model.name}
-                        {model.tag && <Text type="secondary">({model.tag})</Text>}
-                      </Space>
-                    </Option>
-                  ))}
-                </Select>
+              <Form.Item label="模型选择方式">
+                <Radio.Group 
+                  value={inputMode} 
+                  onChange={(e) => {
+                    setInputMode(e.target.value);
+                    // Clear form fields when switching modes
+                    form.resetFields(['model', 'api_url', 'model_name', 'instance_type', 'framework', 'tp_size', 'dp_size']);
+                  }}
+                >
+                  <Radio value="dropdown">
+                    <Space>
+                      <SettingOutlined />
+                      从列表选择
+                    </Space>
+                  </Radio>
+                  <Radio value="manual">
+                    <Space>
+                      <LinkOutlined />
+                      手动输入
+                    </Space>
+                  </Radio>
+                </Radio.Group>
               </Form.Item>
+
+              {inputMode === 'dropdown' ? (
+                <Form.Item
+                  name="model"
+                  label="选择模型"
+                  rules={[{ required: true, message: '请选择要测试的模型' }]}
+                >
+                  <Select placeholder="选择模型">
+                    {models.map(model => (
+                      <Option key={model.key} value={model.key}>
+                        <Space>
+                          {model.type === 'bedrock' ? <CloudOutlined /> : <RocketOutlined />}
+                          {model.name}
+                          {model.tag && <Text type="secondary">({model.tag})</Text>}
+                        </Space>
+                      </Option>
+                    ))}
+                  </Select>
+                </Form.Item>
+              ) : (
+                <>
+                  <Form.Item
+                    name="api_url"
+                    label="API URL"
+                    rules={[
+                      { required: true, message: '请输入API URL' },
+                      { type: 'url', message: '请输入有效的URL' }
+                    ]}
+                    extra="请输入完整的chat completions端点URL，必须包含 /v1/chat/completions 路径"
+                  >
+                    <Input 
+                      placeholder="http://your-api-host.com/v1/chat/completions"
+                      prefix={<LinkOutlined />}
+                    />
+                  </Form.Item>
+                  <Form.Item
+                    name="model_name"
+                    label="模型名称"
+                    rules={[{ required: true, message: '请输入模型名称' }]}
+                    extra="请输入准确的模型名称，如: gpt-3.5-turbo, claude-3-sonnet-20240229"
+                  >
+                    <Input 
+                      placeholder="gpt-3.5-turbo"
+                      prefix={<RocketOutlined />}
+                    />
+                  </Form.Item>
+                  
+                  {/* Manual deployment configuration */}
+                  <Row gutter={16}>
+                    <Col span={12}>
+                      <Form.Item
+                        name="instance_type"
+                        label="实例类型"
+                        rules={[{ required: true, message: '请选择实例类型' }]}
+                      >
+                        <Select placeholder="选择实例类型">
+                          <Option value="ml.g5.xlarge">ml.g5.xlarge</Option>
+                          <Option value="ml.g5.2xlarge">ml.g5.2xlarge</Option>
+                          <Option value="ml.g5.4xlarge">ml.g5.4xlarge</Option>
+                          <Option value="ml.g5.8xlarge">ml.g5.8xlarge</Option>
+                          <Option value="ml.g5.12xlarge">ml.g5.12xlarge</Option>
+                          <Option value="ml.g5.16xlarge">ml.g5.16xlarge</Option>
+                          <Option value="ml.g5.24xlarge">ml.g5.24xlarge</Option>
+                          <Option value="ml.g5.48xlarge">ml.g5.48xlarge</Option>
+                          <Option value="ml.p4d.24xlarge">ml.p4d.24xlarge</Option>
+                          <Option value="ml.p4de.24xlarge">ml.p4de.24xlarge</Option>
+                          <Option value="ml.p5.48xlarge">ml.p5.48xlarge</Option>
+                          <Option value="g5.xlarge">g5.xlarge</Option>
+                          <Option value="g5.2xlarge">g5.2xlarge</Option>
+                          <Option value="g5.4xlarge">g5.4xlarge</Option>
+                          <Option value="g5.8xlarge">g5.8xlarge</Option>
+                          <Option value="g5.12xlarge">g5.12xlarge</Option>
+                          <Option value="g5.16xlarge">g5.16xlarge</Option>
+                          <Option value="g5.24xlarge">g5.24xlarge</Option>
+                          <Option value="g5.48xlarge">g5.48xlarge</Option>
+                        </Select>
+                      </Form.Item>
+                    </Col>
+                    <Col span={12}>
+                      <Form.Item
+                        name="framework"
+                        label="推理框架"
+                        rules={[{ required: true, message: '请选择推理框架' }]}
+                      >
+                        <Select placeholder="选择推理框架">
+                          <Option value="vllm">vLLM</Option>
+                          <Option value="sglang">SGLang</Option>
+                          <Option value="tgi">TGI (Text Generation Inference)</Option>
+                          <Option value="transformers">Transformers</Option>
+                        </Select>
+                      </Form.Item>
+                    </Col>
+                  </Row>
+                  
+                  <Row gutter={16}>
+                    <Col span={12}>
+                      <Form.Item
+                        name="tp_size"
+                        label="张量并行 (TP Size)"
+                        rules={[{ required: true, message: '请输入张量并行数' }]}
+                        extra="通常为GPU数量，如1, 2, 4, 8"
+                      >
+                        <InputNumber
+                          min={1}
+                          max={8}
+                          placeholder="1"
+                          style={{ width: '100%' }}
+                        />
+                      </Form.Item>
+                    </Col>
+                    <Col span={12}>
+                      <Form.Item
+                        name="dp_size"
+                        label="数据并行 (DP Size)"
+                        rules={[{ required: true, message: '请输入数据并行数' }]}
+                        extra="通常为1，除非使用多节点部署"
+                      >
+                        <InputNumber
+                          min={1}
+                          max={16}
+                          placeholder="1"
+                          style={{ width: '100%' }}
+                        />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+                </>
+              )}
+
+              {/* <Alert
+                description="提醒：请求总数和并发数需数量相同，按顺序配对测试，如 '50,100,200' 与 '1,5,10' 进行 (50,1), (100,5), (200,10) 三组测试。"
+                type="info"
+                showIcon={false}
+                style={{ marginBottom: 8, padding: '4px 8px' }}
+              /> */}
 
               <Form.Item
                 name="num_requests"
                 label="请求总数"
-                rules={[{ required: true, message: '请输入请求总数' }]}
+                rules={[
+                  { required: true, message: '请输入请求总数' },
+                  {
+                    validator: (_, value) => {
+                      if (!value) return Promise.reject(new Error('请输入请求总数'));
+                      
+                      // Parse comma-separated values
+                      const numbers = value.split(',').map(v => v.trim()).filter(v => v);
+                      const invalidNumbers = numbers.filter(n => isNaN(n) || parseInt(n) <= 0);
+                      
+                      if (invalidNumbers.length > 0) {
+                        return Promise.reject(new Error('请输入有效的正整数，用逗号分隔'));
+                      }
+
+                      // Check if concurrency field exists and validate count match
+                      const concurrencyValue = form.getFieldValue('concurrency');
+                      if (concurrencyValue) {
+                        const concurrencyNumbers = concurrencyValue.split(',').map(v => v.trim()).filter(v => v);
+                        const validConcurrencyNumbers = concurrencyNumbers.filter(n => !isNaN(n) && parseInt(n) > 0);
+                        
+                        if (validConcurrencyNumbers.length > 0 && numbers.length !== validConcurrencyNumbers.length) {
+                          return Promise.reject(new Error(`请求总数(${numbers.length}个值)和并发数(${validConcurrencyNumbers.length}个值)的数量必须相同`));
+                        }
+                      }
+                      
+                      return Promise.resolve();
+                    }
+                  }
+                ]}
+                extra="可以输入多个值，用英文逗号分隔，如: 10, 20, 50"
               >
-                <InputNumber
-                  min={1}
-                  max={1000}
+                <Input
+                  placeholder="10, 20, 50, 100"
                   style={{ width: '100%' }}
-                  placeholder="请求总数"
                 />
               </Form.Item>
 
               <Form.Item
                 name="concurrency"
                 label="并发数"
-                rules={[{ required: true, message: '请输入并发数' }]}
+                rules={[
+                  { required: true, message: '请输入并发数' },
+                  {
+                    validator: (_, value) => {
+                      if (!value) return Promise.reject(new Error('请输入并发数'));
+                      
+                      // Parse comma-separated values
+                      const numbers = value.split(',').map(v => v.trim()).filter(v => v);
+                      const invalidNumbers = numbers.filter(n => isNaN(n) || parseInt(n) <= 0);
+                      
+                      if (invalidNumbers.length > 0) {
+                        return Promise.reject(new Error('请输入有效的正整数，用逗号分隔'));
+                      }
+
+                      // Check if num_requests field exists and validate count match
+                      const numRequestsValue = form.getFieldValue('num_requests');
+                      if (numRequestsValue) {
+                        const requestNumbers = numRequestsValue.split(',').map(v => v.trim()).filter(v => v);
+                        const validRequestNumbers = requestNumbers.filter(n => !isNaN(n) && parseInt(n) > 0);
+                        
+                        if (validRequestNumbers.length > 0 && numbers.length !== validRequestNumbers.length) {
+                          return Promise.reject(new Error(`并发数(${numbers.length}个值)和请求总数(${validRequestNumbers.length}个值)的数量必须相同`));
+                        }
+                      }
+                      
+                      return Promise.resolve();
+                    }
+                  }
+                ]}
+                extra="可以输入多个值，用英文逗号分隔，需要与请求总数数量相同，如: 1, 5, 10"
               >
-                <InputNumber
-                  min={1}
-                  max={50}
+                <Input
+                  placeholder="1, 5, 10, 20"
                   style={{ width: '100%' }}
-                  placeholder="并发请求数"
                 />
               </Form.Item>
 
               <Row gutter={8}>
                 <Col span={12}>
                   <Form.Item
-                    name={['input_tokens_range', 0]}
-                    label="输入Token最小值"
-                    rules={[{ required: true, message: '请输入最小值' }]}
+                    name="input_tokens"
+                    label="输入Token"
+                    rules={[{ required: true, message: '请输入Token数量' }]}
                   >
                     <InputNumber
                       style={{ width: '100%' }}
-                      placeholder="最小值"
+                      placeholder="输入Token数量"
                       min={1}
-                      max={2000}
+                      max={4000}
                     />
                   </Form.Item>
                 </Col>
                 <Col span={12}>
                   <Form.Item
-                    name={['input_tokens_range', 1]}
-                    label="输入Token最大值"
-                    rules={[{ required: true, message: '请输入最大值' }]}
+                    name="output_tokens"
+                    label="输出Token"
+                    rules={[{ required: true, message: '请输入Token数量' }]}
                   >
                     <InputNumber
                       style={{ width: '100%' }}
-                      placeholder="最大值"
+                      placeholder="输出Token数量"
                       min={1}
-                      max={2000}
-                    />
-                  </Form.Item>
-                </Col>
-              </Row>
-
-              <Row gutter={8}>
-                <Col span={12}>
-                  <Form.Item
-                    name={['output_tokens_range', 0]}
-                    label="输出Token最小值"
-                    rules={[{ required: true, message: '请输入最小值' }]}
-                  >
-                    <InputNumber
-                      style={{ width: '100%' }}
-                      placeholder="最小值"
-                      min={1}
-                      max={2000}
-                    />
-                  </Form.Item>
-                </Col>
-                <Col span={12}>
-                  <Form.Item
-                    name={['output_tokens_range', 1]}
-                    label="输出Token最大值"
-                    rules={[{ required: true, message: '请输入最大值' }]}
-                  >
-                    <InputNumber
-                      style={{ width: '100%' }}
-                      placeholder="最大值"
-                      min={1}
-                      max={2000}
+                      max={4000}
                     />
                   </Form.Item>
                 </Col>
@@ -726,56 +1494,64 @@ const StressTestPage = () => {
             {/* 测试结果 */}
             {currentSession && currentSession.status === 'completed' && currentSession.results && (
               <>
-                <Card title="性能指标概览" size="small">
-                  <Row gutter={[16, 16]}>
-                    <Col span={6}>
-                      <Statistic
-                        title="QPS"
-                        value={currentSession.results.qps || 0}
-                        precision={2}
-                        suffix="req/s"
-                        valueStyle={{ color: '#3f8600' }}
-                      />
-                    </Col>
-                    <Col span={6}>
-                      <Statistic
-                        title="平均TTFT"
-                        value={currentSession.results.avg_ttft || 0}
-                        precision={3}
-                        suffix="s"
-                        valueStyle={{ color: '#cf1322' }}
-                      />
-                    </Col>
-                    <Col span={6}>
-                      <Statistic
-                        title="平均延迟"
-                        value={currentSession.results.avg_latency || 0}
-                        precision={3}
-                        suffix="s"
-                        valueStyle={{ color: '#1890ff' }}
-                      />
-                    </Col>
-                    <Col span={6}>
-                      <Statistic
-                        title="吞吐量"
-                        value={currentSession.results.tokens_per_second || 0}
-                        precision={2}
-                        suffix="tok/s"
-                        valueStyle={{ color: '#722ed1' }}
-                      />
-                    </Col>
-                  </Row>
-                </Card>
+                {/* Show comprehensive summary if available */}
+                {currentSession.results.is_comprehensive ? (
+                  renderComprehensiveSummary(currentSession.results)
+                ) : (
+                  /* Fallback to old format for backward compatibility */
+                  <>
+                    <Card title="性能指标概览" size="small">
+                      <Row gutter={[16, 16]}>
+                        <Col span={6}>
+                          <Statistic
+                            title="QPS"
+                            value={currentSession.results.qps || 0}
+                            precision={2}
+                            suffix="req/s"
+                            valueStyle={{ color: '#3f8600' }}
+                          />
+                        </Col>
+                        <Col span={6}>
+                          <Statistic
+                            title="平均TTFT"
+                            value={currentSession.results.avg_ttft || 0}
+                            precision={3}
+                            suffix="s"
+                            valueStyle={{ color: '#cf1322' }}
+                          />
+                        </Col>
+                        <Col span={6}>
+                          <Statistic
+                            title="平均延迟"
+                            value={currentSession.results.avg_latency || 0}
+                            precision={3}
+                            suffix="s"
+                            valueStyle={{ color: '#1890ff' }}
+                          />
+                        </Col>
+                        <Col span={6}>
+                          <Statistic
+                            title="吞吐量"
+                            value={currentSession.results.tokens_per_second || 0}
+                            precision={2}
+                            suffix="tok/s"
+                            valueStyle={{ color: '#722ed1' }}
+                          />
+                        </Col>
+                      </Row>
+                    </Card>
 
-                <Card title="详细指标" size="small">
-                  {renderResultsTable(currentSession.results)}
-                </Card>
+                    <Card title="详细指标" size="small">
+                      {renderResultsTable(currentSession.results)}
+                    </Card>
 
-                {renderMetricsCharts(currentSession.results)}
-                
-                <Card title="百分位数据" size="small">
-                  {renderPercentilesTable(currentSession.results)}
-                </Card>
+                    {renderMetricsCharts(currentSession.results)}
+                    
+                    <Card title="百分位数据" size="small">
+                      {renderPercentilesTable(currentSession.results)}
+                    </Card>
+                  </>
+                )}
               </>
             )}
           </Space>

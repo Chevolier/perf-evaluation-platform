@@ -38,45 +38,74 @@ A comprehensive platform for multimodal AI inference supporting both AWS Bedrock
 - AWS credentials configured
 - EMD CLI installed (for local models)
 
-### Backend Setup
-
 1. **Install dependencies:**
-   ```bash
-   conda create -n eval-platform python=3.10 -y
-   conda activate eval-platform
-   pip install -r requirements.txt
-   ```
+
+Please ensure to use python=3.10
+
+```bash
+conda create -n eval-platform python=3.10 -y
+conda activate eval-platform
+pip install -r requirements.txt
+```
 
 2. **Configure AWS credentials:**
-   ```bash
-   aws configure
-   # or set environment variables:
-   export AWS_ACCESS_KEY_ID=your_key
-   export AWS_SECRET_ACCESS_KEY=your_secret
-   export AWS_SESSION_TOKEN=your_token  # if using temporary credentials
-   ```
+
+```bash
+aws configure
+# or set environment variables:
+export AWS_ACCESS_KEY_ID=your_key
+export AWS_SECRET_ACCESS_KEY=your_secret
+export AWS_SESSION_TOKEN=your_token  # if using temporary credentials
+```
 
 3. **Start the backend:**
-   ```bash
-   python backend/backend.py
-   ```
+
+```bash
+python run_backend.py
+```
 
 ### Frontend Setup
 
+#### Node.js install
+Go to https://nodejs.org/zh-cn/download to use the codes based on your system, or use the following commands in Linux.
+
+```bash
+# Download and install nvm:
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+
+# in lieu of restarting the shell
+\. "$HOME/.nvm/nvm.sh"
+
+# Download and install Node.js:
+nvm install 22
+
+# Verify the Node.js version:
+node -v # Should print "v22.18.0".
+nvm current # Should print "v22.18.0".
+
+# Verify npm version:
+npm -v # Should print "10.9.3".
+```
+
+### Backend Setup
+
 1. **Install dependencies:**
-   ```bash
-   cd frontend
-   npm install
-   ```
+
+```bash
+cd frontend
+npm install
+```
 
 2. **Start the development server:**
-   ```bash
-   npm start
-   ```
+
+```bash
+npm start
+```
 
 3. **Access the application:**
-   - Frontend: http://localhost:3000
-   - Backend API: http://localhost:5000
+
+- Frontend: http://localhost:3000
+- Backend API: http://localhost:5000
 
 ## 📖 Usage Guide
 

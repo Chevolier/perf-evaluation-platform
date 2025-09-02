@@ -1,0 +1,16 @@
+# Development environment configuration
+
+server:
+  debug: true
+  port: 5000
+
+logging:
+  level: "DEBUG"
+  file: "logs/development.log"
+
+models:
+  emd:
+    base_url: "http://localhost:8000"
+  
+cors:
+  origins: ["http://localhost:3000", "http://localhost:3001"]

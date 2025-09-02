@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(source:*)",
+      "Bash(conda activate:*)",
+      "Bash(python:*)",
+      "Bash(BROWSER=none npm start)",
+      "Bash(ss:*)",
+      "Bash(BROWSER=none PORT=3001 npm start)",
+      "Bash(curl:*)",
+      "Bash(pip install:*)",
+      "Bash(sudo apt-get:*)",
+      "Bash(sudo apt-get install:*)",
+      "Bash(grep:*)"
+    ],
+    "deny": [],
+    "ask": [],
+    "additionalDirectories": [
+      "/usr/share/fonts/truetype/noto"
+    ]
+  }
+}

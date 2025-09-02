@@ -1,0 +1,14 @@
+# Production environment configuration
+
+server:
+  debug: false
+  port: 5000
+  workers: 4
+
+logging:
+  level: "INFO"
+  file: "logs/production.log"
+
+models:
+  emd:
+    base_url: "http://localhost:8000"

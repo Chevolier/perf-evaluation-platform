@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Layout, Typography, Menu, Modal, Button } from 'antd';
 import { 
   SettingOutlined, 
@@ -18,56 +18,141 @@ import 'antd/dist/reset.css';
 const { Header, Content, Sider } = Layout;
 const { Title } = Typography;
 
+// Helper function to get current page from URL
+const getCurrentPageFromURL = () => {
+  const hash = window.location.hash.replace('#', '');
+  const validPages = ['model-hub', 'playground', 'stress-test', 'visualization', 'settings'];
+  return validPages.includes(hash) ? hash : 'model-hub';
+};
+
+// Helper function to update URL when page changes
+const updateURL = (page) => {
+  window.history.replaceState(null, null, `#${page}`);
+};
+
 function App() {
-  const [selectedModels, setSelectedModels] = useState([]);
-  const [dataset, setDataset] = useState({ type: 'image', files: [], prompt: '' });
-  const [params, setParams] = useState({ max_tokens: 1024, temperature: 0.1 });
+  // Load playground state from localStorage
+  const [selectedModels, setSelectedModels] = useState(() => {
+    try {
+      const saved = localStorage.getItem('playground_selectedModels');
+      return saved ? JSON.parse(saved) : [];
+    } catch (error) {
+      console.error('Failed to load selected models from localStorage:', error);
+      return [];
+    }
+  });
+  
+  const [dataset, setDataset] = useState(() => {
+    try {
+      const saved = localStorage.getItem('playground_dataset');
+      return saved ? JSON.parse(saved) : { type: 'image', files: [], prompt: '' };
+    } catch (error) {
+      console.error('Failed to load dataset from localStorage:', error);
+      return { type: 'image', files: [], prompt: '' };
+    }
+  });
+  
+  const [params, setParams] = useState(() => {
+    try {
+      const saved = localStorage.getItem('playground_params');
+      return saved ? JSON.parse(saved) : { max_tokens: 1024, temperature: 0.1 };
+    } catch (error) {
+      console.error('Failed to load params from localStorage:', error);
+      return { max_tokens: 1024, temperature: 0.1 };
+    }
+  });
   
   // 侧边栏状态
   const [collapsed, setCollapsed] = useState(false);
-  const [currentPage, setCurrentPage] = useState('model-hub');
+  const [currentPage, setCurrentPage] = useState(getCurrentPageFromURL);
   
   // 模型选择弹窗状态
   const [modelModalVisible, setModelModalVisible] = useState(false);
+
+  // Function to handle page navigation
+  const navigateToPage = (page) => {
+    setCurrentPage(page);
+    updateURL(page);
+  };
 
   const menuItems = [
     {
       key: 'model-hub',
       icon: <RobotOutlined />,
       label: '模型部署',
-      onClick: () => setCurrentPage('model-hub')
+      onClick: () => navigateToPage('model-hub')
     },
     {
       key: 'playground',
       icon: <PlayCircleOutlined />,
       label: '在线体验',
-      onClick: () => setCurrentPage('playground')
+      onClick: () => navigateToPage('playground')
     },
     {
       key: 'stress-test',
       icon: <ThunderboltOutlined />,
       label: '性能评测',
-      onClick: () => setCurrentPage('stress-test')
+      onClick: () => navigateToPage('stress-test')
     },
     // {
     //   key: 'model-evaluation',
     //   icon: <LineChartOutlined />,
     //   label: '效果评测',
-    //   onClick: () => setCurrentPage('model-evaluation')
+    //   onClick: () => navigateToPage('model-evaluation')
     // },
     {
       key: 'visualization',
       icon: <BarChartOutlined />,
       label: '结果展示',
-      onClick: () => setCurrentPage('visualization')
+      onClick: () => navigateToPage('visualization')
     },
     {
       key: 'settings',
       icon: <SettingOutlined />,
       label: '设置',
-      onClick: () => setCurrentPage('settings')
+      onClick: () => navigateToPage('settings')
     }
   ];
+
+  // Save playground state to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('playground_selectedModels', JSON.stringify(selectedModels));
+    } catch (error) {
+      console.error('Failed to save selected models to localStorage:', error);
+    }
+  }, [selectedModels]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('playground_dataset', JSON.stringify(dataset));
+    } catch (error) {
+      console.error('Failed to save dataset to localStorage:', error);
+    }
+  }, [dataset]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('playground_params', JSON.stringify(params));
+    } catch (error) {
+      console.error('Failed to save params to localStorage:', error);
+    }
+  }, [params]);
+
+  // Listen for URL hash changes (browser back/forward buttons)
+  useEffect(() => {
+    const handleHashChange = () => {
+      const newPage = getCurrentPageFromURL();
+      setCurrentPage(newPage);
+    };
+
+    window.addEventListener('hashchange', handleHashChange);
+    
+    // Cleanup
+    return () => {
+      window.removeEventListener('hashchange', handleHashChange);
+    };
+  }, []);
 
   const renderContent = () => {
     switch (currentPage) {
@@ -123,7 +208,7 @@ function App() {
         height: '64px'
       }}>
         <Title level={2} style={{ color: '#fff', margin: 0 }}>
-          大模型评测平台
+          大模型性能评测平台
         </Title>
       </Header>
       

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { 
   Row, 
   Col, 
@@ -16,7 +16,8 @@ import {
   Empty,
   Alert,
   Tag,
-  Modal
+  Modal,
+  Select
 } from 'antd';
 import { 
   UploadOutlined, 
@@ -24,7 +25,11 @@ import {
   ClearOutlined,
   FileImageOutlined,
   VideoCameraOutlined,
-  RobotOutlined
+  RobotOutlined,
+  SettingOutlined,
+  LinkOutlined,
+  RocketOutlined,
+  CloseOutlined
 } from '@ant-design/icons';
 import PlaygroundResultsDisplay from '../components/PlaygroundResultsDisplay';
 import PlaygroundModelSelector from '../components/PlaygroundModelSelector';
@@ -41,10 +46,208 @@ const PlaygroundPage = ({
   onParamsChange,
   onModelChange
 }) => {
-  const [inferenceResults, setInferenceResults] = useState({});
+  // Load inference results from localStorage
+  const [inferenceResults, setInferenceResults] = useState(() => {
+    try {
+      const saved = localStorage.getItem('playground_inferenceResults');
+      return saved ? JSON.parse(saved) : {};
+    } catch (error) {
+      console.error('Failed to load inference results from localStorage:', error);
+      return {};
+    }
+  });
+  
   const [isInferring, setIsInferring] = useState(false);
   const [modelSelectorVisible, setModelSelectorVisible] = useState(false);
+  
+  // Load playground internal state from localStorage
+  const [inputMode, setInputMode] = useState(() => {
+    try {
+      const saved = localStorage.getItem('playground_inputMode');
+      return saved ? JSON.parse(saved) : 'dropdown';
+    } catch (error) {
+      console.error('Failed to load input mode from localStorage:', error);
+      return 'dropdown';
+    }
+  });
+  
+  const [manualConfig, setManualConfig] = useState(() => {
+    try {
+      const saved = localStorage.getItem('playground_manualConfig');
+      return saved ? JSON.parse(saved) : {
+        api_url: '',
+        model_name: ''
+      };
+    } catch (error) {
+      console.error('Failed to load manual config from localStorage:', error);
+      return {
+        api_url: '',
+        model_name: ''
+      };
+    }
+  });
+
+  // Load history for API URLs and model names
+  const [apiUrlHistory, setApiUrlHistory] = useState(() => {
+    try {
+      const saved = localStorage.getItem('playground_apiUrlHistory');
+      return saved ? JSON.parse(saved) : [];
+    } catch (error) {
+      console.error('Failed to load API URL history from localStorage:', error);
+      return [];
+    }
+  });
+
+  const [modelNameHistory, setModelNameHistory] = useState(() => {
+    try {
+      const saved = localStorage.getItem('playground_modelNameHistory');
+      return saved ? JSON.parse(saved) : [];
+    } catch (error) {
+      console.error('Failed to load model name history from localStorage:', error);
+      return [];
+    }
+  });
   const fileInputRef = useRef(null);
+
+  // Save playground internal state to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('playground_inferenceResults', JSON.stringify(inferenceResults));
+    } catch (error) {
+      console.error('Failed to save inference results to localStorage:', error);
+    }
+  }, [inferenceResults]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('playground_inputMode', JSON.stringify(inputMode));
+    } catch (error) {
+      console.error('Failed to save input mode to localStorage:', error);
+    }
+  }, [inputMode]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('playground_manualConfig', JSON.stringify(manualConfig));
+    } catch (error) {
+      console.error('Failed to save manual config to localStorage:', error);
+    }
+  }, [manualConfig]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('playground_apiUrlHistory', JSON.stringify(apiUrlHistory));
+    } catch (error) {
+      console.error('Failed to save API URL history to localStorage:', error);
+    }
+  }, [apiUrlHistory]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('playground_modelNameHistory', JSON.stringify(modelNameHistory));
+    } catch (error) {
+      console.error('Failed to save model name history to localStorage:', error);
+    }
+  }, [modelNameHistory]);
+
+  // Helper functions to manage history
+  const addToApiUrlHistory = (url) => {
+    if (!url.trim()) return;
+    
+    setApiUrlHistory(prev => {
+      const newHistory = prev.filter(item => item !== url.trim());
+      newHistory.unshift(url.trim());
+      return newHistory.slice(0, 10); // Keep only the latest 10 entries
+    });
+  };
+
+  const addToModelNameHistory = (modelName) => {
+    if (!modelName.trim()) return;
+    
+    setModelNameHistory(prev => {
+      const newHistory = prev.filter(item => item !== modelName.trim());
+      newHistory.unshift(modelName.trim());
+      return newHistory.slice(0, 10); // Keep only the latest 10 entries
+    });
+  };
+
+  const removeFromApiUrlHistory = (url) => {
+    setApiUrlHistory(prev => prev.filter(item => item !== url));
+  };
+
+  const removeFromModelNameHistory = (modelName) => {
+    setModelNameHistory(prev => prev.filter(item => item !== modelName));
+  };
+
+  // Handle page refresh (Command+R on Mac, F5 on Windows/Linux)
+  const handlePageRefresh = useCallback((event) => {
+    // Check for refresh key combinations
+    if ((event.metaKey && event.key === 'r') || event.key === 'F5') {
+      event.preventDefault();
+      
+      // Clear all localStorage data
+      localStorage.removeItem('playground_inferenceResults');
+      localStorage.removeItem('playground_inputMode');
+      localStorage.removeItem('playground_manualConfig');
+      localStorage.removeItem('playground_apiUrlHistory');
+      localStorage.removeItem('playground_modelNameHistory');
+      
+      // Reset all state to defaults
+      setInferenceResults({});
+      setIsInferring(false);
+      setInputMode('dropdown');
+      setManualConfig({
+        api_url: '',
+        model_name: ''
+      });
+      setApiUrlHistory([]);
+      setModelNameHistory([]);
+      
+      // Reset dataset and params via props if they have default reset functions
+      if (onDatasetChange) {
+        onDatasetChange({
+          prompt: '',
+          files: [],
+          type: 'image'
+        });
+      }
+      if (onParamsChange) {
+        onParamsChange({
+          max_tokens: 150,
+          temperature: 0.7
+        });
+      }
+      if (onModelChange) {
+        onModelChange([]);
+      }
+      
+      // Clear file input
+      if (fileInputRef.current) {
+        try {
+          const input = fileInputRef.current.input || 
+                       fileInputRef.current.querySelector('input[type="file"]') ||
+                       fileInputRef.current;
+          if (input && input.value !== undefined) {
+            input.value = '';
+          }
+        } catch (error) {
+          console.log('Unable to clear file input:', error);
+        }
+      }
+      
+      // Refresh the page
+      window.location.reload();
+    }
+  }, [onDatasetChange, onParamsChange, onModelChange, fileInputRef]);
+
+  // Add keyboard event listener for refresh
+  useEffect(() => {
+    document.addEventListener('keydown', handlePageRefresh);
+    
+    return () => {
+      document.removeEventListener('keydown', handlePageRefresh);
+    };
+  }, [handlePageRefresh]);
 
   // 处理文件上传
   const handleFileUpload = async (file, fileList) => {
@@ -207,9 +410,24 @@ const PlaygroundPage = ({
 
   // 开始推理
   const handleStartInference = async () => {
-    if (selectedModels.length === 0) {
-      message.warning('请先选择至少一个模型');
-      return;
+    // Validation based on input mode
+    if (inputMode === 'dropdown') {
+      if (selectedModels.length === 0) {
+        message.warning('请先选择至少一个模型');
+        return;
+      }
+    } else {
+      if (!manualConfig.api_url.trim() || !manualConfig.model_name.trim()) {
+        message.warning('请填写API URL和模型名称');
+        return;
+      }
+      // Validate URL format
+      try {
+        new URL(manualConfig.api_url);
+      } catch (e) {
+        message.warning('请输入有效的API URL');
+        return;
+      }
     }
 
     if (!dataset.prompt.trim()) {
@@ -220,8 +438,13 @@ const PlaygroundPage = ({
     setIsInferring(true);
     setInferenceResults({});
 
+    // Add to history if using manual input
+    if (inputMode === 'manual') {
+      addToApiUrlHistory(manualConfig.api_url);
+      addToModelNameHistory(manualConfig.model_name);
+    }
+
     const requestData = {
-      models: selectedModels,
       text: dataset.prompt,
       frames: dataset.files,
       mediaType: dataset.type,
@@ -229,7 +452,19 @@ const PlaygroundPage = ({
       temperature: params.temperature
     };
 
+    // Handle different input modes
+    if (inputMode === 'dropdown') {
+      requestData.models = selectedModels;
+    } else {
+      requestData.manual_config = {
+        api_url: manualConfig.api_url,
+        model_name: manualConfig.model_name
+      };
+    }
+
     try {
+      console.log('🚀 Starting inference request:', requestData);
+      
       // 使用流式接口
       const response = await fetch('/api/multi-inference', {
         method: 'POST',
@@ -239,36 +474,66 @@ const PlaygroundPage = ({
         body: JSON.stringify(requestData)
       });
 
+      console.log('📡 Response status:', response.status, response.statusText);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
+      let buffer = '';
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
-        const chunk = decoder.decode(value);
-        const lines = chunk.split('\n');
+        const chunk = decoder.decode(value, { stream: true });
+        console.log('📦 Received chunk:', JSON.stringify(chunk));
+        
+        buffer += chunk;
+        const lines = buffer.split('\n');
+        
+        // Keep the last potentially incomplete line in buffer
+        buffer = lines.pop() || '';
 
         for (const line of lines) {
+          console.log('📄 Processing line:', JSON.stringify(line));
+          
           if (line.startsWith('data: ')) {
             try {
-              const data = JSON.parse(line.slice(6));
+              const jsonStr = line.slice(6).trim();
+              console.log('🔍 Parsing JSON:', jsonStr);
               
-              if (data.type === 'complete') {
-                setIsInferring(false);
-                break;
-              } else if (data.model) {
-                setInferenceResults(prev => ({
-                  ...prev,
-                  [data.model]: data
-                }));
+              if (jsonStr) {
+                const data = JSON.parse(jsonStr);
+                console.log('✅ Parsed data:', data);
+                
+                if (data.type === 'complete') {
+                  console.log('🏁 Stream complete');
+                  setIsInferring(false);
+                  break;
+                } else if (data.model) {
+                  console.log('📊 Updating results for model:', data.model);
+                  setInferenceResults(prev => ({
+                    ...prev,
+                    [data.model]: data
+                  }));
+                } else if (data.type === 'heartbeat') {
+                  console.log('💓 Heartbeat received');
+                }
               }
             } catch (e) {
-              console.error('解析SSE数据失败:', e);
+              console.error('❌ 解析SSE数据失败:', e, 'Line:', line);
             }
+          } else if (line.trim()) {
+            console.log('⚠️ Non-SSE line received:', line);
           }
         }
       }
+      
+      console.log('🎯 Stream processing finished');
+      setIsInferring(false);
     } catch (error) {
       console.error('推理请求失败:', error);
       message.error('推理请求失败，请检查网络连接');
@@ -292,39 +557,207 @@ const PlaygroundPage = ({
           <Space direction="vertical" size="large" style={{ width: '100%' }}>
             {/* 模型选择区域 */}
             <Card title="选择模型" size="small">
-              {selectedModels.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '20px' }}>
-                  <Text type="secondary">尚未选择任何模型</Text>
-                  <div style={{ marginTop: 12 }}>
-                    <Button 
-                      type="primary" 
-                      icon={<RobotOutlined />}
-                      onClick={() => setModelSelectorVisible(true)}
-                    >
-                      选择模型
-                    </Button>
-                  </div>
-                </div>
-              ) : (
+              <Space direction="vertical" style={{ width: '100%' }}>
+                {/* 模型输入方式选择 */}
                 <div>
-                  <div style={{ marginBottom: 12 }}>
-                    <Text strong>已选择 {selectedModels.length} 个模型：</Text>
-                  </div>
-                  <div style={{ marginBottom: 12 }}>
-                    {selectedModels.map(model => (
-                      <Tag key={model} color="blue" style={{ margin: '2px' }}>
-                        {model}
-                      </Tag>
-                    ))}
-                  </div>
-                  <Button 
-                    size="small" 
-                    onClick={() => setModelSelectorVisible(true)}
+                  <Text strong style={{ marginBottom: 8, display: 'block' }}>模型输入方式：</Text>
+                  <Radio.Group 
+                    value={inputMode} 
+                    onChange={(e) => {
+                      setInputMode(e.target.value);
+                      // Clear configurations when switching modes
+                      if (e.target.value === 'manual') {
+                        setManualConfig({ api_url: '', model_name: '' });
+                      }
+                    }}
                   >
-                    重新选择
-                  </Button>
+                    <Radio value="dropdown">
+                      <Space>
+                        <SettingOutlined />
+                        从列表选择
+                      </Space>
+                    </Radio>
+                    <Radio value="manual">
+                      <Space>
+                        <LinkOutlined />
+                        手动输入
+                      </Space>
+                    </Radio>
+                  </Radio.Group>
                 </div>
-              )}
+
+                {/* 条件渲染不同的输入方式 */}
+                {inputMode === 'dropdown' ? (
+                  <>
+                    {selectedModels.length === 0 ? (
+                      <div style={{ textAlign: 'center', padding: '20px' }}>
+                        <Text type="secondary">尚未选择任何模型</Text>
+                        <div style={{ marginTop: 12 }}>
+                          <Button 
+                            type="primary" 
+                            icon={<RobotOutlined />}
+                            onClick={() => setModelSelectorVisible(true)}
+                          >
+                            选择模型
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div>
+                        <div style={{ marginBottom: 12 }}>
+                          <Text strong>已选择 {selectedModels.length} 个模型：</Text>
+                        </div>
+                        <div style={{ marginBottom: 12 }}>
+                          {selectedModels.map(model => (
+                            <Tag key={model} color="blue" style={{ margin: '2px' }}>
+                              {model}
+                            </Tag>
+                          ))}
+                        </div>
+                        <Button 
+                          size="small" 
+                          onClick={() => setModelSelectorVisible(true)}
+                        >
+                          重新选择
+                        </Button>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <Space direction="vertical" style={{ width: '100%' }}>
+                    <div>
+                      <Text strong>API URL：</Text>
+                      <Select
+                        mode="tags"
+                        value={manualConfig.api_url ? [manualConfig.api_url] : []}
+                        onChange={(values) => {
+                          const newValue = values.length > 0 ? values[values.length - 1] : '';
+                          setManualConfig({ ...manualConfig, api_url: newValue });
+                        }}
+                        placeholder="http://your-api-host.com/v1/chat/completions"
+                        style={{ marginTop: 4, width: '100%' }}
+                        maxTagCount={1}
+                        dropdownRender={(menu) => (
+                          <div>
+                            {apiUrlHistory.length > 0 && (
+                              <div style={{ padding: '8px 0' }}>
+                                <div style={{ padding: '0 12px 8px', fontSize: '12px', color: '#999' }}>
+                                  历史记录：
+                                </div>
+                                {apiUrlHistory.map((url, index) => (
+                                  <div
+                                    key={index}
+                                    style={{
+                                      padding: '6px 12px',
+                                      cursor: 'pointer',
+                                      display: 'flex',
+                                      justifyContent: 'space-between',
+                                      alignItems: 'center',
+                                      borderRadius: '4px',
+                                      margin: '2px 8px'
+                                    }}
+                                    className="history-item"
+                                    onMouseEnter={(e) => e.target.style.backgroundColor = '#f5f5f5'}
+                                    onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
+                                  >
+                                    <span
+                                      onClick={() => setManualConfig({ ...manualConfig, api_url: url })}
+                                      style={{ flex: 1, fontSize: '13px' }}
+                                    >
+                                      {url}
+                                    </span>
+                                    <CloseOutlined
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        removeFromApiUrlHistory(url);
+                                      }}
+                                      style={{ 
+                                        fontSize: '10px', 
+                                        color: '#999', 
+                                        marginLeft: '8px',
+                                        padding: '2px'
+                                      }}
+                                    />
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            {menu}
+                          </div>
+                        )}
+                      />
+                      <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
+                        请输入完整的chat completions端点URL，或从历史记录中选择
+                      </Text>
+                    </div>
+                    <div>
+                      <Text strong>模型名称：</Text>
+                      <Select
+                        mode="tags"
+                        value={manualConfig.model_name ? [manualConfig.model_name] : []}
+                        onChange={(values) => {
+                          const newValue = values.length > 0 ? values[values.length - 1] : '';
+                          setManualConfig({ ...manualConfig, model_name: newValue });
+                        }}
+                        placeholder="gpt-3.5-turbo"
+                        style={{ marginTop: 4, width: '100%' }}
+                        maxTagCount={1}
+                        dropdownRender={(menu) => (
+                          <div>
+                            {modelNameHistory.length > 0 && (
+                              <div style={{ padding: '8px 0' }}>
+                                <div style={{ padding: '0 12px 8px', fontSize: '12px', color: '#999' }}>
+                                  历史记录：
+                                </div>
+                                {modelNameHistory.map((modelName, index) => (
+                                  <div
+                                    key={index}
+                                    style={{
+                                      padding: '6px 12px',
+                                      cursor: 'pointer',
+                                      display: 'flex',
+                                      justifyContent: 'space-between',
+                                      alignItems: 'center',
+                                      borderRadius: '4px',
+                                      margin: '2px 8px'
+                                    }}
+                                    className="history-item"
+                                    onMouseEnter={(e) => e.target.style.backgroundColor = '#f5f5f5'}
+                                    onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
+                                  >
+                                    <span
+                                      onClick={() => setManualConfig({ ...manualConfig, model_name: modelName })}
+                                      style={{ flex: 1, fontSize: '13px' }}
+                                    >
+                                      {modelName}
+                                    </span>
+                                    <CloseOutlined
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        removeFromModelNameHistory(modelName);
+                                      }}
+                                      style={{ 
+                                        fontSize: '10px', 
+                                        color: '#999', 
+                                        marginLeft: '8px',
+                                        padding: '2px'
+                                      }}
+                                    />
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            {menu}
+                          </div>
+                        )}
+                      />
+                      <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
+                        请输入准确的模型名称，或从历史记录中选择
+                      </Text>
+                    </div>
+                  </Space>
+                )}
+              </Space>
             </Card>
 
             {/* 文件上传 */}
@@ -449,7 +882,7 @@ const PlaygroundPage = ({
               icon={<PlayCircleOutlined />}
               onClick={handleStartInference}
               loading={isInferring}
-              disabled={selectedModels.length === 0}
+              disabled={inputMode === 'dropdown' ? selectedModels.length === 0 : (!manualConfig.api_url.trim() || !manualConfig.model_name.trim())}
               style={{ width: '100%' }}
             >
               {isInferring ? '推理中...' : '开始推理'}
