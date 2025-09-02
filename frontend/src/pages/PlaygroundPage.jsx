@@ -17,7 +17,8 @@ import {
   Alert,
   Tag,
   Modal,
-  Select
+  Select,
+  Image
 } from 'antd';
 import { 
   UploadOutlined, 
@@ -29,7 +30,9 @@ import {
   SettingOutlined,
   LinkOutlined,
   RocketOutlined,
-  CloseOutlined
+  CloseOutlined,
+  EyeOutlined,
+  DeleteOutlined
 } from '@ant-design/icons';
 import PlaygroundResultsDisplay from '../components/PlaygroundResultsDisplay';
 import PlaygroundModelSelector from '../components/PlaygroundModelSelector';
@@ -59,6 +62,17 @@ const PlaygroundPage = ({
   
   const [isInferring, setIsInferring] = useState(false);
   const [modelSelectorVisible, setModelSelectorVisible] = useState(false);
+  
+  // Store original file objects for preview
+  const [originalFiles, setOriginalFiles] = useState(() => {
+    try {
+      const saved = localStorage.getItem('playground_originalFiles');
+      return saved ? JSON.parse(saved) : [];
+    } catch (error) {
+      console.error('Failed to load original files from localStorage:', error);
+      return [];
+    }
+  });
   
   // Load playground internal state from localStorage
   const [inputMode, setInputMode] = useState(() => {
@@ -150,6 +164,14 @@ const PlaygroundPage = ({
     }
   }, [modelNameHistory]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem('playground_originalFiles', JSON.stringify(originalFiles));
+    } catch (error) {
+      console.error('Failed to save original files to localStorage:', error);
+    }
+  }, [originalFiles]);
+
   // Helper functions to manage history
   const addToApiUrlHistory = (url) => {
     if (!url.trim()) return;
@@ -191,6 +213,7 @@ const PlaygroundPage = ({
       localStorage.removeItem('playground_manualConfig');
       localStorage.removeItem('playground_apiUrlHistory');
       localStorage.removeItem('playground_modelNameHistory');
+      localStorage.removeItem('playground_originalFiles');
       
       // Reset all state to defaults
       setInferenceResults({});
@@ -202,6 +225,7 @@ const PlaygroundPage = ({
       });
       setApiUrlHistory([]);
       setModelNameHistory([]);
+      setOriginalFiles([]);
       
       // Reset dataset and params via props if they have default reset functions
       if (onDatasetChange) {
@@ -273,7 +297,11 @@ const PlaygroundPage = ({
         return;
       }
 
+      // Reset original files before processing new ones
+      setOriginalFiles([]);
+      
       const base64Files = [];
+      const newOriginalFiles = [];
       let fileType = 'image'; // 默认类型
       let totalSize = 0;
       const maxImageSize = 5 * 1024 * 1024; // 5MB for images
@@ -361,7 +389,32 @@ const PlaygroundPage = ({
             reader.readAsDataURL(uploadFile);
           });
 
+          // 创建预览URL
+          const previewUrl = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+              console.log(`Created preview URL for: ${uploadFile.name}`);
+              resolve(reader.result);
+            };
+            reader.onerror = (error) => {
+              console.error(`Failed to create preview URL: ${uploadFile.name}`, error);
+              reject(error);
+            };
+            reader.readAsDataURL(uploadFile);
+          });
+
           base64Files.push(base64);
+          
+          // Store file info for preview
+          newOriginalFiles.push({
+            name: uploadFile.name,
+            type: uploadFile.type,
+            size: uploadFile.size,
+            previewUrl: previewUrl,
+            isImage: isImage,
+            isVideo: isVideo
+          });
+          
           message.destroy(); // 清除loading消息
         } catch (error) {
           message.destroy(); // 清除loading消息
@@ -372,10 +425,12 @@ const PlaygroundPage = ({
 
       if (base64Files.length === 0) {
         message.warning('没有成功处理任何文件');
+        setOriginalFiles([]);
         return;
       }
 
       message.success(`成功处理 ${base64Files.length} 个文件`);
+      setOriginalFiles(newOriginalFiles);
       onDatasetChange({
         ...dataset,
         files: base64Files,
@@ -390,6 +445,7 @@ const PlaygroundPage = ({
   // 清除上传的文件
   const handleClearFiles = () => {
     onDatasetChange({ ...dataset, files: [], type: 'image' });
+    setOriginalFiles([]);
     
     // 安全地清空文件输入
     if (fileInputRef.current) {
@@ -405,6 +461,22 @@ const PlaygroundPage = ({
         console.log('Unable to clear file input:', error);
         // 即使清空失败也不影响功能，因为状态已经清空
       }
+    }
+  };
+
+  // 删除单个文件
+  const handleRemoveFile = (index) => {
+    const newFiles = [...dataset.files];
+    const newOriginalFiles = [...originalFiles];
+    
+    newFiles.splice(index, 1);
+    newOriginalFiles.splice(index, 1);
+    
+    onDatasetChange({ ...dataset, files: newFiles });
+    setOriginalFiles(newOriginalFiles);
+    
+    if (newFiles.length === 0) {
+      onDatasetChange({ ...dataset, files: [], type: 'image' });
     }
   };
 
@@ -787,26 +859,131 @@ const PlaygroundPage = ({
                 </Dragger>
 
                 {dataset.files.length > 0 && (
-                  <div style={{ 
-                    display: 'flex', 
-                    justifyContent: 'space-between', 
-                    alignItems: 'center',
-                    padding: '8px',
-                    background: '#f6f6f6',
-                    borderRadius: '4px'
-                  }}>
-                    <Space>
-                      {getFileIcon()}
-                      <Text>已上传 {dataset.files.length} 个{getFileTypeText()}文件</Text>
-                    </Space>
-                    <Button 
-                      type="text" 
-                      size="small" 
-                      icon={<ClearOutlined />}
-                      onClick={handleClearFiles}
-                    >
-                      清除
-                    </Button>
+                  <div style={{ marginTop: '16px' }}>
+                    <div style={{ 
+                      display: 'flex', 
+                      justifyContent: 'space-between', 
+                      alignItems: 'center',
+                      padding: '8px',
+                      background: '#f6f6f6',
+                      borderRadius: '4px',
+                      marginBottom: '12px'
+                    }}>
+                      <Space>
+                        {getFileIcon()}
+                        <Text>已上传 {dataset.files.length} 个{getFileTypeText()}文件</Text>
+                      </Space>
+                      <Button 
+                        type="text" 
+                        size="small" 
+                        icon={<ClearOutlined />}
+                        onClick={handleClearFiles}
+                      >
+                        清除全部
+                      </Button>
+                    </div>
+                    
+                    {/* 图片预览网格 */}
+                    {originalFiles.length > 0 && (
+                      <div style={{ 
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))',
+                        gap: '12px',
+                        maxHeight: '300px',
+                        overflowY: 'auto',
+                        padding: '8px',
+                        border: '1px solid #f0f0f0',
+                        borderRadius: '6px',
+                        background: '#fafafa'
+                      }}>
+                        {originalFiles.map((fileInfo, index) => (
+                          <div 
+                            key={index} 
+                            style={{ 
+                              position: 'relative',
+                              border: '1px solid #d9d9d9',
+                              borderRadius: '6px',
+                              overflow: 'hidden',
+                              background: '#fff'
+                            }}
+                          >
+                            {fileInfo.isImage ? (
+                              <Image
+                                src={fileInfo.previewUrl}
+                                alt={fileInfo.name}
+                                style={{
+                                  width: '100%',
+                                  height: '80px',
+                                  objectFit: 'cover'
+                                }}
+                                fallback="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMIAAADDCAYAAADQvc6UAAABRWlDQ1BJQ0MgUHJvZmlsZQAAKJFjYGASSSwoyGFhYGDIzSspCnJ3UoiIjFJgf8LAwSDCIMogwMCcmFxc4BgQ4ANUwgCjUcG3awyMIPqyLsis7PPOq3QdDFcvjV3jOD1boQVTPQrgSkktTgbSf4A4LbmgqISBgTEFyFYuLykAsTuAbJEioKOA7DkgdjqEvQHEToKwj4DVhAQ5A9k3gGyB5IxEoBmML4BsnSQk8XQkNtReEOBxcfXxUQg1Mjc0dyHgXNJBSWpFCYh2zi+oLMpMzyhRcASGUqqCZ16yno6CkYGRAQMDKMwhqj/fAIcloxgHQqxAjIHBEugw5sUIsSQpBobtQPdLciLEVJYzMPBHMDBsayhILEqEO4DxG0txmrERhM29nYGBddr//5/DGRjYNRkY/l7////39v///y4Dmn+LgeHANwDrkl1AuO+pmgAAADhlWElmTU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAAqACAAQAAAABAAAAwqADAAQAAAABAAAAwwAAAAD9b/HnAAAHlklEQVR4Ae3dP3Ik1RnG4W+FgYxN"
+                              />
+                            ) : fileInfo.isVideo ? (
+                              <div style={{
+                                width: '100%',
+                                height: '80px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                background: '#f0f0f0'
+                              }}>
+                                <VideoCameraOutlined style={{ fontSize: '32px', color: '#999' }} />
+                              </div>
+                            ) : (
+                              <div style={{
+                                width: '100%',
+                                height: '80px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                background: '#f0f0f0'
+                              }}>
+                                <FileImageOutlined style={{ fontSize: '32px', color: '#999' }} />
+                              </div>
+                            )}
+                            
+                            {/* 文件信息 */}
+                            <div style={{ 
+                              padding: '6px',
+                              fontSize: '11px',
+                              color: '#666',
+                              borderTop: '1px solid #f0f0f0'
+                            }}>
+                              <div style={{ 
+                                whiteSpace: 'nowrap',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis'
+                              }}>
+                                {fileInfo.name}
+                              </div>
+                              <div style={{ fontSize: '10px', color: '#999' }}>
+                                {(fileInfo.size / 1024 / 1024).toFixed(1)}MB
+                              </div>
+                            </div>
+                            
+                            {/* 删除按钮 */}
+                            <Button
+                              type="text"
+                              size="small"
+                              icon={<DeleteOutlined />}
+                              onClick={() => handleRemoveFile(index)}
+                              style={{
+                                position: 'absolute',
+                                top: '4px',
+                                right: '4px',
+                                width: '24px',
+                                height: '24px',
+                                background: 'rgba(0,0,0,0.5)',
+                                color: '#fff',
+                                border: 'none',
+                                borderRadius: '50%',
+                                fontSize: '12px'
+                              }}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
               </Space>

@@ -54,12 +54,12 @@ A comprehensive platform for model (LLMs, VLMs, etc.) deployment and performance
 - AWS credentials configured
 - EMD CLI for model deployment
 
-### Automated Setup
+<!-- ### Automated Setup
 
 ```bash
 # Run the setup script (recommended)
 ./scripts/setup.sh
-```
+``` -->
 
 ### Manual Setup
 
@@ -67,9 +67,12 @@ A comprehensive platform for model (LLMs, VLMs, etc.) deployment and performance
 
 ```bash
 # Create Python environment
-conda create -n eval-platform python=3.10 -y
-conda activate eval-platform
+conda create -n perf-eval python=3.10 -y
+conda activate perf-eval
 pip install -r requirements.txt
+
+cd evalscope/
+pip install -e .
 
 # Configure AWS credentials
 aws configure
