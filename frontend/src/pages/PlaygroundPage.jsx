@@ -627,6 +627,8 @@ const PlaygroundPage = ({
                     <div>
                       <Text strong>API URL：</Text>
                       <Input
+                        name="api_url"
+                        autoComplete="url"
                         value={manualConfig.api_url}
                         onChange={(e) => setManualConfig({ ...manualConfig, api_url: e.target.value })}
                         placeholder="http://your-api-host.com/v1/chat/completions"
@@ -640,6 +642,8 @@ const PlaygroundPage = ({
                     <div>
                       <Text strong>模型名称：</Text>
                       <Input
+                        name="model_name"
+                        autoComplete="off"
                         value={manualConfig.model_name}
                         onChange={(e) => setManualConfig({ ...manualConfig, model_name: e.target.value })}
                         placeholder="gpt-3.5-turbo"
