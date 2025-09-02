@@ -362,6 +362,7 @@ const StressTestPage = () => {
         concurrency: "1, 5, 10",
         input_tokens: 32,
         output_tokens: 32,
+        deployment_method: "EMD",
         instance_type: "g5.2xlarge",
         framework: "vllm",
         tp_size: 1,
@@ -1123,6 +1124,7 @@ const StressTestPage = () => {
                 concurrency: "1, 5, 10",
                 input_tokens: 32,
                 output_tokens: 32,
+                deployment_method: "EMD",
                 instance_type: "g5.2xlarge",
                 framework: "vllm",
                 tp_size: 1,
@@ -1135,7 +1137,7 @@ const StressTestPage = () => {
                   onChange={(e) => {
                     setInputMode(e.target.value);
                     // Clear form fields when switching modes
-                    form.resetFields(['model', 'api_url', 'model_name', 'instance_type', 'framework', 'tp_size', 'dp_size']);
+                    form.resetFields(['model', 'deployment_method', 'api_url', 'model_name', 'instance_type', 'framework', 'tp_size', 'dp_size']);
                   }}
                 >
                   <Radio value="dropdown">
@@ -1154,23 +1156,39 @@ const StressTestPage = () => {
               </Form.Item>
 
               {inputMode === 'dropdown' ? (
-                <Form.Item
-                  name="model"
-                  label="选择模型"
-                  rules={[{ required: true, message: '请选择要测试的模型' }]}
-                >
-                  <Select placeholder="选择模型">
-                    {models.map(model => (
-                      <Option key={model.key} value={model.key}>
-                        <Space>
-                          {model.type === 'bedrock' ? <CloudOutlined /> : <RocketOutlined />}
-                          {model.name}
-                          {model.tag && <Text type="secondary">({model.tag})</Text>}
-                        </Space>
-                      </Option>
-                    ))}
-                  </Select>
-                </Form.Item>
+                <>
+                  <Form.Item
+                    name="model"
+                    label="选择模型"
+                    rules={[{ required: true, message: '请选择要测试的模型' }]}
+                  >
+                    <Select placeholder="选择模型">
+                      {models.map(model => (
+                        <Option key={model.key} value={model.key}>
+                          <Space>
+                            {model.type === 'bedrock' ? <CloudOutlined /> : <RocketOutlined />}
+                            {model.name}
+                            {model.tag && <Text type="secondary">({model.tag})</Text>}
+                          </Space>
+                        </Option>
+                      ))}
+                    </Select>
+                  </Form.Item>
+                  
+                  <Form.Item
+                    name="deployment_method"
+                    label="部署方式"
+                    rules={[{ required: true, message: '请选择部署方式' }]}
+                    initialValue="EMD"
+                  >
+                    <Select placeholder="选择部署方式">
+                      <Option value="EMD">EMD</Option>
+                      <Option value="HyperPod">HyperPod</Option>
+                      <Option value="EKS">EKS</Option>
+                      <Option value="EC2">EC2</Option>
+                    </Select>
+                  </Form.Item>
+                </>
               ) : (
                 <>
                   <Form.Item
@@ -1197,6 +1215,20 @@ const StressTestPage = () => {
                       placeholder="gpt-3.5-turbo"
                       prefix={<RocketOutlined />}
                     />
+                  </Form.Item>
+                  
+                  <Form.Item
+                    name="deployment_method"
+                    label="部署方式"
+                    rules={[{ required: true, message: '请选择部署方式' }]}
+                    initialValue="EMD"
+                  >
+                    <Select placeholder="选择部署方式">
+                      <Option value="EMD">EMD</Option>
+                      <Option value="HyperPod">HyperPod</Option>
+                      <Option value="EKS">EKS</Option>
+                      <Option value="EC2">EC2</Option>
+                    </Select>
                   </Form.Item>
                   
                   {/* Manual deployment configuration */}
@@ -1283,46 +1315,6 @@ const StressTestPage = () => {
               /> */}
 
               <Form.Item
-                name="num_requests"
-                label="请求总数"
-                rules={[
-                  { required: true, message: '请输入请求总数' },
-                  {
-                    validator: (_, value) => {
-                      if (!value) return Promise.reject(new Error('请输入请求总数'));
-                      
-                      // Parse comma-separated values
-                      const numbers = value.split(',').map(v => v.trim()).filter(v => v);
-                      const invalidNumbers = numbers.filter(n => isNaN(n) || parseInt(n) <= 0);
-                      
-                      if (invalidNumbers.length > 0) {
-                        return Promise.reject(new Error('请输入有效的正整数，用逗号分隔'));
-                      }
-
-                      // Check if concurrency field exists and validate count match
-                      const concurrencyValue = form.getFieldValue('concurrency');
-                      if (concurrencyValue) {
-                        const concurrencyNumbers = concurrencyValue.split(',').map(v => v.trim()).filter(v => v);
-                        const validConcurrencyNumbers = concurrencyNumbers.filter(n => !isNaN(n) && parseInt(n) > 0);
-                        
-                        if (validConcurrencyNumbers.length > 0 && numbers.length !== validConcurrencyNumbers.length) {
-                          return Promise.reject(new Error(`请求总数(${numbers.length}个值)和并发数(${validConcurrencyNumbers.length}个值)的数量必须相同`));
-                        }
-                      }
-                      
-                      return Promise.resolve();
-                    }
-                  }
-                ]}
-                extra="可以输入多个值，用英文逗号分隔，如: 10, 20, 50"
-              >
-                <Input
-                  placeholder="10, 20, 50, 100"
-                  style={{ width: '100%' }}
-                />
-              </Form.Item>
-
-              <Form.Item
                 name="concurrency"
                 label="并发数"
                 rules={[
@@ -1354,10 +1346,50 @@ const StressTestPage = () => {
                     }
                   }
                 ]}
-                extra="可以输入多个值，用英文逗号分隔，需要与请求总数数量相同，如: 1, 5, 10"
+                extra="可以输入多个值，用英文逗号分隔，如: 1, 5, 10"
               >
                 <Input
-                  placeholder="1, 5, 10, 20"
+                  placeholder="1, 5, 10"
+                  style={{ width: '100%' }}
+                />
+              </Form.Item>
+
+              <Form.Item
+                name="num_requests"
+                label="请求总数"
+                rules={[
+                  { required: true, message: '请输入请求总数' },
+                  {
+                    validator: (_, value) => {
+                      if (!value) return Promise.reject(new Error('请输入请求总数'));
+                      
+                      // Parse comma-separated values
+                      const numbers = value.split(',').map(v => v.trim()).filter(v => v);
+                      const invalidNumbers = numbers.filter(n => isNaN(n) || parseInt(n) <= 0);
+                      
+                      if (invalidNumbers.length > 0) {
+                        return Promise.reject(new Error('请输入有效的正整数，用逗号分隔'));
+                      }
+
+                      // Check if concurrency field exists and validate count match
+                      const concurrencyValue = form.getFieldValue('concurrency');
+                      if (concurrencyValue) {
+                        const concurrencyNumbers = concurrencyValue.split(',').map(v => v.trim()).filter(v => v);
+                        const validConcurrencyNumbers = concurrencyNumbers.filter(n => !isNaN(n) && parseInt(n) > 0);
+                        
+                        if (validConcurrencyNumbers.length > 0 && numbers.length !== validConcurrencyNumbers.length) {
+                          return Promise.reject(new Error(`请求总数(${numbers.length}个值)和并发数(${validConcurrencyNumbers.length}个值)的数量必须相同`));
+                        }
+                      }
+                      
+                      return Promise.resolve();
+                    }
+                  }
+                ]}
+                extra="可以输入多个值，用英文逗号分隔，需要与并发数数量相同，如: 20, 100, 200"
+              >
+                <Input
+                  placeholder="20, 100, 200"
                   style={{ width: '100%' }}
                 />
               </Form.Item>
