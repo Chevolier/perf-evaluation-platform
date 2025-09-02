@@ -1,7 +1,8 @@
 """Model management service for deployment and status tracking."""
 
 import time
-from typing import Dict, Any, Optional, List, Tuple
+import random
+from typing import Dict, Any, List
 from datetime import datetime
 
 try:
@@ -11,9 +12,9 @@ try:
 except ImportError:
     EMD_AVAILABLE = False
 
-from ..core.models import ModelRegistry, model_registry, EMDModel, BedrockModel
+from ..core.models import model_registry, EMDModel
 from ..config import get_config
-from ..utils import get_logger, generate_session_id
+from ..utils import get_logger
 
 
 logger = get_logger(__name__)
@@ -27,6 +28,79 @@ class ModelService:
         self.registry = model_registry
         self._deployment_status = {}
         self._current_emd_tag = None
+        
+        # Circuit breaker for AWS throttling
+        self._circuit_breaker = {
+            'state': 'closed',  # closed, open, half_open
+            'failure_count': 0,
+            'last_failure_time': None,
+            'failure_threshold': 3,  # Open circuit after 3 consecutive failures
+            'recovery_timeout': 60,  # Try again after 60 seconds
+            'half_open_success_threshold': 1  # Close circuit after 1 success in half-open
+        }
+        
+        # Enhanced caching for throttling scenarios
+        self._emd_status_cache = {
+            'data': None,
+            'timestamp': None,
+            'extended_ttl': 300  # 5 minutes extended cache for throttling
+        }
+    
+    def _should_circuit_break(self) -> bool:
+        """Check if circuit breaker should prevent EMD calls."""
+        circuit = self._circuit_breaker
+        now = time.time()
+        
+        if circuit['state'] == 'closed':
+            return False
+        elif circuit['state'] == 'open':
+            # Check if recovery timeout has passed
+            if circuit['last_failure_time'] and (now - circuit['last_failure_time']) > circuit['recovery_timeout']:
+                circuit['state'] = 'half_open'
+                logger.info("🔄 Circuit breaker switching to half-open state")
+                return False
+            return True
+        elif circuit['state'] == 'half_open':
+            return False
+        
+        return False
+    
+    def _record_circuit_success(self):
+        """Record successful EMD call."""
+        circuit = self._circuit_breaker
+        if circuit['state'] == 'half_open':
+            circuit['state'] = 'closed'
+            circuit['failure_count'] = 0
+            logger.info("✅ Circuit breaker closed - EMD calls restored")
+        elif circuit['state'] == 'closed':
+            circuit['failure_count'] = max(0, circuit['failure_count'] - 1)
+    
+    def _record_circuit_failure(self):
+        """Record failed EMD call."""
+        circuit = self._circuit_breaker
+        circuit['failure_count'] += 1
+        circuit['last_failure_time'] = time.time()
+        
+        if circuit['failure_count'] >= circuit['failure_threshold']:
+            circuit['state'] = 'open'
+            logger.warning(f"🚫 Circuit breaker opened - EMD calls suspended for {circuit['recovery_timeout']}s due to {circuit['failure_count']} consecutive failures")
+    
+    def _get_cached_emd_data(self) -> Dict[str, Any]:
+        """Get cached EMD data if available."""
+        cache = self._emd_status_cache
+        if cache['data'] and cache['timestamp']:
+            age = time.time() - cache['timestamp']
+            # Use extended TTL during circuit breaker scenarios
+            ttl = cache['extended_ttl'] if self._circuit_breaker['state'] != 'closed' else 60
+            if age < ttl:
+                logger.info(f"🎯 Using cached EMD data (age: {age:.1f}s, circuit: {self._circuit_breaker['state']})")
+                return cache['data']
+        return None
+    
+    def _cache_emd_data(self, data: Dict[str, Any]):
+        """Cache EMD data."""
+        self._emd_status_cache['data'] = data
+        self._emd_status_cache['timestamp'] = time.time()
     
     def get_all_models(self) -> Dict[str, Dict[str, Any]]:
         """Get all available models.
@@ -111,17 +185,56 @@ class ModelService:
             "tag": None
         }
     
+    def _retry_with_exponential_backoff(self, func, max_retries=3, base_delay=1):
+        """Retry function with exponential backoff for throttling errors."""
+        for attempt in range(max_retries + 1):
+            try:
+                return func()
+            except Exception as e:
+                error_str = str(e).lower()
+                if 'throttling' in error_str or 'rate exceeded' in error_str:
+                    if attempt < max_retries:
+                        delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
+                        logger.warning(f"Throttling detected, retrying in {delay:.1f}s (attempt {attempt + 1}/{max_retries + 1})")
+                        time.sleep(delay)
+                        continue
+                    else:
+                        logger.error(f"Max retries ({max_retries}) exceeded for throttling error: {e}")
+                        # Return empty result instead of failing completely
+                        return {"deployed": {}, "inprogress": {}, "failed": {}}
+                else:
+                    # Non-throttling error, re-raise immediately
+                    raise e
+        return {"deployed": {}, "inprogress": {}, "failed": {}}
+    
     def _get_current_emd_models(self) -> Dict[str, Any]:
         """Get current EMD models using the same approach as original backend.
         
         Returns:
             Dictionary with deployed, inprogress, and failed models
         """
-        try:
-            # Call get_model_status() without parameters to get all models
+        # Check circuit breaker and use cached data if available
+        if self._should_circuit_break():
+            cached_data = self._get_cached_emd_data()
+            if cached_data:
+                return cached_data
+            else:
+                logger.warning("🚫 Circuit breaker active but no cached data available")
+                return {"deployed": {}, "inprogress": {}, "failed": {}}
+        
+        # Try to use cached data first (normal 60s TTL when circuit is closed)
+        cached_data = self._get_cached_emd_data()
+        if cached_data:
+            return cached_data
+        
+        def _get_status():
             status = get_model_status()
             logger.info(f"EMD SDK get_model_status returned: {status}")
-            # print(f"🔍 DEBUG: EMD status check result: {status}")
+            return status
+        
+        try:
+            # Use retry wrapper for AWS API calls that might get throttled
+            status = self._retry_with_exponential_backoff(_get_status, max_retries=2, base_delay=0.5)
             
             # Create reverse mapping from model_path to model_key
             reverse_mapping = {}
@@ -137,7 +250,7 @@ class ModelService:
             inprogress = {}
             failed = {}
             
-            # Process completed models
+            # First, process completed models (higher priority)
             for model in status.get("completed", []):
                 model_id = model.get("model_id")
                 model_tag = model.get("model_tag")
@@ -158,18 +271,22 @@ class ModelService:
                             "status": stack_status
                         }
             
-            # Process in-progress models
+            # Process in-progress models (only if not already in deployed/failed)
             for model in status.get("inprogress", []):
                 model_id = model.get("model_id")
                 model_tag = model.get("model_tag")
                 stack_status = model.get("stack_status", "")  # Use stack_status, not status
                 
-                # Check execution_info for pipeline status (more accurate than stack_status for in-progress)
-                execution_info = model.get("execution_info", {})
-                pipeline_status = execution_info.get("status", "")
-                
                 if model_id in reverse_mapping:
                     model_key = reverse_mapping[model_id]
+                    
+                    # Skip if already processed as deployed or failed
+                    if model_key in deployed or model_key in failed:
+                        continue
+                    
+                    # Check execution_info for pipeline status (more accurate than stack_status for in-progress)
+                    execution_info = model.get("execution_info", {})
+                    pipeline_status = execution_info.get("status", "")
                     
                     # If pipeline failed, move to failed category
                     if pipeline_status == "Failed":
@@ -194,10 +311,30 @@ class ModelService:
                 "failed": failed
             }
             # print(f"🔍 DEBUG: Processed EMD status - deployed: {deployed}, inprogress: {inprogress}, failed: {failed}")
+            
+            # Cache successful result and record circuit breaker success
+            self._cache_emd_data(result)
+            self._record_circuit_success()
+            
             return result
             
         except Exception as e:
-            logger.error(f"Failed to get current EMD models: {e}")
+            error_str = str(e).lower()
+            
+            # Record circuit breaker failure
+            self._record_circuit_failure()
+            
+            if 'throttling' in error_str or 'rate exceeded' in error_str or 'timeout' in error_str:
+                logger.warning(f"🔥 AWS API issue detected (circuit: {self._circuit_breaker['state']}): {e}")
+                
+                # Try to return cached data during failures
+                cached_data = self._get_cached_emd_data()
+                if cached_data:
+                    logger.info("🎯 Returning cached data due to AWS API failure")
+                    return cached_data
+            else:
+                logger.error(f"Failed to get current EMD models: {e}")
+            
             return {"deployed": {}, "inprogress": {}, "failed": {}}
     
     def get_current_emd_models(self) -> List[str]:
@@ -358,7 +495,7 @@ class ModelService:
             }
     
     def check_multiple_model_status(self, models: List[str]) -> Dict[str, Any]:
-        """Check deployment status for multiple models.
+        """Check deployment status for multiple models with throttling protection.
         
         Args:
             models: List of model keys to check
@@ -366,33 +503,118 @@ class ModelService:
         Returns:
             Status results for all models
         """
-        model_status = {}
+        def _check_status():
+            model_status = {}
+            
+            # Get all EMD model statuses in a single call to reduce API calls
+            emd_models = [model_key for model_key in models if self.registry.is_emd_model(model_key)]
+            emd_status_cache = {}
+            
+            if emd_models and EMD_AVAILABLE:
+                try:
+                    # Single call to get all EMD statuses
+                    current_emd_models = self._get_current_emd_models()
+                    
+                    # Cache the results for all EMD models
+                    for model_key in emd_models:
+                        if model_key in current_emd_models.get("deployed", {}):
+                            model_info = current_emd_models["deployed"][model_key]
+                            emd_status_cache[model_key] = {
+                                "status": "deployed",
+                                "message": "Model is deployed and ready",
+                                "tag": model_info.get("tag"),
+                                "endpoint": model_info.get("endpoint")
+                            }
+                        elif model_key in current_emd_models.get("inprogress", {}):
+                            emd_status_cache[model_key] = {
+                                "status": "inprogress",
+                                "message": "Model is being deployed",
+                                "tag": current_emd_models["inprogress"][model_key].get("tag")
+                            }
+                        elif model_key in current_emd_models.get("failed", {}):
+                            emd_status_cache[model_key] = {
+                                "status": "failed",
+                                "message": "Deployment failed",
+                                "tag": current_emd_models["failed"][model_key].get("tag")
+                            }
+                        else:
+                            # Check cached status or default
+                            if model_key in self._deployment_status:
+                                emd_status_cache[model_key] = self._deployment_status[model_key]
+                            else:
+                                emd_status_cache[model_key] = {
+                                    "status": "not_deployed",
+                                    "message": "Model not deployed",
+                                    "tag": None
+                                }
+                except Exception as e:
+                    logger.warning(f"Failed to get batch EMD status: {e}")
+                    # Fallback to cached status for all EMD models
+                    for model_key in emd_models:
+                        if model_key in self._deployment_status:
+                            emd_status_cache[model_key] = self._deployment_status[model_key]
+                        else:
+                            emd_status_cache[model_key] = {
+                                "status": "not_deployed",
+                                "message": "Status check failed - may need to refresh",
+                                "tag": None
+                            }
+            
+            # Process all models using the cached EMD data
+            for model_key in models:
+                if self.registry.is_emd_model(model_key):
+                    if model_key in emd_status_cache:
+                        status_info = emd_status_cache[model_key]
+                    else:
+                        # Fallback for models not in cache
+                        status_info = {
+                            "status": "not_deployed",
+                            "message": "Model not deployed",
+                            "tag": None
+                        }
+                    
+                    # Map our status format to what frontend expects
+                    model_status[model_key] = {
+                        "status": self._map_status_for_frontend(status_info.get("status")),
+                        "message": status_info.get("message", ""),
+                        "tag": status_info.get("tag"),
+                        "endpoint": status_info.get("endpoint")
+                    }
+                elif self.registry.is_bedrock_model(model_key):
+                    model_status[model_key] = {
+                        "status": "available",
+                        "message": "Bedrock model is always available"
+                    }
+                else:
+                    model_status[model_key] = {
+                        "status": "unknown",
+                        "message": "Model not found"
+                    }
+            return model_status
         
-        for model_key in models:
-            if self.registry.is_emd_model(model_key):
-                status_info = self.get_emd_deployment_status(model_key)
-                # Map our status format to what frontend expects
-                model_status[model_key] = {
-                    "status": self._map_status_for_frontend(status_info.get("status")),
-                    "message": status_info.get("message", ""),
-                    "tag": status_info.get("tag"),
-                    "endpoint": status_info.get("endpoint")
+        try:
+            # Use retry wrapper for status checks that might get throttled
+            model_status = self._retry_with_exponential_backoff(_check_status, max_retries=2, base_delay=0.3)
+            
+            return {
+                "status": "success",
+                "model_status": model_status  # Frontend expects 'model_status' not 'results'
+            }
+        except Exception as e:
+            logger.error(f"Error in batch status check: {e}")
+            # Return partial results for known models
+            fallback_status = {}
+            for model_key in models:
+                fallback_status[model_key] = {
+                    "status": "not_deployed" if self.registry.is_emd_model(model_key) else "available",
+                    "message": "Status check failed - refresh may help" if self.registry.is_emd_model(model_key) else "Bedrock model is always available"
                 }
-            elif self.registry.is_bedrock_model(model_key):
-                model_status[model_key] = {
-                    "status": "available",
-                    "message": "Bedrock model is always available"
-                }
-            else:
-                model_status[model_key] = {
-                    "status": "unknown",
-                    "message": "Model not found"
-                }
-        
-        return {
-            "status": "success",
-            "model_status": model_status  # Frontend expects 'model_status' not 'results'
-        }
+            
+            return {
+                "status": "partial_success",
+                "model_status": fallback_status,
+                "warning": "Some status checks failed due to API limits"
+            }
     
     def _map_status_for_frontend(self, backend_status: str) -> str:
         """Map backend status to frontend status format.

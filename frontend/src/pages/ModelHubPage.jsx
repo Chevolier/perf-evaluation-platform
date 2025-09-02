@@ -31,6 +31,21 @@ const ModelHubPage = () => {
   const [initialLoading, setInitialLoading] = useState(true);
   const [statusLoading, setStatusLoading] = useState(false);
   
+  // Add cache for API responses
+  const [apiCache, setApiCache] = useState(() => {
+    try {
+      const cached = localStorage.getItem('modelHub_apiCache');
+      const parsed = cached ? JSON.parse(cached) : {};
+      // Check if cache is still valid (5 minutes)
+      if (parsed.timestamp && Date.now() - parsed.timestamp < 300000) {
+        return parsed;
+      }
+    } catch (error) {
+      console.error('Failed to load API cache:', error);
+    }
+    return { timestamp: 0, modelList: null, modelStatus: null };
+  });
+  
   // Load state from localStorage
   const [modelStatus, setModelStatus] = useState(() => {
     try {
@@ -144,10 +159,16 @@ const ModelHubPage = () => {
             }
           });
           
-          setModelStatus(prev => ({
-            ...prev,
-            ...newStatus
-          }));
+          // Batch state updates to reduce re-renders
+          React.startTransition(() => {
+            setModelStatus(prev => ({
+              ...prev,
+              ...newStatus
+            }));
+            
+            // 清空选择
+            setSelectedModels([]);
+          });
           
           // Show appropriate message
           if (failedCount === 0) {
@@ -160,9 +181,6 @@ const ModelHubPage = () => {
         } else {
           message.error(`部署请求失败: ${responseData.message || '未知错误'}`);
         }
-        
-        // 清空选择
-        setSelectedModels([]);
         
       } else {
         const errorText = await response.text();
@@ -186,45 +204,120 @@ const ModelHubPage = () => {
     });
   }, []);
 
-  // Save modelStatus to localStorage
+  // Optimized batch localStorage saves with debouncing
   useEffect(() => {
-    try {
-      localStorage.setItem('modelHub_modelStatus', JSON.stringify(modelStatus));
-    } catch (error) {
-      console.error('Failed to save model status to localStorage:', error);
-    }
-  }, [modelStatus]);
-
-  // Save selectedModels to localStorage
-  useEffect(() => {
-    try {
-      localStorage.setItem('modelHub_selectedModels', JSON.stringify(selectedModels));
-    } catch (error) {
-      console.error('Failed to save selected models to localStorage:', error);
-    }
-  }, [selectedModels]);
-
-  // Save deploymentConfig to localStorage
-  useEffect(() => {
-    try {
-      localStorage.setItem('modelHub_deploymentConfig', JSON.stringify(deploymentConfig));
-    } catch (error) {
-      console.error('Failed to save deployment config to localStorage:', error);
-    }
-  }, [deploymentConfig]);
+    const timeoutId = setTimeout(() => {
+      try {
+        // Batch all localStorage operations to avoid blocking
+        const batch = {
+          modelHub_modelStatus: JSON.stringify(modelStatus),
+          modelHub_selectedModels: JSON.stringify(selectedModels),
+          modelHub_deploymentConfig: JSON.stringify(deploymentConfig)
+        };
+        
+        // Use requestIdleCallback if available for non-blocking writes
+        const writeBatch = () => {
+          Object.entries(batch).forEach(([key, value]) => {
+            try {
+              localStorage.setItem(key, value);
+            } catch (error) {
+              console.warn(`Failed to save ${key}:`, error);
+            }
+          });
+        };
+        
+        if (window.requestIdleCallback) {
+          window.requestIdleCallback(writeBatch, { timeout: 1000 });
+        } else {
+          setTimeout(writeBatch, 0);
+        }
+      } catch (error) {
+        console.error('Failed to batch save localStorage:', error);
+      }
+    }, 300); // Debounce localStorage writes
+    
+    return () => clearTimeout(timeoutId);
+  }, [modelStatus, selectedModels, deploymentConfig]);
 
   // Optimized data fetching with parallel API calls and immediate UI rendering
   const fetchModelData = useCallback(async () => {
     try {
+      // Check cache first
+      const now = Date.now();
+      if (apiCache.timestamp && now - apiCache.timestamp < 300000 && apiCache.modelList) {
+        console.log('🚀 Using cached model data');
+        
+        // Use cached data immediately
+        const bedrockModels = apiCache.modelList.bedrock ? 
+          Object.entries(apiCache.modelList.bedrock).map(([key, info]) => ({
+            key,
+            name: info.name,
+            description: info.description,
+            alwaysAvailable: true
+          })) : [];
+          
+        const emdModels = apiCache.modelList.emd ? 
+          Object.entries(apiCache.modelList.emd).map(([key, info]) => ({
+            key,
+            name: info.name,
+            description: info.description,
+            alwaysAvailable: false
+          })) : [];
+          
+        setModelCategories({
+          bedrock: {
+            ...categoryTemplates.bedrock,
+            models: bedrockModels
+          },
+          emd: {
+            ...categoryTemplates.emd,
+            models: emdModels
+          }
+        });
+        
+        if (apiCache.modelStatus) {
+          setModelStatus(prev => ({
+            ...prev,
+            ...apiCache.modelStatus
+          }));
+        }
+        
+        setInitialLoading(false);
+        return;
+      }
+      
       // Make both API calls in parallel for faster loading
-      const [modelListResponse] = await Promise.allSettled([
-        fetch('/api/model-list')
+      const deployableModelKeys = modelCategories.emd?.models?.map(m => m.key) || [];
+      
+      // Add timeout handling to prevent hanging on throttled requests
+      const fetchWithTimeout = (url, options = {}, timeout = 10000) => {
+        return Promise.race([
+          fetch(url, options),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Request timeout')), timeout)
+          )
+        ]);
+      };
+      
+      const [modelListResponse, statusResponse] = await Promise.allSettled([
+        fetchWithTimeout('/api/model-list', {}, 15000),
+        deployableModelKeys.length > 0 ? fetchWithTimeout('/api/check-model-status', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ models: deployableModelKeys })
+        }, 10000) : Promise.resolve({ ok: false })
       ]);
       
+      let modelListData = null;
+      let statusData = null;
+      
+      // Process model list response
       if (modelListResponse.status === 'fulfilled' && modelListResponse.value.ok) {
         const data = await modelListResponse.value.json();
         
         if (data.status === 'success' && data.models) {
+          modelListData = data.models;
+          
           // Process models with memoized transformation
           const bedrockModels = data.models.bedrock ? 
             Object.entries(data.models.bedrock).map(([key, info]) => ({
@@ -242,50 +335,71 @@ const ModelHubPage = () => {
               alwaysAvailable: false
             })) : [];
             
-          // Update UI immediately with model data
-          setModelCategories({
-            bedrock: {
-              ...categoryTemplates.bedrock,
-              models: bedrockModels
-            },
-            emd: {
-              ...categoryTemplates.emd,
-              models: emdModels
-            }
-          });
-          
-          // Stop initial loading immediately
-          setInitialLoading(false);
-          
-          // Fetch status for deployable models only (non-blocking)
-          const deployableModels = emdModels.map(m => m.key);
-          if (deployableModels.length > 0) {
-            setStatusLoading(true);
-            
-            // Use requestIdleCallback or setTimeout to defer status check
-            const timeoutId = setTimeout(async () => {
-              try {
-                const statusResponse = await fetch('/api/check-model-status', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ models: deployableModels })
-                });
-                
-                if (statusResponse.ok) {
-                  const statusData = await statusResponse.json();
-                  if (statusData.model_status) {
-                    setModelStatus(statusData.model_status);
-                  }
-                }
-              } catch (error) {
-                console.warn('Status check failed:', error);
-              } finally {
-                setStatusLoading(false);
+          // Batch UI updates to reduce re-renders
+          React.startTransition(() => {
+            setModelCategories({
+              bedrock: {
+                ...categoryTemplates.bedrock,
+                models: bedrockModels
+              },
+              emd: {
+                ...categoryTemplates.emd,
+                models: emdModels
               }
-            }, 50); // Minimal delay to let UI render first
+            });
             
-            return () => clearTimeout(timeoutId);
+            // Stop initial loading immediately
+            setInitialLoading(false);
+          });
+        }
+      }
+      
+      // Process status response (if available)
+      if (statusResponse.status === 'fulfilled' && statusResponse.value.ok) {
+        try {
+          const data = await statusResponse.value.json();
+          if (data.model_status) {
+            statusData = data.model_status;
+            setModelStatus(prev => ({
+              ...prev,
+              ...data.model_status
+            }));
           }
+        } catch (error) {
+          console.warn('Status parsing failed:', error);
+        }
+      } else if (statusResponse.status === 'rejected' || 
+                 (statusResponse.value && !statusResponse.value.ok)) {
+        // Handle failed status check - set default not_deployed status
+        console.warn('Status check failed or timed out, setting default status');
+        const emdModels = modelListData?.emd ? Object.keys(modelListData.emd) : [];
+        const fallbackStatus = {};
+        emdModels.forEach(modelKey => {
+          fallbackStatus[modelKey] = {
+            status: 'not_deployed',
+            message: 'Status check failed - may need to refresh'
+          };
+        });
+        setModelStatus(prev => ({
+          ...prev,
+          ...fallbackStatus
+        }));
+        statusData = fallbackStatus;
+      }
+      
+      // Update cache with successful responses
+      if (modelListData || statusData) {
+        const newCache = {
+          timestamp: Date.now(),
+          modelList: modelListData || apiCache.modelList,
+          modelStatus: statusData || apiCache.modelStatus
+        };
+        setApiCache(newCache);
+        
+        try {
+          localStorage.setItem('modelHub_apiCache', JSON.stringify(newCache));
+        } catch (error) {
+          console.warn('Failed to cache API response:', error);
         }
       }
     } catch (error) {
@@ -293,7 +407,7 @@ const ModelHubPage = () => {
     } finally {
       setInitialLoading(false);
     }
-  }, [categoryTemplates]);
+  }, [categoryTemplates, apiCache]);
 
   useEffect(() => {
     fetchModelData();
@@ -306,36 +420,36 @@ const ModelHubPage = () => {
     // message.info(`${modelKey} 清理功能开发中...`);
   }, []);
 
+  // Clear cache and refresh data
+  const handleClearCache = useCallback(() => {
+    // Clear all localStorage data
+    localStorage.removeItem('modelHub_modelStatus');
+    localStorage.removeItem('modelHub_selectedModels');
+    localStorage.removeItem('modelHub_deploymentConfig');
+    localStorage.removeItem('modelHub_apiCache');
+    
+    // Batch state resets to reduce re-renders
+    React.startTransition(() => {
+      setModelStatus({});
+      setSelectedModels([]);
+      setApiCache({ timestamp: 0, modelList: null, modelStatus: null });
+      setInitialLoading(true);
+    });
+    
+    // Force refresh data
+    fetchModelData();
+  }, [fetchModelData]);
+
   // Handle page refresh (Command+R on Mac, F5 on Windows/Linux)
   const handlePageRefresh = useCallback((event) => {
     // Check for refresh key combinations
     if ((event.metaKey && event.key === 'r') || event.key === 'F5') {
       event.preventDefault();
-      
-      // Clear all localStorage data
-      localStorage.removeItem('modelHub_modelStatus');
-      localStorage.removeItem('modelHub_selectedModels');
-      localStorage.removeItem('modelHub_deploymentConfig');
-      
-      // Reset all state to defaults
-      setModelStatus({});
-      setSelectedModels([]);
-      setDeploymentConfig({
-        method: 'SageMaker Endpoint',
-        framework: 'vllm',
-        serviceType: 'sagemaker_realtime',
-        machineType: 'g5.2xlarge',
-        tpSize: 1,
-        dpSize: 1
-      });
-      setModelCategories(categoryTemplates);
-      setInitialLoading(true);
-      setStatusLoading(false);
-      
+      handleClearCache();
       // Refresh the page
       window.location.reload();
     }
-  }, [categoryTemplates]);
+  }, [handleClearCache]);
 
   // Add keyboard event listener for refresh
   useEffect(() => {
@@ -352,7 +466,16 @@ const ModelHubPage = () => {
     }
     
     const status = modelStatus[model.key];
-    if (!status) return <Tag color="processing">检查中...</Tag>;
+    
+    // Add timeout for "检查中..." status - if no status after 15 seconds, show error
+    if (!status) {
+      if (initialLoading) {
+        return <Tag color="processing">检查中...</Tag>;
+      } else {
+        // If not initial loading and still no status, show error state
+        return <Tag color="error">检查失败</Tag>;
+      }
+    }
 
     switch (status.status) {
       case 'available':
@@ -369,7 +492,7 @@ const ModelHubPage = () => {
       default:
         return <Tag color="default">未知</Tag>;
     }
-  }, [modelStatus]);
+  }, [modelStatus, initialLoading]);
 
   const getModelCheckbox = useCallback((model) => {
     if (model.alwaysAvailable) return null;
@@ -474,13 +597,24 @@ const ModelHubPage = () => {
   return (
     <div style={{ padding: '24px', background: '#f5f5f5', minHeight: '100vh' }}>
       <div style={{ marginBottom: 24 }}>
-        <Space>
-          <RobotOutlined style={{ fontSize: '24px', color: '#1890ff' }} />
-          <Title level={2} style={{ margin: 0 }}>模型商店</Title>
-        </Space>
-        <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
-          管理和部署所有可用的推理模型
-        </Text>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div>
+            <Space>
+              <RobotOutlined style={{ fontSize: '24px', color: '#1890ff' }} />
+              <Title level={2} style={{ margin: 0 }}>模型商店</Title>
+            </Space>
+            <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
+              管理和部署所有可用的推理模型
+            </Text>
+          </div>
+          <Button 
+            onClick={handleClearCache}
+            loading={initialLoading}
+            title="如果模型状态显示不正确，点击刷新状态"
+          >
+            刷新状态
+          </Button>
+        </div>
       </div>
 
       {/* Show UI structure immediately, even during initial loading */}
