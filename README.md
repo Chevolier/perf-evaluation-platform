@@ -1,6 +1,6 @@
-# Multimodal Inference Platform
+# Model Performance Evaluation Platform
 
-A comprehensive platform for multimodal AI inference supporting both AWS Bedrock API models and EMD (Easy Model Deployer) local models.
+A platform for model performance evaluation. Supports 1-click deployment of various LLMs and VLMs on Amazon SageMaker Endpoint, Amazon SageMaker HyperPod, Amazon EKS, EC2 using vllm, sglang, etc., and 1-click performance evaluation. 
 
 ## ✨ Features
 
