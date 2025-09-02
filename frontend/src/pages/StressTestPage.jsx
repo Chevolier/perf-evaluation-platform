@@ -67,6 +67,27 @@ const StressTestPage = () => {
   const pollingRestored = useRef(false);
 
   // 获取可用模型列表
+  // Cross-field validation helper
+  const validateFieldCount = () => {
+    const concurrencyValue = form.getFieldValue('concurrency');
+    const numRequestsValue = form.getFieldValue('num_requests');
+    
+    if (!concurrencyValue || !numRequestsValue) return null;
+    
+    const parseCommaSeparatedNumbers = (str) => {
+      return str.split(',').map(v => v.trim()).filter(v => v && !isNaN(v) && parseInt(v) > 0);
+    };
+    
+    const concurrencyNumbers = parseCommaSeparatedNumbers(concurrencyValue);
+    const requestNumbers = parseCommaSeparatedNumbers(numRequestsValue);
+    
+    if (concurrencyNumbers.length > 0 && requestNumbers.length > 0 && concurrencyNumbers.length !== requestNumbers.length) {
+      return `并发数(${concurrencyNumbers.length}个值)和请求总数(${requestNumbers.length}个值)的数量必须相同`;
+    }
+    
+    return null;
+  };
+
   const fetchModels = async () => {
     try {
       const response = await fetch('/api/model-list');
@@ -1330,16 +1351,11 @@ const StressTestPage = () => {
                       if (invalidNumbers.length > 0) {
                         return Promise.reject(new Error('请输入有效的正整数，用逗号分隔'));
                       }
-
-                      // Check if num_requests field exists and validate count match
-                      const numRequestsValue = form.getFieldValue('num_requests');
-                      if (numRequestsValue) {
-                        const requestNumbers = numRequestsValue.split(',').map(v => v.trim()).filter(v => v);
-                        const validRequestNumbers = requestNumbers.filter(n => !isNaN(n) && parseInt(n) > 0);
-                        
-                        if (validRequestNumbers.length > 0 && numbers.length !== validRequestNumbers.length) {
-                          return Promise.reject(new Error(`并发数(${numbers.length}个值)和请求总数(${validRequestNumbers.length}个值)的数量必须相同`));
-                        }
+                      
+                      // Cross-field validation
+                      const crossFieldError = validateFieldCount();
+                      if (crossFieldError) {
+                        return Promise.reject(new Error(crossFieldError));
                       }
                       
                       return Promise.resolve();
@@ -1351,6 +1367,12 @@ const StressTestPage = () => {
                 <Input
                   placeholder="1, 5, 10"
                   style={{ width: '100%' }}
+                  onChange={() => {
+                    // Trigger validation for both fields when either changes
+                    setTimeout(() => {
+                      form.validateFields(['concurrency', 'num_requests']);
+                    }, 0);
+                  }}
                 />
               </Form.Item>
 
@@ -1370,16 +1392,11 @@ const StressTestPage = () => {
                       if (invalidNumbers.length > 0) {
                         return Promise.reject(new Error('请输入有效的正整数，用逗号分隔'));
                       }
-
-                      // Check if concurrency field exists and validate count match
-                      const concurrencyValue = form.getFieldValue('concurrency');
-                      if (concurrencyValue) {
-                        const concurrencyNumbers = concurrencyValue.split(',').map(v => v.trim()).filter(v => v);
-                        const validConcurrencyNumbers = concurrencyNumbers.filter(n => !isNaN(n) && parseInt(n) > 0);
-                        
-                        if (validConcurrencyNumbers.length > 0 && numbers.length !== validConcurrencyNumbers.length) {
-                          return Promise.reject(new Error(`请求总数(${numbers.length}个值)和并发数(${validConcurrencyNumbers.length}个值)的数量必须相同`));
-                        }
+                      
+                      // Cross-field validation
+                      const crossFieldError = validateFieldCount();
+                      if (crossFieldError) {
+                        return Promise.reject(new Error(crossFieldError));
                       }
                       
                       return Promise.resolve();
@@ -1391,6 +1408,12 @@ const StressTestPage = () => {
                 <Input
                   placeholder="20, 100, 200"
                   style={{ width: '100%' }}
+                  onChange={() => {
+                    // Trigger validation for both fields when either changes
+                    setTimeout(() => {
+                      form.validateFields(['concurrency', 'num_requests']);
+                    }, 0);
+                  }}
                 />
               </Form.Item>
 
