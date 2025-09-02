@@ -119,3 +119,4 @@ pyproject.toml
 .python-version
 
 data/
+.claude/

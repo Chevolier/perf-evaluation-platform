@@ -345,9 +345,11 @@ class InferenceService:
                     raise ValueError(f"No deployment tag found for model {model}")
                 
                 # Get endpoint name from EMD deployment info 
-                # Based on the emd status output, the actual endpoint name is:
-                # EMD-Model-{model}-{tag}-endpoint
-                endpoint_name = f"EMD-Model-{model}-{deployment_tag}-endpoint"
+                # Based on the emd status output, the actual endpoint name uses model_path:
+                # EMD-Model-{model_path_converted}-{tag}-endpoint
+                # Convert model_path to lowercase and replace special chars with hyphens
+                model_name_for_endpoint = model_path.lower().replace('_', '-').replace('.', '-')
+                endpoint_name = f"EMD-Model-{model_name_for_endpoint}-{deployment_tag}-endpoint"
                 
                 logger.info(f"Using EMD endpoint: {endpoint_name}")
                 

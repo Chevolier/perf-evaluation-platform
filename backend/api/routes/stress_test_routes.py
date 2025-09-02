@@ -101,19 +101,19 @@ def download_stress_test_report(session_id):
             logger.warning(f"Session {session_id} not completed or no results available")
             return jsonify({"status": "error", "message": "Test not completed or no results available"}), 400
         
-        # Generate PDF report
-        pdf_content = stress_test_service.generate_pdf_report(session_id)
+        # Generate PDF report and zip session folder
+        zip_content = stress_test_service.generate_pdf_report_and_zip_session(session_id)
         
-        if not pdf_content:
-            logger.error(f"Failed to generate PDF report for session {session_id}")
+        if not zip_content:
+            logger.error(f"Failed to generate report and zip session folder for session {session_id}")
             return jsonify({"status": "error", "message": "Failed to generate report"}), 500
         
-        # Return PDF file
-        response = make_response(pdf_content)
-        response.headers['Content-Type'] = 'application/pdf'
-        response.headers['Content-Disposition'] = f'attachment; filename=stress_test_report_{session_id}.pdf'
+        # Return ZIP file
+        response = make_response(zip_content)
+        response.headers['Content-Type'] = 'application/zip'
+        response.headers['Content-Disposition'] = f'attachment; filename=stress_test_session_{session_id}.zip'
         
-        logger.info(f"PDF report generated for session {session_id}")
+        logger.info(f"Session zip file generated for session {session_id}")
         return response
         
     except Exception as e:

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo "🚀 Setting up Multimodal Inference Platform"
+echo "🚀 Setting up Model Inference Platform"
 echo "=========================================="
 
 # Check Python version
@@ -39,10 +39,6 @@ source venv/bin/activate
 echo "Installing Python dependencies..."
 pip install --upgrade pip
 pip install -r requirements.txt
-
-# Install EMD CLI
-echo "Installing EMD CLI..."
-pip install emd-cli
 
 echo "✓ Backend setup complete!"
 
@@ -87,10 +83,7 @@ echo "🎉 Setup complete!"
 echo ""
 echo "To start the platform:"
 echo "1. Backend:"
-echo "   cd backend && source venv/bin/activate && python backend.py"
+echo "  source venv/bin/activate && python run_backend.py"
 echo "2. Frontend (in another terminal):"
 echo "   cd frontend && npm start"
 echo "3. Access: http://localhost:3000"
-echo ""
-echo "For EMD models, deploy them first:"
-echo "   emd deploy --model-id Qwen2-VL-7B-Instruct --instance-type g5.12xlarge --engine-type vllm --service-type sagemaker_realtime --model-tag dev"

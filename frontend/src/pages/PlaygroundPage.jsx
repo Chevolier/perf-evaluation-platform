@@ -17,7 +17,8 @@ import {
   Alert,
   Tag,
   Modal,
-  Select
+  Select,
+  Image
 } from 'antd';
 import { 
   UploadOutlined, 
@@ -29,14 +30,15 @@ import {
   SettingOutlined,
   LinkOutlined,
   RocketOutlined,
-  CloseOutlined
+  CloseOutlined,
+  EyeOutlined,
+  DeleteOutlined
 } from '@ant-design/icons';
 import PlaygroundResultsDisplay from '../components/PlaygroundResultsDisplay';
 import PlaygroundModelSelector from '../components/PlaygroundModelSelector';
 
 const { Title, Text, Paragraph } = Typography;
 const { TextArea } = Input;
-const { Dragger } = Upload;
 
 const PlaygroundPage = ({
   selectedModels,
@@ -59,6 +61,17 @@ const PlaygroundPage = ({
   
   const [isInferring, setIsInferring] = useState(false);
   const [modelSelectorVisible, setModelSelectorVisible] = useState(false);
+  
+  // Store original file objects for preview
+  const [originalFiles, setOriginalFiles] = useState(() => {
+    try {
+      const saved = localStorage.getItem('playground_originalFiles');
+      return saved ? JSON.parse(saved) : [];
+    } catch (error) {
+      console.error('Failed to load original files from localStorage:', error);
+      return [];
+    }
+  });
   
   // Load playground internal state from localStorage
   const [inputMode, setInputMode] = useState(() => {
@@ -150,6 +163,14 @@ const PlaygroundPage = ({
     }
   }, [modelNameHistory]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem('playground_originalFiles', JSON.stringify(originalFiles));
+    } catch (error) {
+      console.error('Failed to save original files to localStorage:', error);
+    }
+  }, [originalFiles]);
+
   // Helper functions to manage history
   const addToApiUrlHistory = (url) => {
     if (!url.trim()) return;
@@ -191,6 +212,7 @@ const PlaygroundPage = ({
       localStorage.removeItem('playground_manualConfig');
       localStorage.removeItem('playground_apiUrlHistory');
       localStorage.removeItem('playground_modelNameHistory');
+      localStorage.removeItem('playground_originalFiles');
       
       // Reset all state to defaults
       setInferenceResults({});
@@ -202,6 +224,7 @@ const PlaygroundPage = ({
       });
       setApiUrlHistory([]);
       setModelNameHistory([]);
+      setOriginalFiles([]);
       
       // Reset dataset and params via props if they have default reset functions
       if (onDatasetChange) {
@@ -213,8 +236,8 @@ const PlaygroundPage = ({
       }
       if (onParamsChange) {
         onParamsChange({
-          max_tokens: 150,
-          temperature: 0.7
+          max_tokens: 1024,
+          temperature: 0.6
         });
       }
       if (onModelChange) {
@@ -273,7 +296,11 @@ const PlaygroundPage = ({
         return;
       }
 
+      // Reset original files before processing new ones
+      setOriginalFiles([]);
+      
       const base64Files = [];
+      const newOriginalFiles = [];
       let fileType = 'image'; // 默认类型
       let totalSize = 0;
       const maxImageSize = 5 * 1024 * 1024; // 5MB for images
@@ -361,7 +388,32 @@ const PlaygroundPage = ({
             reader.readAsDataURL(uploadFile);
           });
 
+          // 创建预览URL
+          const previewUrl = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+              console.log(`Created preview URL for: ${uploadFile.name}`);
+              resolve(reader.result);
+            };
+            reader.onerror = (error) => {
+              console.error(`Failed to create preview URL: ${uploadFile.name}`, error);
+              reject(error);
+            };
+            reader.readAsDataURL(uploadFile);
+          });
+
           base64Files.push(base64);
+          
+          // Store file info for preview
+          newOriginalFiles.push({
+            name: uploadFile.name,
+            type: uploadFile.type,
+            size: uploadFile.size,
+            previewUrl: previewUrl,
+            isImage: isImage,
+            isVideo: isVideo
+          });
+          
           message.destroy(); // 清除loading消息
         } catch (error) {
           message.destroy(); // 清除loading消息
@@ -372,10 +424,12 @@ const PlaygroundPage = ({
 
       if (base64Files.length === 0) {
         message.warning('没有成功处理任何文件');
+        setOriginalFiles([]);
         return;
       }
 
       message.success(`成功处理 ${base64Files.length} 个文件`);
+      setOriginalFiles(newOriginalFiles);
       onDatasetChange({
         ...dataset,
         files: base64Files,
@@ -390,6 +444,7 @@ const PlaygroundPage = ({
   // 清除上传的文件
   const handleClearFiles = () => {
     onDatasetChange({ ...dataset, files: [], type: 'image' });
+    setOriginalFiles([]);
     
     // 安全地清空文件输入
     if (fileInputRef.current) {
@@ -405,6 +460,22 @@ const PlaygroundPage = ({
         console.log('Unable to clear file input:', error);
         // 即使清空失败也不影响功能，因为状态已经清空
       }
+    }
+  };
+
+  // 删除单个文件
+  const handleRemoveFile = (index) => {
+    const newFiles = [...dataset.files];
+    const newOriginalFiles = [...originalFiles];
+    
+    newFiles.splice(index, 1);
+    newOriginalFiles.splice(index, 1);
+    
+    onDatasetChange({ ...dataset, files: newFiles });
+    setOriginalFiles(newOriginalFiles);
+    
+    if (newFiles.length === 0) {
+      onDatasetChange({ ...dataset, files: [], type: 'image' });
     }
   };
 
@@ -760,68 +831,215 @@ const PlaygroundPage = ({
               </Space>
             </Card>
 
-            {/* 文件上传 */}
-            <Card title="上传素材" size="small">
-              <Space direction="vertical" style={{ width: '100%' }}>
-                <Dragger
-                  ref={fileInputRef}
-                  name="file"
-                  multiple={true}
-                  beforeUpload={handleFileUpload}
-                  showUploadList={false}
-                  accept="image/*,video/*"
-                  style={{ padding: '20px' }}
-                >
-                  <p className="ant-upload-drag-icon">
-                    {getFileIcon()}
-                  </p>
-                  <p className="ant-upload-text">
-                    点击或拖拽文件到此区域上传
-                  </p>
-                  <p className="ant-upload-hint">
-                    支持图片（JPG、PNG、GIF等，最大5MB）和视频（MP4、MOV、AVI等，最大50MB）
-                  </p>
-                  <p className="ant-upload-hint" style={{ fontSize: '11px', color: '#999' }}>
-                    视频文件最多3个，图片文件最多10个，总大小不超过100MB
-                  </p>
-                </Dragger>
-
-                {dataset.files.length > 0 && (
-                  <div style={{ 
-                    display: 'flex', 
-                    justifyContent: 'space-between', 
+            {/* 提示词输入 - 集成上传功能 */}
+            <Card title="提示词" size="small">
+              <div style={{ position: 'relative' }}>
+                {/* 文本输入区域 */}
+                <div style={{ position: 'relative' }}>
+                  <TextArea
+                    value={dataset.prompt}
+                    onChange={(e) => onDatasetChange({ ...dataset, prompt: e.target.value })}
+                    placeholder="请输入提示词，描述你希望模型完成的任务..."
+                    rows={6}
+                    maxLength={2000}
+                    showCount
+                    style={{
+                      paddingBottom: '48px',
+                      resize: 'none'
+                    }}
+                  />
+                  
+                  {/* 底部工具栏 - 模仿Bedrock样式 */}
+                  <div style={{
+                    position: 'absolute',
+                    bottom: '8px',
+                    left: '8px',
+                    right: '8px',
+                    display: 'flex',
+                    justifyContent: 'space-between',
                     alignItems: 'center',
-                    padding: '8px',
-                    background: '#f6f6f6',
-                    borderRadius: '4px'
+                    zIndex: 1
                   }}>
-                    <Space>
-                      {getFileIcon()}
-                      <Text>已上传 {dataset.files.length} 个{getFileTypeText()}文件</Text>
-                    </Space>
-                    <Button 
-                      type="text" 
-                      size="small" 
-                      icon={<ClearOutlined />}
-                      onClick={handleClearFiles}
-                    >
-                      清除
-                    </Button>
+                    {/* 左侧上传按钮 */}
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <Upload
+                        ref={fileInputRef}
+                        name="file"
+                        multiple={true}
+                        beforeUpload={handleFileUpload}
+                        showUploadList={false}
+                        accept="image/*,video/*"
+                      >
+                        <Button 
+                          type="text" 
+                          size="small"
+                          icon={<UploadOutlined />}
+                          style={{
+                            color: '#666',
+                            border: 'none',
+                            boxShadow: 'none',
+                            background: 'transparent'
+                          }}
+                        >
+                          上传素材
+                        </Button>
+                      </Upload>
+                    </div>
+                    
+                    {/* 右侧字符计数 - 使用内置的showCount会自动显示 */}
+                  </div>
+                </div>
+                
+                {/* 图片预览区域 - 显示在输入框下方 */}
+                {dataset.files.length > 0 && (
+                  <div style={{ marginTop: '16px' }}>
+                    <div style={{ 
+                      display: 'flex', 
+                      justifyContent: 'space-between', 
+                      alignItems: 'center',
+                      padding: '8px 0',
+                      marginBottom: '12px'
+                    }}>
+                      <Space>
+                        {getFileIcon()}
+                        <Text style={{ fontSize: '14px', color: '#666' }}>
+                          已上传 {dataset.files.length} 个{getFileTypeText()}文件
+                        </Text>
+                      </Space>
+                      <Button 
+                        type="text" 
+                        size="small" 
+                        icon={<ClearOutlined />}
+                        onClick={handleClearFiles}
+                        style={{ color: '#999' }}
+                      >
+                        清除全部
+                      </Button>
+                    </div>
+                    
+                    {/* 小图片预览行 */}
+                    {originalFiles.length > 0 && (
+                      <div style={{ 
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        gap: '8px',
+                        padding: '12px',
+                        border: '1px solid #f0f0f0',
+                        borderRadius: '8px',
+                        background: '#fafafa'
+                      }}>
+                        {originalFiles.map((fileInfo, index) => (
+                          <div 
+                            key={index} 
+                            style={{ 
+                              position: 'relative',
+                              border: '1px solid #d9d9d9',
+                              borderRadius: '6px',
+                              overflow: 'hidden',
+                              background: '#fff',
+                              cursor: fileInfo.isImage ? 'pointer' : 'default'
+                            }}
+                            onClick={() => {
+                              if (fileInfo.isImage) {
+                                // 使用 Ant Design 的 Image 预览功能
+                                const img = document.createElement('img');
+                                img.src = fileInfo.previewUrl;
+                                img.style.display = 'none';
+                                document.body.appendChild(img);
+                                
+                                // 触发 Ant Design Image 预览
+                                const event = new MouseEvent('click', { bubbles: true });
+                                const imageElement = document.querySelector(`[data-preview-id="preview-${index}"]`);
+                                if (imageElement) {
+                                  imageElement.click();
+                                }
+                              }
+                            }}
+                          >
+                            {fileInfo.isImage ? (
+                              <Image
+                                src={fileInfo.previewUrl}
+                                alt={fileInfo.name}
+                                width={60}
+                                height={60}
+                                style={{
+                                  objectFit: 'cover',
+                                  borderRadius: '4px'
+                                }}
+                                preview={{
+                                  mask: (
+                                    <div style={{
+                                      background: 'rgba(0,0,0,0.5)',
+                                      color: 'white',
+                                      padding: '4px',
+                                      borderRadius: '4px',
+                                      fontSize: '12px'
+                                    }}>
+                                      <EyeOutlined /> 预览
+                                    </div>
+                                  )
+                                }}
+                                data-preview-id={`preview-${index}`}
+                                fallback="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMIAAADDCAYAAADQvc6UAAABRWlDQ1BJQ0MgUHJvZmlsZQAAKJFjYGASSSwoyGFhYGDIzSspCnJ3UoiIjFJgf8LAwSDCIMogwMCcmFxc4BgQ4ANUwgCjUcG3awyMIPqyLsis7PPOq3QdDFcvjV3jOD1boQVTPQrgSkktTgbSf4A4LbmgqISBgTEFyFYuLykAsTuAbJEioKOA7DkgdjqEvQHEToKwj4DVhAQ5A9k3gGyB5IxEoBmML4BsnSQk8XQkNtReEOBxcfXxUQg1Mjc0dyHgXNJBSWpFCYh2zi+oLMpMzyhRcASGUqqCZ16yno6CkYGRAQMDKMwhqj/fAIcloxgHQqxAjIHBEugw5sUIsSQpBobtQPdLciLEVJYzMPBHMDBsayhILEqEO4DxG0txmrERhM29nYGBddr//5/DGRjYNRkY/l7////39v///y4Dmn+LgeHANwDrkl1AuO+pmgAAADhlWElmTU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAAqACAAQAAAABAAAAwqADAAQAAAABAAAAwwAAAAD9b/HnAAAHlklEQVR4Ae3dP3Ik1RnG4W+FgYxN"
+                              />
+                            ) : fileInfo.isVideo ? (
+                              <div style={{
+                                width: '60px',
+                                height: '60px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                background: '#f0f0f0',
+                                borderRadius: '4px'
+                              }}>
+                                <VideoCameraOutlined style={{ fontSize: '20px', color: '#999' }} />
+                              </div>
+                            ) : (
+                              <div style={{
+                                width: '60px',
+                                height: '60px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                background: '#f0f0f0',
+                                borderRadius: '4px'
+                              }}>
+                                <FileImageOutlined style={{ fontSize: '20px', color: '#999' }} />
+                              </div>
+                            )}
+                            
+                            {/* 删除按钮 */}
+                            <Button
+                              type="text"
+                              size="small"
+                              icon={<DeleteOutlined />}
+                              onClick={(e) => {
+                                e.stopPropagation(); // 防止触发图片预览
+                                handleRemoveFile(index);
+                              }}
+                              style={{
+                                position: 'absolute',
+                                top: '2px',
+                                right: '2px',
+                                width: '18px',
+                                height: '18px',
+                                background: 'rgba(0,0,0,0.6)',
+                                color: '#fff',
+                                border: 'none',
+                                borderRadius: '50%',
+                                fontSize: '10px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center'
+                              }}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
-              </Space>
-            </Card>
-
-            {/* 提示词输入 */}
-            <Card title="提示词" size="small">
-              <TextArea
-                value={dataset.prompt}
-                onChange={(e) => onDatasetChange({ ...dataset, prompt: e.target.value })}
-                placeholder="请输入提示词，描述你希望模型完成的任务..."
-                rows={6}
-                maxLength={2000}
-                showCount
-              />
+              </div>
             </Card>
 
             {/* 参数配置 */}
