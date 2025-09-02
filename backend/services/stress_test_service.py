@@ -1579,6 +1579,7 @@ except Exception as e:
                     "supports_multimodal": model_info.get('supports_multimodal', False)
                 },
                 "deployment_config": {
+                    "deployment_method": test_params.get('deployment_method', 'EMD'),
                     "framework": test_params.get('inference_framework', 'vllm'),
                     "instance_type": test_params.get('instance_type', 'ml.g5.2xlarge'),
                     "tp_size": test_params.get('tp_size', self._infer_tp_size(test_params.get('instance_type', 'ml.g5.2xlarge'))),
@@ -1777,6 +1778,7 @@ except Exception as e:
                     "tokenizer_path": test_params.get('tokenizer_path', 'Unknown')
                 },
                 "deployment_config": {
+                    "deployment_method": test_params.get('deployment_method', 'EMD'),
                     "framework": test_params.get('inference_framework', 'vllm'),
                     "instance_type": test_params.get('instance_type', 'g5.xlarge'),
                     "tp_size": test_params.get('tp_size', 1),
