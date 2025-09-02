@@ -1,10 +1,10 @@
 # Model Performance Evaluation Platform
 
-A comprehensive platform for large language model performance evaluation and deployment. Supports 1-click deployment of various LLMs and VLMs on Amazon SageMaker, EKS, and EC2 using vLLM, SGLang, and other inference engines, plus comprehensive performance testing and visualization.
+A comprehensive platform for model (LLMs, VLMs, etc.) deployment and performance evaluation. Supports 1-click deployment of various models on Amazon SageMaker Endpoint, SageMaker HyperPod, EKS, and EC2 using vLLM, SGLang, and other inference engines, plus comprehensive performance testing and visualization.
 
 ## ✨ Features
 
-- **Model Hub**: Deploy and manage EMD models with real-time status tracking
+- **Model Hub**: Deploy and manage models with real-time status tracking
 - **Interactive Playground**: Multi-model comparison with streaming inference
 - **Performance Testing**: Stress testing and throughput benchmarking
 - **Result Visualization**: Charts and analytics for performance metrics
@@ -142,22 +142,6 @@ cd frontend && npm start
 **AWS Bedrock Models** (API-based):
 - Claude 4
 - Nova
-
-### EMD Model Deployment
-
-Deploy models through the web interface or CLI:
-
-```bash
-# CLI deployment example
-emd deploy --model-id Qwen2-VL-7B-Instruct \
-           --instance-type g5.12xlarge \
-           --engine-type vllm \
-           --service-type sagemaker_realtime \
-           --model-tag dev
-
-# Check deployment status
-emd status
-```
 
 ### Media Processing
 
