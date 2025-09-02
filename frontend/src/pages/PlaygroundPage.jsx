@@ -39,7 +39,6 @@ import PlaygroundModelSelector from '../components/PlaygroundModelSelector';
 
 const { Title, Text, Paragraph } = Typography;
 const { TextArea } = Input;
-const { Dragger } = Upload;
 
 const PlaygroundPage = ({
   selectedModels,
@@ -832,34 +831,12 @@ const PlaygroundPage = ({
               </Space>
             </Card>
 
-            {/* 文件上传 */}
-            <Card title="上传素材" size="small">
-              <Space direction="vertical" style={{ width: '100%' }}>
-                <Dragger
-                  ref={fileInputRef}
-                  name="file"
-                  multiple={true}
-                  beforeUpload={handleFileUpload}
-                  showUploadList={false}
-                  accept="image/*,video/*"
-                  style={{ padding: '20px' }}
-                >
-                  <p className="ant-upload-drag-icon">
-                    {getFileIcon()}
-                  </p>
-                  <p className="ant-upload-text">
-                    点击或拖拽文件到此区域上传
-                  </p>
-                  <p className="ant-upload-hint">
-                    支持图片（JPG、PNG、GIF等，最大5MB）和视频（MP4、MOV、AVI等，最大50MB）
-                  </p>
-                  <p className="ant-upload-hint" style={{ fontSize: '11px', color: '#999' }}>
-                    视频文件最多3个，图片文件最多10个，总大小不超过100MB
-                  </p>
-                </Dragger>
-
+            {/* 提示词输入 - 集成上传功能 */}
+            <Card title="提示词" size="small">
+              <div style={{ position: 'relative' }}>
+                {/* 图片预览区域 - 显示在输入框上方 */}
                 {dataset.files.length > 0 && (
-                  <div style={{ marginTop: '16px' }}>
+                  <div style={{ marginBottom: '16px' }}>
                     <div style={{ 
                       display: 'flex', 
                       justifyContent: 'space-between', 
@@ -986,19 +963,63 @@ const PlaygroundPage = ({
                     )}
                   </div>
                 )}
-              </Space>
-            </Card>
-
-            {/* 提示词输入 */}
-            <Card title="提示词" size="small">
-              <TextArea
-                value={dataset.prompt}
-                onChange={(e) => onDatasetChange({ ...dataset, prompt: e.target.value })}
-                placeholder="请输入提示词，描述你希望模型完成的任务..."
-                rows={6}
-                maxLength={2000}
-                showCount
-              />
+                
+                {/* 文本输入区域 */}
+                <div style={{ position: 'relative' }}>
+                  <TextArea
+                    value={dataset.prompt}
+                    onChange={(e) => onDatasetChange({ ...dataset, prompt: e.target.value })}
+                    placeholder="请输入提示词，描述你希望模型完成的任务..."
+                    rows={6}
+                    maxLength={2000}
+                    showCount
+                    style={{
+                      paddingBottom: '48px',
+                      resize: 'none'
+                    }}
+                  />
+                  
+                  {/* 底部工具栏 - 模仿Bedrock样式 */}
+                  <div style={{
+                    position: 'absolute',
+                    bottom: '8px',
+                    left: '8px',
+                    right: '8px',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    zIndex: 1
+                  }}>
+                    {/* 左侧上传按钮 */}
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <Upload
+                        ref={fileInputRef}
+                        name="file"
+                        multiple={true}
+                        beforeUpload={handleFileUpload}
+                        showUploadList={false}
+                        accept="image/*,video/*"
+                      >
+                        <Button 
+                          type="text" 
+                          size="small"
+                          icon={<UploadOutlined />}
+                          style={{
+                            color: '#666',
+                            border: 'none',
+                            boxShadow: 'none',
+                            background: 'transparent'
+                          }}
+                        >
+                          上传素材
+                        </Button>
+                      </Upload>
+                    </div>
+                    
+                    {/* 右侧字符计数 - 使用内置的showCount会自动显示 */}
+                  </div>
+                </div>
+              </div>
             </Card>
 
             {/* 参数配置 */}
