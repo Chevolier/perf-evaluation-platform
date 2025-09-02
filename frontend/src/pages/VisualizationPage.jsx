@@ -410,12 +410,12 @@ const VisualizationPage = () => {
     ];
     
     // Get all unique sessions sorted for consistent indexing
-    const uniqueSessions = [...new Set(Object.values(resultData).map(r => `${r.model}_${r.instance_type}_${r.framework}_${r.session_id}`))].sort();
+    const uniqueSessions = [...new Set(Object.values(resultData).map(r => `${r.model}_${r.deployment_method || 'emd'}_${r.instance_type}_${r.framework}_${r.session_id}`))].sort();
     console.log('Unique sessions for styling:', uniqueSessions);
     
     Object.entries(resultData).forEach(([key, result]) => {
       const performanceData = result.data?.performance_data || [];
-      const modelLabel = `${result.model}_${result.instance_type}_${result.framework}_${result.session_id}`;
+      const modelLabel = `${result.model}_${result.deployment_method || 'emd'}_${result.instance_type}_${result.framework}_${result.session_id}`;
       
       // Get style index for this session
       const styleIndex = uniqueSessions.indexOf(modelLabel);
@@ -658,13 +658,13 @@ const VisualizationPage = () => {
       selectedResults.forEach((resultKey, index) => {
         const result = resultData[resultKey];
         if (result && currentY < pageHeight - 30) {
-          const summaryText = `${index + 1}. ${result.model} - ${result.session_id} (${result.instance_type}, ${result.framework})`;
+          const summaryText = `${index + 1}. ${result.model} - ${result.session_id} (${result.deployment_method || 'emd'}, ${result.instance_type}, ${result.framework})`;
           doc.text(summaryText, margin + 5, currentY);
           currentY += 6;
         } else if (result && currentY >= pageHeight - 30) {
           doc.addPage();
           currentY = margin;
-          const summaryText = `${index + 1}. ${result.model} - ${result.session_id} (${result.instance_type}, ${result.framework})`;
+          const summaryText = `${index + 1}. ${result.model} - ${result.session_id} (${result.deployment_method || 'emd'}, ${result.instance_type}, ${result.framework})`;
           doc.text(summaryText, margin + 5, currentY);
           currentY += 6;
         }
@@ -730,6 +730,7 @@ const VisualizationPage = () => {
           // Configuration parameters to display
           const configParams = [
             { label: 'Model', value: result.model || configData.model || 'N/A' },
+            { label: 'Deployment Method', value: result.deployment_method || configData.deployment_method || 'emd' },
             { label: 'Instance Type', value: result.instance_type || configData.instance_type || 'N/A' },
             { label: 'Framework', value: result.framework || configData.framework || 'N/A' },
             { label: 'Dataset', value: result.dataset || configData.dataset || 'N/A' },
@@ -1126,6 +1127,7 @@ const VisualizationPage = () => {
                           <Text strong>{result.model}</Text>
                           <Text type="secondary">{result.session_id}</Text>
                           <Space wrap size="small">
+                            <Tag size="small">Deployment: {result.deployment_method || 'emd'}</Tag>
                             <Tag size="small">Instance: {result.instance_type}</Tag>
                             <Tag size="small">Framework: {result.framework}</Tag>
                             <Tag size="small">Dataset: {result.dataset}</Tag>
