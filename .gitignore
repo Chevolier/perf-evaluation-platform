@@ -115,3 +115,6 @@ htmlcov/
 *.bak
 *.backup
 *~
+uv.lock
+pyproject.toml
+.python-version
