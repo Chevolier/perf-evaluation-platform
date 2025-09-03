@@ -103,7 +103,7 @@ class OpenaiPlugin(DefaultApiPlugin):
         """Parser responses and return number of request and response tokens.
         Only one response for non-stream, multiple responses for stream.
         """
-
+        
         # when stream, the last response is the full usage
         # when non-stream, the last response is the first response
         last_response_js = responses[-1]

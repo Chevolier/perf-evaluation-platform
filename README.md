@@ -129,10 +129,15 @@ cd frontend && npm start
 
 ## Local EC2 model deployment
 To use vllm to start a server on an g5.xlarge instance:
+
 ```bash
+# enable-prompt-tokens-details would help to show token usage info in response
 vllm serve /home/ec2-user/SageMaker/efs/Models/Qwen3-8B \
 	--gpu-memory-utilization 0.9 \
-	--max_model_len 2048
+	--max_model_len 2048 \
+  --enable-prompt-tokens-details
+
+nohup vllm serve /home/ec2-user/SageMaker/efs/Models/Qwen2.5-VL-7B-Instruct --port 8000 --host 0.0.0.0 --dtype bfloat16 --gpu-memory-utilization 0.9 --max_model_len 2048 --limit-mm-per-prompt '{"images": 1, "videos": 1}' --enable-prompt-tokens-details >logs/serve_qwen2.5-vl-7bi.out 2>&1 &
 ```
 You will obtain:
 Api url: http://0.0.0.0:8000/v1/chat/completions
