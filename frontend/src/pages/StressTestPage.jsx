@@ -1689,12 +1689,13 @@ const StressTestPage = () => {
                   )}
                   
                   {/* Manual deployment configuration */}
-                  <Row gutter={16}>
-                    <Col span={12}>
+                  <Row gutter={8} justify="space-between" style={{ marginBottom: 16 }}>
+                    <Col flex="1">
                       <Form.Item
                         name="instance_type"
                         label="实例类型"
                         rules={[{ required: true, message: '请选择实例类型' }]}
+                        style={{ marginBottom: 0 }}
                       >
                         <Select placeholder="选择实例类型">
                           <Option value="g5.xlarge">g5.xlarge</Option>
@@ -1713,11 +1714,12 @@ const StressTestPage = () => {
                         </Select>
                       </Form.Item>
                     </Col>
-                    <Col span={12}>
+                    <Col flex="1">
                       <Form.Item
                         name="framework"
                         label="推理框架"
                         rules={[{ required: true, message: '请选择推理框架' }]}
+                        style={{ marginBottom: 0 }}
                       >
                         <Select placeholder="选择推理框架">
                           <Option value="vllm">vLLM</Option>
@@ -1727,15 +1729,12 @@ const StressTestPage = () => {
                         </Select>
                       </Form.Item>
                     </Col>
-                  </Row>
-                  
-                  <Row gutter={16}>
-                    <Col span={12}>
+                    <Col flex="1">
                       <Form.Item
                         name="tp_size"
                         label="张量并行 (TP Size)"
                         rules={[{ required: true, message: '请输入张量并行数' }]}
-                        extra="通常为GPU数量，如1, 2, 4, 8"
+                        style={{ marginBottom: 0 }}
                       >
                         <InputNumber
                           min={1}
@@ -1745,12 +1744,12 @@ const StressTestPage = () => {
                         />
                       </Form.Item>
                     </Col>
-                    <Col span={12}>
+                    <Col flex="1">
                       <Form.Item
                         name="dp_size"
                         label="数据并行 (DP Size)"
                         rules={[{ required: true, message: '请输入数据并行数' }]}
-                        extra="通常为1，除非使用多节点部署"
+                        style={{ marginBottom: 0 }}
                       >
                         <InputNumber
                           min={1}
