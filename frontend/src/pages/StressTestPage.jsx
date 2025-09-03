@@ -1658,13 +1658,19 @@ const StressTestPage = () => {
                 />
               </Form.Item>
 
+              {!shouldEnableTokenParams() && (
+                <div style={{ marginBottom: '12px' }}>
+                  <Text type="secondary" style={{ fontSize: '12px' }}>
+                    Token参数仅在LLM模型+random数据集或VLM模型+random_vl数据集时启用
+                  </Text>
+                </div>
+              )}
               <Row gutter={8}>
                 <Col span={12}>
                   <Form.Item
                     name="input_tokens"
                     label="输入Token"
                     rules={shouldEnableTokenParams() ? [{ required: true, message: '请输入Token数量' }] : []}
-                    extra={!shouldEnableTokenParams() ? "仅在LLM模型+random数据集或VLM模型+random_vl数据集时启用" : undefined}
                   >
                     <InputNumber
                       style={{ width: '100%' }}
@@ -1680,7 +1686,6 @@ const StressTestPage = () => {
                     name="output_tokens"
                     label="输出Token"
                     rules={shouldEnableTokenParams() ? [{ required: true, message: '请输入Token数量' }] : []}
-                    extra={!shouldEnableTokenParams() ? "仅在LLM模型+random数据集或VLM模型+random_vl数据集时启用" : undefined}
                   >
                     <InputNumber
                       style={{ width: '100%' }}
@@ -1695,7 +1700,14 @@ const StressTestPage = () => {
 
               {/* VLM Parameters - show for all models but conditionally enable */}
               <Divider orientation="left" style={{ margin: '16px 0 8px 0' }}>
-                <Text type="secondary" style={{ fontSize: '14px' }}>VLM 图像参数</Text>
+                <Text type="secondary" style={{ fontSize: '14px' }}>
+                  VLM 图像参数
+                  {!shouldEnableImageParams() && (
+                    <Text type="secondary" style={{ fontSize: '12px', marginLeft: '8px' }}>
+                      (仅在VLM模型+random_vl数据集时启用)
+                    </Text>
+                  )}
+                </Text>
               </Divider>
               <Row gutter={8}>
                 <Col span={8}>
@@ -1704,7 +1716,6 @@ const StressTestPage = () => {
                     label="图像宽度"
                     rules={shouldEnableImageParams() ? [{ required: true, message: '请输入图像宽度' }] : []}
                     initialValue={512}
-                    extra={!shouldEnableImageParams() ? "仅在VLM模型+random_vl数据集时启用" : undefined}
                   >
                     <InputNumber
                       style={{ width: '100%' }}
@@ -1722,7 +1733,6 @@ const StressTestPage = () => {
                     label="图像高度"
                     rules={shouldEnableImageParams() ? [{ required: true, message: '请输入图像高度' }] : []}
                     initialValue={512}
-                    extra={!shouldEnableImageParams() ? "仅在VLM模型+random_vl数据集时启用" : undefined}
                   >
                     <InputNumber
                       style={{ width: '100%' }}
@@ -1740,7 +1750,6 @@ const StressTestPage = () => {
                     label="图像数量"
                     rules={shouldEnableImageParams() ? [{ required: true, message: '请输入图像数量' }] : []}
                     initialValue={1}
-                    extra={!shouldEnableImageParams() ? "仅在VLM模型+random_vl数据集时启用" : undefined}
                   >
                     <InputNumber
                       style={{ width: '100%' }}
