@@ -681,6 +681,14 @@ class StressTestService:
         input_tokens = test_params.get('input_tokens', 200)
         output_tokens = test_params.get('output_tokens', 500)
         temperature = test_params.get('temperature', 0.1)
+        dataset = test_params.get('dataset', 'random')
+        dataset_path = test_params.get('dataset_path', '')
+        
+        # VLM parameters
+        image_width = test_params.get('image_width', 512)
+        image_height = test_params.get('image_height', 512)
+        image_num = test_params.get('image_num', 1)
+        image_format = test_params.get('image_format', 'RGB')
         
         logger.info(f"[DEBUG] Raw parameters from frontend:")
         logger.info(f"[DEBUG]   num_requests: {num_requests_list} (type: {type(num_requests_list)})")
@@ -806,6 +814,11 @@ class StressTestService:
             logger.info(f"EVALSCOPE_LOG: Tokenizer path - {tokenizer_path}")
             
             # Create a simple Python script that uses evalscope SDK directly (original approach)
+            dataset_param = f"'{dataset_path}'" if dataset == 'custom' and dataset_path else f"'{dataset}'"
+            
+            # Check if VLM parameters should be included (when image parameters are provided)
+            has_vlm_params = 'image_width' in test_params and 'image_height' in test_params and 'image_num' in test_params
+            
             script_content = f'''#!/usr/bin/env python
 import sys
 import json
@@ -824,7 +837,7 @@ try:
         model='{model_name}',
         url='{api_url}',
         api='openai',
-        dataset='random',
+        dataset={dataset_param},
         min_tokens={min_tokens},
         max_tokens={max_tokens},
         prefix_length=0,
@@ -834,7 +847,7 @@ try:
         temperature={temperature},
         outputs_dir='{output_dir}',
         stream=True,
-        seed=42
+        seed=42{', image_width=' + str(image_width) + ', image_height=' + str(image_height) + ', image_format="' + image_format + '", image_num=' + str(image_num) if has_vlm_params else ''}
     )
     
     # Run the benchmark (this creates the subfolder structure)
@@ -1597,10 +1610,15 @@ except Exception as e:
                     "concurrency": test_params.get('concurrency', [5]),
                     "total_requests": test_params.get('num_requests', [50]),
                     "dataset": test_params.get('dataset', 'random'),
+                    "dataset_path": test_params.get('dataset_path', ''),
                     "input_tokens": test_params.get('input_tokens', 200),
                     "output_tokens": test_params.get('output_tokens', 500),
                     "temperature": test_params.get('temperature', 0.1),
-                    "stream": test_params.get('stream', True)
+                    "stream": test_params.get('stream', True),
+                    "image_width": test_params.get('image_width', 512),
+                    "image_height": test_params.get('image_height', 512),
+                    "image_num": test_params.get('image_num', 1),
+                    "image_format": test_params.get('image_format', 'RGB')
                 }
             }
             
@@ -1799,6 +1817,7 @@ except Exception as e:
                     "total_requests": test_params.get('num_requests', []),
                     "paired_combinations": paired_combinations,
                     "dataset": test_params.get('dataset', 'random'),
+                    "dataset_path": test_params.get('dataset_path', ''),
                     "input_tokens": {
                         "min": test_params.get('input_tokens', 32),
                         "max": test_params.get('input_tokens', 32),
@@ -1813,7 +1832,11 @@ except Exception as e:
                     "stream": test_params.get('stream', True),
                     "seed": 42,
                     "prefix_length": 0,
-                    "apply_chat_template": True
+                    "apply_chat_template": True,
+                    "image_width": test_params.get('image_width', 512),
+                    "image_height": test_params.get('image_height', 512),
+                    "image_num": test_params.get('image_num', 1),
+                    "image_format": test_params.get('image_format', 'RGB')
                 },
                 "test_results_summary": {
                     "total_test_time": comprehensive_summary.get('total_test_time', 0),
@@ -1862,6 +1885,14 @@ except Exception as e:
         input_tokens = test_params.get('input_tokens', 200)
         output_tokens = test_params.get('output_tokens', 500)
         temperature = test_params.get('temperature', 0.1)
+        dataset = test_params.get('dataset', 'random')
+        dataset_path = test_params.get('dataset_path', '')
+        
+        # VLM parameters
+        image_width = test_params.get('image_width', 512)
+        image_height = test_params.get('image_height', 512)
+        image_num = test_params.get('image_num', 1)
+        image_format = test_params.get('image_format', 'RGB')
         
         logger.info(f"[DEBUG] Custom API - Raw parameters from frontend:")
         logger.info(f"[DEBUG]   num_requests: {num_requests_list} (type: {type(num_requests_list)})")
@@ -1973,6 +2004,11 @@ except Exception as e:
             })
             
             # Create Python script to run evalscope programmatically using the same approach as original implementation
+            dataset_param = f"'{dataset_path}'" if dataset == 'custom' and dataset_path else f"'{dataset}'"
+            
+            # Check if VLM parameters should be included (when image parameters are provided)
+            has_vlm_params = 'image_width' in test_params and 'image_height' in test_params and 'image_num' in test_params
+            
             script_content = f'''#!/usr/bin/env python
 import sys
 import json
@@ -1991,7 +2027,7 @@ try:
         model='{model_name}',
         url='{api_url}',
         api='openai',
-        dataset='random',
+        dataset={dataset_param},
         min_tokens={min_tokens},
         max_tokens={max_tokens},
         prefix_length=0,
@@ -2001,7 +2037,7 @@ try:
         temperature={temperature},
         outputs_dir='{output_dir}',
         stream=True,
-        seed=42
+        seed=42{', image_width=' + str(image_width) + ', image_height=' + str(image_height) + ', image_format="' + image_format + '", image_num=' + str(image_num) if has_vlm_params else ''}
     )
     
     # Run the benchmark (this creates the subfolder structure)

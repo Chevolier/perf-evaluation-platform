@@ -43,6 +43,7 @@ const StressTestPage = () => {
   const [models, setModels] = useState([]);
   const [inputMode, setInputMode] = useState('dropdown'); // 'dropdown' or 'manual'
   const [datasetType, setDatasetType] = useState('random');
+  const [isMultimodal, setIsMultimodal] = useState(false);
   
   // 从localStorage恢复测试会话状态
   const [testSessions, setTestSessions] = useState(() => {
@@ -66,6 +67,12 @@ const StressTestPage = () => {
   
   const [pollingInterval, setPollingInterval] = useState(null);
   const pollingRestored = useRef(false);
+
+  // Handle model selection change to detect multimodal models
+  const handleModelChange = (modelKey) => {
+    const selectedModel = models.find(model => model.key === modelKey);
+    setIsMultimodal(selectedModel?.supports_multimodal || false);
+  };
 
   // 获取可用模型列表
   // Cross-field validation helper
@@ -104,7 +111,8 @@ const StressTestPage = () => {
                 key,
                 name: info.name,
                 type: 'bedrock',
-                description: info.description
+                description: info.description,
+                supports_multimodal: info.supports_multimodal || false
               });
             });
           }
@@ -128,7 +136,8 @@ const StressTestPage = () => {
                     name: info.name,
                     type: 'emd',
                     description: info.description,
-                    tag: status.tag
+                    tag: status.tag,
+                    supports_multimodal: info.supports_multimodal || false
                   });
                 }
               });
@@ -169,9 +178,19 @@ const StressTestPage = () => {
           concurrency: concurrencyArray,
           input_tokens: values.input_tokens,
           output_tokens: values.output_tokens,
-          temperature: 0.1
+          temperature: 0.1,
+          dataset: values.dataset,
+          dataset_path: values.dataset_path
         }
       };
+
+      // Add VLM parameters if multimodal model is selected
+      if (isMultimodal) {
+        requestBody.params.image_width = values.image_width;
+        requestBody.params.image_height = values.image_height;
+        requestBody.params.image_num = values.image_num;
+        requestBody.params.image_format = 'RGB'; // Fixed value as per test file
+      }
 
       // Handle different input modes
       if (inputMode === 'manual') {
@@ -386,6 +405,9 @@ const StressTestPage = () => {
         output_tokens: 32,
         deployment_method: "EMD",
         dataset: "random",
+        image_width: 512,
+        image_height: 512,
+        image_num: 1,
         instance_type: "g5.2xlarge",
         framework: "vllm",
         tp_size: 1,
@@ -1149,6 +1171,9 @@ const StressTestPage = () => {
                 output_tokens: 32,
                 deployment_method: "EMD",
                 dataset: "random",
+                image_width: 512,
+                image_height: 512,
+                image_num: 1,
                 instance_type: "g5.2xlarge",
                 framework: "vllm",
                 tp_size: 1,
@@ -1161,7 +1186,7 @@ const StressTestPage = () => {
                   onChange={(e) => {
                     setInputMode(e.target.value);
                     // Clear form fields when switching modes
-                    form.resetFields(['model', 'deployment_method', 'dataset', 'dataset_path', 'api_url', 'model_name', 'instance_type', 'framework', 'tp_size', 'dp_size']);
+                    form.resetFields(['model', 'deployment_method', 'dataset', 'dataset_path', 'api_url', 'model_name', 'instance_type', 'framework', 'tp_size', 'dp_size', 'image_width', 'image_height', 'image_num']);
                   }}
                 >
                   <Radio value="dropdown">
@@ -1186,13 +1211,17 @@ const StressTestPage = () => {
                     label="选择模型"
                     rules={[{ required: true, message: '请选择要测试的模型' }]}
                   >
-                    <Select placeholder="选择模型">
+                    <Select 
+                      placeholder="选择模型"
+                      onChange={handleModelChange}
+                    >
                       {models.map(model => (
                         <Option key={model.key} value={model.key}>
                           <Space>
                             {model.type === 'bedrock' ? <CloudOutlined /> : <RocketOutlined />}
                             {model.name}
                             {model.tag && <Text type="secondary">({model.tag})</Text>}
+                            {model.supports_multimodal && <Text type="success" style={{ fontSize: '12px' }}>[VLM]</Text>}
                           </Space>
                         </Option>
                       ))}
@@ -1516,6 +1545,64 @@ const StressTestPage = () => {
                   </Form.Item>
                 </Col>
               </Row>
+
+              {/* VLM Parameters - only show for multimodal models */}
+              {isMultimodal && (
+                <>
+                  <Divider orientation="left" style={{ margin: '16px 0 8px 0' }}>
+                    <Text type="secondary" style={{ fontSize: '14px' }}>VLM 图像参数</Text>
+                  </Divider>
+                  <Row gutter={8}>
+                    <Col span={8}>
+                      <Form.Item
+                        name="image_width"
+                        label="图像宽度"
+                        rules={[{ required: true, message: '请输入图像宽度' }]}
+                        initialValue={512}
+                      >
+                        <InputNumber
+                          style={{ width: '100%' }}
+                          placeholder="512"
+                          min={64}
+                          max={2048}
+                          step={64}
+                        />
+                      </Form.Item>
+                    </Col>
+                    <Col span={8}>
+                      <Form.Item
+                        name="image_height"
+                        label="图像高度"
+                        rules={[{ required: true, message: '请输入图像高度' }]}
+                        initialValue={512}
+                      >
+                        <InputNumber
+                          style={{ width: '100%' }}
+                          placeholder="512"
+                          min={64}
+                          max={2048}
+                          step={64}
+                        />
+                      </Form.Item>
+                    </Col>
+                    <Col span={8}>
+                      <Form.Item
+                        name="image_num"
+                        label="图像数量"
+                        rules={[{ required: true, message: '请输入图像数量' }]}
+                        initialValue={1}
+                      >
+                        <InputNumber
+                          style={{ width: '100%' }}
+                          placeholder="1"
+                          min={1}
+                          max={10}
+                        />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+                </>
+              )}
 
               <Form.Item>
                 <Button
