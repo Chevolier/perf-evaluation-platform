@@ -45,6 +45,85 @@ const StressTestPage = () => {
   const [datasetType, setDatasetType] = useState('random');
   const [isMultimodal, setIsMultimodal] = useState(false);
   
+  // Model type mapping - maps model names to LLM or VLM
+  const MODEL_TYPE_MAP = {
+    // Common LLM models
+    "Qwen3-8B": "LLM",
+    "Qwen2.5-8B": "LLM", 
+    "Qwen2.5-14B": "LLM",
+    "Qwen2.5-32B": "LLM",
+    "Qwen2.5-72B": "LLM",
+    "Qwen2-7B": "LLM",
+    "Qwen2-1.5B": "LLM",
+    "Qwen2-0.5B": "LLM",
+    "Llama-3.2-1B": "LLM",
+    "Llama-3.2-3B": "LLM", 
+    "Llama-3.1-8B": "LLM",
+    "Llama-3.1-70B": "LLM",
+    "Llama-3.1-405B": "LLM",
+    "Gemma-2-2B": "LLM",
+    "Gemma-2-9B": "LLM",
+    "Gemma-2-27B": "LLM",
+    // Common VLM models
+    "Qwen2.5-VL-7B-Instruct": "VLM",
+    "Qwen2.5-VL-32B-Instruct": "VLM",
+    "Qwen2-VL-7B-Instruct": "VLM",
+    "Qwen2-VL-2B-Instruct": "VLM",
+    "Llava-1.5-7B": "VLM",
+    "Llava-1.5-13B": "VLM", 
+    "Llava-Next-7B": "VLM",
+    "Llava-Next-13B": "VLM",
+    "InternVL2-8B": "VLM",
+    "InternVL2-26B": "VLM",
+    "MiniCPM-V-2.6": "VLM",
+    "CogVLM2-19B": "VLM"
+  };
+  
+  // Extract model name from path using regex (looks for model size pattern like 7B, 32B, etc.)
+  const extractModelNameFromPath = (modelPath) => {
+    if (!modelPath || typeof modelPath !== 'string') return modelPath;
+    
+    // If it's already a simple model name, return as is
+    if (!modelPath.includes('/')) return modelPath;
+    
+    // Extract model name from path - look for directory names that contain size patterns
+    const pathParts = modelPath.split('/').filter(part => part.length > 0);
+    
+    // Find the part that looks like a model name (contains size like 7B, 32B, etc.)
+    for (const part of pathParts) {
+      if (/\d+[Bb]/.test(part)) {
+        return part;
+      }
+    }
+    
+    // Fallback: return the last directory name
+    return pathParts[pathParts.length - 1] || modelPath;
+  };
+  
+  // Determine if a model is multimodal based on model name
+  const getModelType = (modelName) => {
+    if (!modelName) return 'LLM';
+    
+    const extractedName = extractModelNameFromPath(modelName);
+    
+    // Direct lookup first
+    if (MODEL_TYPE_MAP[extractedName]) {
+      return MODEL_TYPE_MAP[extractedName];
+    }
+    
+    // Fallback: check for VLM keywords in the name
+    const vlmKeywords = ['VL', 'Vision', 'Llava', 'InternVL', 'CogVLM', 'MiniCPM-V'];
+    const nameUpper = extractedName.toUpperCase();
+    
+    for (const keyword of vlmKeywords) {
+      if (nameUpper.includes(keyword.toUpperCase())) {
+        return 'VLM';
+      }
+    }
+    
+    return 'LLM';
+  };
+  
   // 从localStorage恢复测试会话状态
   const [testSessions, setTestSessions] = useState(() => {
     try {
@@ -71,7 +150,58 @@ const StressTestPage = () => {
   // Handle model selection change to detect multimodal models
   const handleModelChange = (modelKey) => {
     const selectedModel = models.find(model => model.key === modelKey);
-    setIsMultimodal(selectedModel?.supports_multimodal || false);
+    const modelType = getModelType(selectedModel?.name || modelKey);
+    setIsMultimodal(modelType === 'VLM');
+    
+    // Force form to re-render to update conditional validation
+    setTimeout(() => {
+      form.validateFields(['input_tokens', 'output_tokens', 'image_width', 'image_height', 'image_num']);
+    }, 0);
+  };
+  
+  // Handle manual model name change to detect multimodal models
+  const handleManualModelNameChange = (modelName) => {
+    const modelType = getModelType(modelName);
+    setIsMultimodal(modelType === 'VLM');
+    
+    // Force form to re-render to update conditional validation
+    setTimeout(() => {
+      form.validateFields(['input_tokens', 'output_tokens', 'image_width', 'image_height', 'image_num']);
+    }, 0);
+  };
+  
+  // Determine if parameters should be enabled based on model type and dataset
+  const shouldEnableTokenParams = () => {
+    const currentModelType = inputMode === 'dropdown' 
+      ? (() => {
+          const modelKey = form.getFieldValue('model');
+          const selectedModel = models.find(model => model.key === modelKey);
+          return getModelType(selectedModel?.name || modelKey);
+        })()
+      : getModelType(form.getFieldValue('model_name'));
+    
+    const currentDataset = form.getFieldValue('dataset') || datasetType;
+    
+    // Enable token params if:
+    // - LLM model with random dataset
+    // - VLM model with random_vl dataset
+    return (currentModelType === 'LLM' && currentDataset === 'random') ||
+           (currentModelType === 'VLM' && currentDataset === 'random_vl');
+  };
+  
+  const shouldEnableImageParams = () => {
+    const currentModelType = inputMode === 'dropdown' 
+      ? (() => {
+          const modelKey = form.getFieldValue('model');
+          const selectedModel = models.find(model => model.key === modelKey);
+          return getModelType(selectedModel?.name || modelKey);
+        })()
+      : getModelType(form.getFieldValue('model_name'));
+    
+    const currentDataset = form.getFieldValue('dataset') || datasetType;
+    
+    // Enable image params if VLM model with random_vl dataset
+    return currentModelType === 'VLM' && currentDataset === 'random_vl';
   };
 
   // 获取可用模型列表
@@ -1250,7 +1380,13 @@ const StressTestPage = () => {
                   >
                     <Select 
                       placeholder="选择数据集"
-                      onChange={(value) => setDatasetType(value)}
+                      onChange={(value) => {
+                        setDatasetType(value);
+                        // Force form to re-render to update conditional validation
+                        setTimeout(() => {
+                          form.validateFields(['input_tokens', 'output_tokens', 'image_width', 'image_height', 'image_num']);
+                        }, 0);
+                      }}
                     >
                       <Option value="random">random</Option>
                       <Option value="random_vl">random_vl</Option>
@@ -1295,11 +1431,12 @@ const StressTestPage = () => {
                     name="model_name"
                     label="模型名称"
                     rules={[{ required: true, message: '请输入模型名称' }]}
-                    extra="请输入准确的模型名称，如: gpt-3.5-turbo, claude-3-sonnet-20240229"
+                    extra="请输入准确的模型名称，如: gpt-3.5-turbo, claude-3-sonnet-20240229, Qwen2.5-VL-7B-Instruct"
                   >
                     <Input 
                       placeholder="gpt-3.5-turbo"
                       prefix={<RocketOutlined />}
+                      onChange={(e) => handleManualModelNameChange(e.target.value)}
                     />
                   </Form.Item>
                   
@@ -1325,7 +1462,13 @@ const StressTestPage = () => {
                   >
                     <Select 
                       placeholder="选择数据集"
-                      onChange={(value) => setDatasetType(value)}
+                      onChange={(value) => {
+                        setDatasetType(value);
+                        // Force form to re-render to update conditional validation
+                        setTimeout(() => {
+                          form.validateFields(['input_tokens', 'output_tokens', 'image_width', 'image_height', 'image_num']);
+                        }, 0);
+                      }}
                     >
                       <Option value="random">random</Option>
                       <Option value="random_vl">random_vl</Option>
@@ -1520,13 +1663,15 @@ const StressTestPage = () => {
                   <Form.Item
                     name="input_tokens"
                     label="输入Token"
-                    rules={[{ required: true, message: '请输入Token数量' }]}
+                    rules={shouldEnableTokenParams() ? [{ required: true, message: '请输入Token数量' }] : []}
+                    extra={!shouldEnableTokenParams() ? "仅在LLM模型+random数据集或VLM模型+random_vl数据集时启用" : undefined}
                   >
                     <InputNumber
                       style={{ width: '100%' }}
                       placeholder="输入Token数量"
                       min={1}
                       max={4000}
+                      disabled={!shouldEnableTokenParams()}
                     />
                   </Form.Item>
                 </Col>
@@ -1534,75 +1679,79 @@ const StressTestPage = () => {
                   <Form.Item
                     name="output_tokens"
                     label="输出Token"
-                    rules={[{ required: true, message: '请输入Token数量' }]}
+                    rules={shouldEnableTokenParams() ? [{ required: true, message: '请输入Token数量' }] : []}
+                    extra={!shouldEnableTokenParams() ? "仅在LLM模型+random数据集或VLM模型+random_vl数据集时启用" : undefined}
                   >
                     <InputNumber
                       style={{ width: '100%' }}
                       placeholder="输出Token数量"
                       min={1}
                       max={4000}
+                      disabled={!shouldEnableTokenParams()}
                     />
                   </Form.Item>
                 </Col>
               </Row>
 
-              {/* VLM Parameters - only show for multimodal models */}
-              {isMultimodal && (
-                <>
-                  <Divider orientation="left" style={{ margin: '16px 0 8px 0' }}>
-                    <Text type="secondary" style={{ fontSize: '14px' }}>VLM 图像参数</Text>
-                  </Divider>
-                  <Row gutter={8}>
-                    <Col span={8}>
-                      <Form.Item
-                        name="image_width"
-                        label="图像宽度"
-                        rules={[{ required: true, message: '请输入图像宽度' }]}
-                        initialValue={512}
-                      >
-                        <InputNumber
-                          style={{ width: '100%' }}
-                          placeholder="512"
-                          min={64}
-                          max={2048}
-                          step={64}
-                        />
-                      </Form.Item>
-                    </Col>
-                    <Col span={8}>
-                      <Form.Item
-                        name="image_height"
-                        label="图像高度"
-                        rules={[{ required: true, message: '请输入图像高度' }]}
-                        initialValue={512}
-                      >
-                        <InputNumber
-                          style={{ width: '100%' }}
-                          placeholder="512"
-                          min={64}
-                          max={2048}
-                          step={64}
-                        />
-                      </Form.Item>
-                    </Col>
-                    <Col span={8}>
-                      <Form.Item
-                        name="image_num"
-                        label="图像数量"
-                        rules={[{ required: true, message: '请输入图像数量' }]}
-                        initialValue={1}
-                      >
-                        <InputNumber
-                          style={{ width: '100%' }}
-                          placeholder="1"
-                          min={1}
-                          max={10}
-                        />
-                      </Form.Item>
-                    </Col>
-                  </Row>
-                </>
-              )}
+              {/* VLM Parameters - show for all models but conditionally enable */}
+              <Divider orientation="left" style={{ margin: '16px 0 8px 0' }}>
+                <Text type="secondary" style={{ fontSize: '14px' }}>VLM 图像参数</Text>
+              </Divider>
+              <Row gutter={8}>
+                <Col span={8}>
+                  <Form.Item
+                    name="image_width"
+                    label="图像宽度"
+                    rules={shouldEnableImageParams() ? [{ required: true, message: '请输入图像宽度' }] : []}
+                    initialValue={512}
+                    extra={!shouldEnableImageParams() ? "仅在VLM模型+random_vl数据集时启用" : undefined}
+                  >
+                    <InputNumber
+                      style={{ width: '100%' }}
+                      placeholder="512"
+                      min={64}
+                      max={2048}
+                      step={64}
+                      disabled={!shouldEnableImageParams()}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={8}>
+                  <Form.Item
+                    name="image_height"
+                    label="图像高度"
+                    rules={shouldEnableImageParams() ? [{ required: true, message: '请输入图像高度' }] : []}
+                    initialValue={512}
+                    extra={!shouldEnableImageParams() ? "仅在VLM模型+random_vl数据集时启用" : undefined}
+                  >
+                    <InputNumber
+                      style={{ width: '100%' }}
+                      placeholder="512"
+                      min={64}
+                      max={2048}
+                      step={64}
+                      disabled={!shouldEnableImageParams()}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={8}>
+                  <Form.Item
+                    name="image_num"
+                    label="图像数量"
+                    rules={shouldEnableImageParams() ? [{ required: true, message: '请输入图像数量' }] : []}
+                    initialValue={1}
+                    extra={!shouldEnableImageParams() ? "仅在VLM模型+random_vl数据集时启用" : undefined}
+                  >
+                    <InputNumber
+                      style={{ width: '100%' }}
+                      placeholder="1"
+                      min={1}
+                      max={10}
+                      disabled={!shouldEnableImageParams()}
+                    />
+                  </Form.Item>
+                </Col>
+              </Row>
 
               <Form.Item>
                 <Button
