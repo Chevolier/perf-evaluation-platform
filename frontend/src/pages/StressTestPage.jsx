@@ -13,7 +13,6 @@ import {
   Progress,
   Table,
   message,
-  Divider,
   Statistic,
   Spin,
   Radio,
@@ -1288,7 +1287,7 @@ const StressTestPage = () => {
 
       <Row gutter={[24, 24]}>
         {/* 测试配置 */}
-        <Col span={8}>
+        <Col span={24}>
           <Card title="测试配置" size="small">
             <Form
               form={form}
@@ -1310,105 +1309,209 @@ const StressTestPage = () => {
                 dp_size: 1
               }}
             >
-              <Form.Item label="模型选择方式">
-                <Radio.Group 
-                  value={inputMode} 
-                  onChange={(e) => {
-                    setInputMode(e.target.value);
-                    // Clear form fields when switching modes
-                    form.resetFields(['model', 'deployment_method', 'dataset', 'dataset_path', 'api_url', 'model_name', 'instance_type', 'framework', 'tp_size', 'dp_size', 'image_width', 'image_height', 'image_num']);
-                  }}
-                >
-                  <Radio value="dropdown">
-                    <Space>
-                      <SettingOutlined />
-                      从列表选择
-                    </Space>
-                  </Radio>
-                  <Radio value="manual">
-                    <Space>
-                      <LinkOutlined />
-                      手动输入
-                    </Space>
-                  </Radio>
-                </Radio.Group>
-              </Form.Item>
+              <Row gutter={8} justify="space-between" align="middle" style={{ marginBottom: 16, padding: '8px 0' }}>
+                <Col flex="none">
+                  <Text strong style={{ fontSize: '14px' }}>模型选择方式:</Text>
+                </Col>
+                <Col flex="1" style={{ textAlign: 'left', paddingLeft: '16px' }}>
+                  <Radio.Group 
+                    value={inputMode} 
+                    onChange={(e) => {
+                      setInputMode(e.target.value);
+                      // Clear form fields when switching modes
+                      form.resetFields(['model', 'deployment_method', 'dataset', 'dataset_path', 'api_url', 'model_name', 'instance_type', 'framework', 'tp_size', 'dp_size', 'image_width', 'image_height', 'image_num']);
+                    }}
+                  >
+                    <Radio value="dropdown" style={{ marginRight: '24px' }}>
+                      <Space>
+                        <SettingOutlined />
+                        <span>从列表选择</span>
+                      </Space>
+                    </Radio>
+                    <Radio value="manual">
+                      <Space>
+                        <LinkOutlined />
+                        <span>手动输入</span>
+                      </Space>
+                    </Radio>
+                  </Radio.Group>
+                </Col>
+              </Row>
 
               {inputMode === 'dropdown' ? (
                 <>
-                  <Form.Item
-                    name="model"
-                    label="选择模型"
-                    rules={[{ required: true, message: '请选择要测试的模型' }]}
-                  >
-                    <Select 
-                      placeholder="选择模型"
-                      onChange={handleModelChange}
-                    >
-                      {models.map(model => (
-                        <Option key={model.key} value={model.key}>
-                          <Space>
-                            {model.type === 'bedrock' ? <CloudOutlined /> : <RocketOutlined />}
-                            {model.name}
-                            {model.tag && <Text type="secondary">({model.tag})</Text>}
-                            {model.supports_multimodal && <Text type="success" style={{ fontSize: '12px' }}>[VLM]</Text>}
-                          </Space>
-                        </Option>
-                      ))}
-                    </Select>
-                  </Form.Item>
-                  
-                  <Form.Item
-                    name="deployment_method"
-                    label="部署方式"
-                    rules={[{ required: true, message: '请选择部署方式' }]}
-                    initialValue="EMD"
-                  >
-                    <Select placeholder="选择部署方式">
-                      <Option value="EMD">EMD</Option>
-                      <Option value="HyperPod">HyperPod</Option>
-                      <Option value="EKS">EKS</Option>
-                      <Option value="EC2">EC2</Option>
-                    </Select>
-                  </Form.Item>
-
-                  <Form.Item
-                    name="dataset"
-                    label="数据集"
-                    rules={[{ required: true, message: '请选择数据集' }]}
-                    initialValue="random"
-                  >
-                    <Select 
-                      placeholder="选择数据集"
-                      onChange={(value) => {
-                        setDatasetType(value);
-                        // Force form to re-render to update conditional validation
-                        setTimeout(() => {
-                          form.validateFields(['input_tokens', 'output_tokens', 'image_width', 'image_height', 'image_num']);
-                        }, 0);
-                      }}
-                    >
-                      <Option value="random">random</Option>
-                      <Option value="random_vl">random_vl</Option>
-                      <Option value="openqa">openqa</Option>
-                      <Option value="longalpaca">longalpaca</Option>
-                      <Option value="flickr8k">flickr8k</Option>
-                      <Option value="custom">custom</Option>
-                    </Select>
-                  </Form.Item>
+                  {/* Main configuration row */}
+                  <Row gutter={8} justify="space-between">
+                    <Col flex="1">
+                      <Form.Item
+                        name="model"
+                        label="选择模型"
+                        rules={[{ required: true, message: '请选择要测试的模型' }]}
+                        style={{ marginBottom: 16 }}
+                      >
+                        <Select 
+                          placeholder="选择模型"
+                          onChange={handleModelChange}
+                        >
+                          {models.map(model => (
+                            <Option key={model.key} value={model.key}>
+                              <Space>
+                                {model.type === 'bedrock' ? <CloudOutlined /> : <RocketOutlined />}
+                                {model.name}
+                                {model.tag && <Text type="secondary">({model.tag})</Text>}
+                                {model.supports_multimodal && <Text type="success" style={{ fontSize: '12px' }}>[VLM]</Text>}
+                              </Space>
+                            </Option>
+                          ))}
+                        </Select>
+                      </Form.Item>
+                    </Col>
+                    <Col flex="1">
+                      <Form.Item
+                        name="deployment_method"
+                        label="部署方式"
+                        rules={[{ required: true, message: '请选择部署方式' }]}
+                        initialValue="EMD"
+                        style={{ marginBottom: 16 }}
+                      >
+                        <Select placeholder="选择部署方式">
+                          <Option value="EMD">EMD</Option>
+                          <Option value="HyperPod">HyperPod</Option>
+                          <Option value="EKS">EKS</Option>
+                          <Option value="EC2">EC2</Option>
+                        </Select>
+                      </Form.Item>
+                    </Col>
+                    <Col flex="1">
+                      <Form.Item
+                        name="dataset"
+                        label="数据集"
+                        rules={[{ required: true, message: '请选择数据集' }]}
+                        initialValue="random"
+                        style={{ marginBottom: 16 }}
+                      >
+                        <Select 
+                          placeholder="选择数据集"
+                          onChange={(value) => {
+                            setDatasetType(value);
+                            // Force form to re-render to update conditional validation
+                            setTimeout(() => {
+                              form.validateFields(['input_tokens', 'output_tokens', 'image_width', 'image_height', 'image_num']);
+                            }, 0);
+                          }}
+                        >
+                          <Option value="random">random</Option>
+                          <Option value="random_vl">random_vl</Option>
+                          <Option value="openqa">openqa</Option>
+                          <Option value="longalpaca">longalpaca</Option>
+                          <Option value="flickr8k">flickr8k</Option>
+                          <Option value="custom">custom</Option>
+                        </Select>
+                      </Form.Item>
+                    </Col>
+                    <Col flex="1">
+                      <Form.Item
+                        name="concurrency"
+                        label="并发数"
+                        rules={[
+                          { required: true, message: '请输入并发数' },
+                          {
+                            validator: (_, value) => {
+                              if (!value) return Promise.reject(new Error('请输入并发数'));
+                              
+                              // Parse comma-separated values
+                              const numbers = value.split(',').map(v => v.trim()).filter(v => v);
+                              const invalidNumbers = numbers.filter(n => isNaN(n) || parseInt(n) <= 0);
+                              
+                              if (invalidNumbers.length > 0) {
+                                return Promise.reject(new Error('请输入有效的正整数，用逗号分隔'));
+                              }
+                              
+                              // Cross-field validation
+                              const crossFieldError = validateFieldCount();
+                              if (crossFieldError) {
+                                return Promise.reject(new Error(crossFieldError));
+                              }
+                              
+                              return Promise.resolve();
+                            }
+                          }
+                        ]}
+                        style={{ marginBottom: 16 }}
+                      >
+                        <Input
+                          placeholder="1, 5, 10"
+                          style={{ width: '100%' }}
+                          onChange={() => {
+                            // Trigger validation for both fields when either changes
+                            setTimeout(() => {
+                              form.validateFields(['concurrency', 'num_requests']);
+                            }, 0);
+                          }}
+                        />
+                      </Form.Item>
+                    </Col>
+                    <Col flex="1">
+                      <Form.Item
+                        name="num_requests"
+                        label="请求总数"
+                        rules={[
+                          { required: true, message: '请输入请求总数' },
+                          {
+                            validator: (_, value) => {
+                              if (!value) return Promise.reject(new Error('请输入请求总数'));
+                              
+                              // Parse comma-separated values
+                              const numbers = value.split(',').map(v => v.trim()).filter(v => v);
+                              const invalidNumbers = numbers.filter(n => isNaN(n) || parseInt(n) <= 0);
+                              
+                              if (invalidNumbers.length > 0) {
+                                return Promise.reject(new Error('请输入有效的正整数，用逗号分隔'));
+                              }
+                              
+                              // Cross-field validation
+                              const crossFieldError = validateFieldCount();
+                              if (crossFieldError) {
+                                return Promise.reject(new Error(crossFieldError));
+                              }
+                              
+                              return Promise.resolve();
+                            }
+                          }
+                        ]}
+                        style={{ marginBottom: 16 }}
+                      >
+                        <Input
+                          placeholder="20, 100, 200"
+                          style={{ width: '100%' }}
+                          onChange={() => {
+                            // Trigger validation for both fields when either changes
+                            setTimeout(() => {
+                              form.validateFields(['concurrency', 'num_requests']);
+                            }, 0);
+                          }}
+                        />
+                      </Form.Item>
+                    </Col>
+                  </Row>
 
                   {datasetType === 'custom' && (
-                    <Form.Item
-                      name="dataset_path"
-                      label="数据集路径"
-                      rules={[{ required: true, message: '请输入数据集路径' }]}
-                      extra="请输入自定义数据集的完整路径"
-                    >
-                      <Input 
-                        placeholder="/path/to/your/dataset"
-                        prefix={<LinkOutlined />}
-                      />
-                    </Form.Item>
+                    <Row gutter={16}>
+                      <Col span={24}>
+                        <Form.Item
+                          name="dataset_path"
+                          label="数据集路径"
+                          rules={[{ required: true, message: '请输入数据集路径' }]}
+                          extra="请输入自定义数据集的完整路径"
+                          style={{ marginBottom: 16 }}
+                        >
+                          <Input 
+                            placeholder="/path/to/your/dataset"
+                            prefix={<LinkOutlined />}
+                          />
+                        </Form.Item>
+                      </Col>
+                    </Row>
                   )}
                 </>
               ) : (
@@ -1440,44 +1543,136 @@ const StressTestPage = () => {
                     />
                   </Form.Item>
                   
-                  <Form.Item
-                    name="deployment_method"
-                    label="部署方式"
-                    rules={[{ required: true, message: '请选择部署方式' }]}
-                    initialValue="EMD"
-                  >
-                    <Select placeholder="选择部署方式">
-                      <Option value="EMD">EMD</Option>
-                      <Option value="HyperPod">HyperPod</Option>
-                      <Option value="EKS">EKS</Option>
-                      <Option value="EC2">EC2</Option>
-                    </Select>
-                  </Form.Item>
-
-                  <Form.Item
-                    name="dataset"
-                    label="数据集"
-                    rules={[{ required: true, message: '请选择数据集' }]}
-                    initialValue="random"
-                  >
-                    <Select 
-                      placeholder="选择数据集"
-                      onChange={(value) => {
-                        setDatasetType(value);
-                        // Force form to re-render to update conditional validation
-                        setTimeout(() => {
-                          form.validateFields(['input_tokens', 'output_tokens', 'image_width', 'image_height', 'image_num']);
-                        }, 0);
-                      }}
-                    >
-                      <Option value="random">random</Option>
-                      <Option value="random_vl">random_vl</Option>
-                      <Option value="openqa">openqa</Option>
-                      <Option value="longalpaca">longalpaca</Option>
-                      <Option value="flickr8k">flickr8k</Option>
-                      <Option value="custom">custom</Option>
-                    </Select>
-                  </Form.Item>
+                  {/* Main configuration row for manual mode */}
+                  <Row gutter={8}>
+                    <Col span={6}>
+                      <Form.Item
+                        name="deployment_method"
+                        label="部署方式"
+                        rules={[{ required: true, message: '请选择部署方式' }]}
+                        initialValue="EMD"
+                        style={{ marginBottom: 16 }}
+                      >
+                        <Select placeholder="选择部署方式">
+                          <Option value="EMD">EMD</Option>
+                          <Option value="HyperPod">HyperPod</Option>
+                          <Option value="EKS">EKS</Option>
+                          <Option value="EC2">EC2</Option>
+                        </Select>
+                      </Form.Item>
+                    </Col>
+                    <Col span={6}>
+                      <Form.Item
+                        name="dataset"
+                        label="数据集"
+                        rules={[{ required: true, message: '请选择数据集' }]}
+                        initialValue="random"
+                        style={{ marginBottom: 16 }}
+                      >
+                        <Select 
+                          placeholder="选择数据集"
+                          onChange={(value) => {
+                            setDatasetType(value);
+                            // Force form to re-render to update conditional validation
+                            setTimeout(() => {
+                              form.validateFields(['input_tokens', 'output_tokens', 'image_width', 'image_height', 'image_num']);
+                            }, 0);
+                          }}
+                        >
+                          <Option value="random">random</Option>
+                          <Option value="random_vl">random_vl</Option>
+                          <Option value="openqa">openqa</Option>
+                          <Option value="longalpaca">longalpaca</Option>
+                          <Option value="flickr8k">flickr8k</Option>
+                          <Option value="custom">custom</Option>
+                        </Select>
+                      </Form.Item>
+                    </Col>
+                    <Col span={6}>
+                      <Form.Item
+                        name="concurrency"
+                        label="并发数"
+                        rules={[
+                          { required: true, message: '请输入并发数' },
+                          {
+                            validator: (_, value) => {
+                              if (!value) return Promise.reject(new Error('请输入并发数'));
+                              
+                              // Parse comma-separated values
+                              const numbers = value.split(',').map(v => v.trim()).filter(v => v);
+                              const invalidNumbers = numbers.filter(n => isNaN(n) || parseInt(n) <= 0);
+                              
+                              if (invalidNumbers.length > 0) {
+                                return Promise.reject(new Error('请输入有效的正整数，用逗号分隔'));
+                              }
+                              
+                              // Cross-field validation
+                              const crossFieldError = validateFieldCount();
+                              if (crossFieldError) {
+                                return Promise.reject(new Error(crossFieldError));
+                              }
+                              
+                              return Promise.resolve();
+                            }
+                          }
+                        ]}
+                        style={{ marginBottom: 16 }}
+                      >
+                        <Input
+                          placeholder="1, 5, 10"
+                          style={{ width: '100%' }}
+                          onChange={() => {
+                            // Trigger validation for both fields when either changes
+                            setTimeout(() => {
+                              form.validateFields(['concurrency', 'num_requests']);
+                            }, 0);
+                          }}
+                        />
+                      </Form.Item>
+                    </Col>
+                    <Col span={6}>
+                      <Form.Item
+                        name="num_requests"
+                        label="请求总数"
+                        rules={[
+                          { required: true, message: '请输入请求总数' },
+                          {
+                            validator: (_, value) => {
+                              if (!value) return Promise.reject(new Error('请求总数'));
+                              
+                              // Parse comma-separated values
+                              const numbers = value.split(',').map(v => v.trim()).filter(v => v);
+                              const invalidNumbers = numbers.filter(n => isNaN(n) || parseInt(n) <= 0);
+                              
+                              if (invalidNumbers.length > 0) {
+                                return Promise.reject(new Error('请输入有效的正整数，用逗号分隔'));
+                              }
+                              
+                              // Cross-field validation
+                              const crossFieldError = validateFieldCount();
+                              if (crossFieldError) {
+                                return Promise.reject(new Error(crossFieldError));
+                              }
+                              
+                              return Promise.resolve();
+                            }
+                          }
+                        ]}
+                        style={{ marginBottom: 16 }}
+                      >
+                        <Input
+                          placeholder="20, 100, 200"
+                          style={{ width: '100%' }}
+                          onChange={() => {
+                            // Trigger validation for both fields when either changes
+                            setTimeout(() => {
+                              form.validateFields(['concurrency', 'num_requests']);
+                            }, 0);
+                          }}
+                        />
+                      </Form.Item>
+                    </Col>
+                  </Row>
 
                   {datasetType === 'custom' && (
                     <Form.Item
@@ -1569,153 +1764,47 @@ const StressTestPage = () => {
                 </>
               )}
 
-              {/* <Alert
-                description="提醒：请求总数和并发数需数量相同，按顺序配对测试，如 '50,100,200' 与 '1,5,10' 进行 (50,1), (100,5), (200,10) 三组测试。"
-                type="info"
-                showIcon={false}
-                style={{ marginBottom: 8, padding: '4px 8px' }}
-              /> */}
-
-              <Form.Item
-                name="concurrency"
-                label="并发数"
-                rules={[
-                  { required: true, message: '请输入并发数' },
-                  {
-                    validator: (_, value) => {
-                      if (!value) return Promise.reject(new Error('请输入并发数'));
-                      
-                      // Parse comma-separated values
-                      const numbers = value.split(',').map(v => v.trim()).filter(v => v);
-                      const invalidNumbers = numbers.filter(n => isNaN(n) || parseInt(n) <= 0);
-                      
-                      if (invalidNumbers.length > 0) {
-                        return Promise.reject(new Error('请输入有效的正整数，用逗号分隔'));
-                      }
-                      
-                      // Cross-field validation
-                      const crossFieldError = validateFieldCount();
-                      if (crossFieldError) {
-                        return Promise.reject(new Error(crossFieldError));
-                      }
-                      
-                      return Promise.resolve();
-                    }
-                  }
-                ]}
-                extra="可以输入多个值，用英文逗号分隔，如: 1, 5, 10"
-              >
-                <Input
-                  placeholder="1, 5, 10"
-                  style={{ width: '100%' }}
-                  onChange={() => {
-                    // Trigger validation for both fields when either changes
-                    setTimeout(() => {
-                      form.validateFields(['concurrency', 'num_requests']);
-                    }, 0);
-                  }}
-                />
-              </Form.Item>
-
-              <Form.Item
-                name="num_requests"
-                label="请求总数"
-                rules={[
-                  { required: true, message: '请输入请求总数' },
-                  {
-                    validator: (_, value) => {
-                      if (!value) return Promise.reject(new Error('请输入请求总数'));
-                      
-                      // Parse comma-separated values
-                      const numbers = value.split(',').map(v => v.trim()).filter(v => v);
-                      const invalidNumbers = numbers.filter(n => isNaN(n) || parseInt(n) <= 0);
-                      
-                      if (invalidNumbers.length > 0) {
-                        return Promise.reject(new Error('请输入有效的正整数，用逗号分隔'));
-                      }
-                      
-                      // Cross-field validation
-                      const crossFieldError = validateFieldCount();
-                      if (crossFieldError) {
-                        return Promise.reject(new Error(crossFieldError));
-                      }
-                      
-                      return Promise.resolve();
-                    }
-                  }
-                ]}
-                extra="可以输入多个值，用英文逗号分隔，需要与并发数数量相同，如: 20, 100, 200"
-              >
-                <Input
-                  placeholder="20, 100, 200"
-                  style={{ width: '100%' }}
-                  onChange={() => {
-                    // Trigger validation for both fields when either changes
-                    setTimeout(() => {
-                      form.validateFields(['concurrency', 'num_requests']);
-                    }, 0);
-                  }}
-                />
-              </Form.Item>
-
-              {!shouldEnableTokenParams() && (
-                <div style={{ marginBottom: '12px' }}>
-                  <Text type="secondary" style={{ fontSize: '12px' }}>
-                    Token参数仅在LLM模型+random数据集或VLM模型+random_vl数据集时启用
-                  </Text>
-                </div>
-              )}
-              <Row gutter={8}>
-                <Col span={12}>
+              {/* Token and VLM Parameters */}
+              <Row gutter={8} justify="space-between" style={{ marginBottom: 16 }}>
+                <Col flex="1">
                   <Form.Item
                     name="input_tokens"
                     label="输入Token"
                     rules={shouldEnableTokenParams() ? [{ required: true, message: '请输入Token数量' }] : []}
+                    style={{ marginBottom: 0 }}
                   >
                     <InputNumber
                       style={{ width: '100%' }}
-                      placeholder="输入Token数量"
+                      placeholder="32"
                       min={1}
                       max={4000}
                       disabled={!shouldEnableTokenParams()}
                     />
                   </Form.Item>
                 </Col>
-                <Col span={12}>
+                <Col flex="1">
                   <Form.Item
                     name="output_tokens"
                     label="输出Token"
                     rules={shouldEnableTokenParams() ? [{ required: true, message: '请输入Token数量' }] : []}
+                    style={{ marginBottom: 0 }}
                   >
                     <InputNumber
                       style={{ width: '100%' }}
-                      placeholder="输出Token数量"
+                      placeholder="32"
                       min={1}
                       max={4000}
                       disabled={!shouldEnableTokenParams()}
                     />
                   </Form.Item>
                 </Col>
-              </Row>
-
-              {/* VLM Parameters - show for all models but conditionally enable */}
-              <Divider orientation="left" style={{ margin: '16px 0 8px 0' }}>
-                <Text type="secondary" style={{ fontSize: '14px' }}>
-                  VLM 图像参数
-                  {!shouldEnableImageParams() && (
-                    <Text type="secondary" style={{ fontSize: '12px', marginLeft: '8px' }}>
-                      (仅在VLM模型+random_vl数据集时启用)
-                    </Text>
-                  )}
-                </Text>
-              </Divider>
-              <Row gutter={8}>
-                <Col span={8}>
+                <Col flex="1">
                   <Form.Item
                     name="image_width"
                     label="图像宽度"
                     rules={shouldEnableImageParams() ? [{ required: true, message: '请输入图像宽度' }] : []}
                     initialValue={512}
+                    style={{ marginBottom: 0 }}
                   >
                     <InputNumber
                       style={{ width: '100%' }}
@@ -1727,12 +1816,13 @@ const StressTestPage = () => {
                     />
                   </Form.Item>
                 </Col>
-                <Col span={8}>
+                <Col flex="1">
                   <Form.Item
                     name="image_height"
                     label="图像高度"
                     rules={shouldEnableImageParams() ? [{ required: true, message: '请输入图像高度' }] : []}
                     initialValue={512}
+                    style={{ marginBottom: 0 }}
                   >
                     <InputNumber
                       style={{ width: '100%' }}
@@ -1744,12 +1834,13 @@ const StressTestPage = () => {
                     />
                   </Form.Item>
                 </Col>
-                <Col span={8}>
+                <Col flex="1">
                   <Form.Item
                     name="image_num"
                     label="图像数量"
                     rules={shouldEnableImageParams() ? [{ required: true, message: '请输入图像数量' }] : []}
                     initialValue={1}
+                    style={{ marginBottom: 0 }}
                   >
                     <InputNumber
                       style={{ width: '100%' }}
@@ -1761,6 +1852,14 @@ const StressTestPage = () => {
                   </Form.Item>
                 </Col>
               </Row>
+              
+              {/* Parameter enablement info */}
+              <div style={{ marginBottom: '16px' }}>
+                <Text type="secondary" style={{ fontSize: '12px' }}>
+                  Token参数仅在LLM模型+random数据集或VLM模型+random_vl数据集时启用；
+                  图像参数仅在VLM模型+random_vl数据集时启用
+                </Text>
+              </div>
 
               <Form.Item>
                 <Button
@@ -1777,9 +1876,9 @@ const StressTestPage = () => {
             </Form>
           </Card>
         </Col>
-
+        
         {/* 测试状态和进度 */}
-        <Col span={16}>
+        <Col span={24}>
           <Space direction="vertical" style={{ width: '100%' }} size="large">
             {/* 当前测试状态 */}
             {currentSession && (
