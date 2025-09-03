@@ -42,6 +42,7 @@ const StressTestPage = () => {
   const [loading, setLoading] = useState(false);
   const [models, setModels] = useState([]);
   const [inputMode, setInputMode] = useState('dropdown'); // 'dropdown' or 'manual'
+  const [datasetType, setDatasetType] = useState('random');
   
   // 从localStorage恢复测试会话状态
   const [testSessions, setTestSessions] = useState(() => {
@@ -384,6 +385,7 @@ const StressTestPage = () => {
         input_tokens: 32,
         output_tokens: 32,
         deployment_method: "EMD",
+        dataset: "random",
         instance_type: "g5.2xlarge",
         framework: "vllm",
         tp_size: 1,
@@ -1146,6 +1148,7 @@ const StressTestPage = () => {
                 input_tokens: 32,
                 output_tokens: 32,
                 deployment_method: "EMD",
+                dataset: "random",
                 instance_type: "g5.2xlarge",
                 framework: "vllm",
                 tp_size: 1,
@@ -1158,7 +1161,7 @@ const StressTestPage = () => {
                   onChange={(e) => {
                     setInputMode(e.target.value);
                     // Clear form fields when switching modes
-                    form.resetFields(['model', 'deployment_method', 'api_url', 'model_name', 'instance_type', 'framework', 'tp_size', 'dp_size']);
+                    form.resetFields(['model', 'deployment_method', 'dataset', 'dataset_path', 'api_url', 'model_name', 'instance_type', 'framework', 'tp_size', 'dp_size']);
                   }}
                 >
                   <Radio value="dropdown">
@@ -1209,6 +1212,39 @@ const StressTestPage = () => {
                       <Option value="EC2">EC2</Option>
                     </Select>
                   </Form.Item>
+
+                  <Form.Item
+                    name="dataset"
+                    label="数据集"
+                    rules={[{ required: true, message: '请选择数据集' }]}
+                    initialValue="random"
+                  >
+                    <Select 
+                      placeholder="选择数据集"
+                      onChange={(value) => setDatasetType(value)}
+                    >
+                      <Option value="random">random</Option>
+                      <Option value="random_vl">random_vl</Option>
+                      <Option value="openqa">openqa</Option>
+                      <Option value="longalpaca">longalpaca</Option>
+                      <Option value="flickr8k">flickr8k</Option>
+                      <Option value="custom">custom</Option>
+                    </Select>
+                  </Form.Item>
+
+                  {datasetType === 'custom' && (
+                    <Form.Item
+                      name="dataset_path"
+                      label="数据集路径"
+                      rules={[{ required: true, message: '请输入数据集路径' }]}
+                      extra="请输入自定义数据集的完整路径"
+                    >
+                      <Input 
+                        placeholder="/path/to/your/dataset"
+                        prefix={<LinkOutlined />}
+                      />
+                    </Form.Item>
+                  )}
                 </>
               ) : (
                 <>
@@ -1251,6 +1287,39 @@ const StressTestPage = () => {
                       <Option value="EC2">EC2</Option>
                     </Select>
                   </Form.Item>
+
+                  <Form.Item
+                    name="dataset"
+                    label="数据集"
+                    rules={[{ required: true, message: '请选择数据集' }]}
+                    initialValue="random"
+                  >
+                    <Select 
+                      placeholder="选择数据集"
+                      onChange={(value) => setDatasetType(value)}
+                    >
+                      <Option value="random">random</Option>
+                      <Option value="random_vl">random_vl</Option>
+                      <Option value="openqa">openqa</Option>
+                      <Option value="longalpaca">longalpaca</Option>
+                      <Option value="flickr8k">flickr8k</Option>
+                      <Option value="custom">custom</Option>
+                    </Select>
+                  </Form.Item>
+
+                  {datasetType === 'custom' && (
+                    <Form.Item
+                      name="dataset_path"
+                      label="数据集路径"
+                      rules={[{ required: true, message: '请输入数据集路径' }]}
+                      extra="请输入自定义数据集的完整路径"
+                    >
+                      <Input 
+                        placeholder="/path/to/your/dataset"
+                        prefix={<LinkOutlined />}
+                      />
+                    </Form.Item>
+                  )}
                   
                   {/* Manual deployment configuration */}
                   <Row gutter={16}>
