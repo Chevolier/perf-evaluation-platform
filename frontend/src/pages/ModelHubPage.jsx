@@ -22,7 +22,8 @@ import {
   ThunderboltOutlined,
   CheckCircleOutlined,
   DeleteOutlined,
-  RocketOutlined
+  RocketOutlined,
+  ReloadOutlined
 } from '@ant-design/icons';
 
 const { Title, Text, Paragraph } = Typography;
@@ -629,13 +630,34 @@ const ModelHubPage = () => {
   return (
     <div style={{ padding: '24px', background: '#f5f5f5', minHeight: '100vh' }}>
       <div style={{ marginBottom: 24 }}>
-        <Space>
-          <RobotOutlined style={{ fontSize: '24px', color: '#1890ff' }} />
-          <Title level={2} style={{ margin: 0 }}>模型商店</Title>
-        </Space>
-        <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
-          管理和部署所有可用的推理模型
-        </Text>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div>
+            <Space>
+              <RobotOutlined style={{ fontSize: '24px', color: '#1890ff' }} />
+              <Title level={2} style={{ margin: 0 }}>模型商店</Title>
+            </Space>
+            <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
+              管理和部署所有可用的推理模型
+            </Text>
+          </div>
+          <Button
+            icon={<ReloadOutlined />}
+            onClick={() => {
+              console.log('🔄 Manual refresh triggered - clearing cache');
+              // Clear localStorage cache to force fresh data
+              localStorage.removeItem('modelHub_modelStatus');
+              localStorage.removeItem('modelHub_cacheTimestamp');
+              // Set loading state to show "检查中..." instead of "检查失败"
+              setInitialLoading(true);
+              // Don't clear modelStatus immediately - let fetchModelData handle it
+              // Trigger fresh data fetch
+              fetchModelData();
+            }}
+            loading={initialLoading}
+          >
+            刷新状态
+          </Button>
+        </div>
       </div>
 
       {/* Show UI structure immediately, even during initial loading */}
