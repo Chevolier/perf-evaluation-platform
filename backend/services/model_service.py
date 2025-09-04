@@ -178,7 +178,9 @@ class ModelService:
         
         # Fallback to cached status or default
         if model_key in self._deployment_status:
-            return self._deployment_status[model_key]
+            cached_status = self._deployment_status[model_key]
+            # Return cached status, which should be updated by _get_current_emd_models if deletion completed
+            return cached_status
         
         return {
             "status": "not_deployed",
@@ -305,6 +307,26 @@ class ModelService:
                             "status": stack_status or pipeline_status,
                             "stage": model.get("stage_name", "")
                         }
+            
+            # Check for models that were in "deleting" status but are no longer in EMD
+            # These should be marked as "not_deployed" since deletion completed
+            all_emd_model_keys = set(reverse_mapping.values())
+            current_emd_model_keys = set(deployed.keys()) | set(inprogress.keys()) | set(failed.keys())
+            deleted_model_keys = all_emd_model_keys - current_emd_model_keys
+            
+            # Clear deleting status for models that are no longer in EMD
+            for model_key in deleted_model_keys:
+                if model_key in self._deployment_status:
+                    current_status = self._deployment_status[model_key].get("status")
+                    if current_status == "deleting":
+                        # Model was being deleted and is now gone from EMD - deletion completed
+                        self._deployment_status[model_key] = {
+                            "status": "not_deployed",
+                            "message": "Model successfully deleted",
+                            "tag": None
+                        }
+                        logger.info(f"✅ Model {model_key} deletion completed - marked as not_deployed")
+                        print(f"✅ DEBUG: Model {model_key} deletion completed - marked as not_deployed")
             
             result = {
                 "deployed": deployed,

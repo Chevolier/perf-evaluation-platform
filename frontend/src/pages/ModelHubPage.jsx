@@ -22,7 +22,8 @@ import {
   ThunderboltOutlined,
   CheckCircleOutlined,
   DeleteOutlined,
-  RocketOutlined
+  RocketOutlined,
+  ReloadOutlined
 } from '@ant-design/icons';
 
 const { Title, Text, Paragraph } = Typography;
@@ -350,6 +351,47 @@ const ModelHubPage = () => {
     fetchModelData();
   }, [fetchModelData]);
 
+  // Polling for models in deleting or deploying status
+  useEffect(() => {
+    const pollInterval = setInterval(() => {
+      // Check if there are any models in transitional states
+      const hasTransitionalModels = Object.values(modelStatus).some(status => 
+        ['deleting', 'inprogress', 'init'].includes(status?.status)
+      );
+      
+      if (hasTransitionalModels) {
+        console.log('🔄 Polling for transitional model status updates...');
+        // Fetch only status for models that need updates
+        const transitionalModelKeys = Object.keys(modelStatus).filter(key => 
+          ['deleting', 'inprogress', 'init'].includes(modelStatus[key]?.status)
+        );
+        
+        if (transitionalModelKeys.length > 0) {
+          fetch('/api/check-model-status', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ models: transitionalModelKeys })
+          })
+          .then(response => response.json())
+          .then(data => {
+            if (data.model_status) {
+              console.log('🔄 Status update received:', data.model_status);
+              setModelStatus(prev => ({
+                ...prev,
+                ...data.model_status
+              }));
+            }
+          })
+          .catch(error => {
+            console.warn('Status polling failed:', error);
+          });
+        }
+      }
+    }, 10000); // Poll every 10 seconds
+    
+    return () => clearInterval(pollInterval);
+  }, [modelStatus]);
+
   const handleCleanup = useCallback(async (modelKey) => {
     try {
       console.log(`Starting cleanup for model: ${modelKey}`);
@@ -588,13 +630,33 @@ const ModelHubPage = () => {
   return (
     <div style={{ padding: '24px', background: '#f5f5f5', minHeight: '100vh' }}>
       <div style={{ marginBottom: 24 }}>
-        <Space>
-          <RobotOutlined style={{ fontSize: '24px', color: '#1890ff' }} />
-          <Title level={2} style={{ margin: 0 }}>模型商店</Title>
-        </Space>
-        <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
-          管理和部署所有可用的推理模型
-        </Text>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div>
+            <Space>
+              <RobotOutlined style={{ fontSize: '24px', color: '#1890ff' }} />
+              <Title level={2} style={{ margin: 0 }}>模型商店</Title>
+            </Space>
+            <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
+              管理和部署所有可用的推理模型
+            </Text>
+          </div>
+          <Button
+            icon={<ReloadOutlined />}
+            onClick={() => {
+              console.log('🔄 Manual refresh triggered - clearing cache');
+              // Clear localStorage cache to force fresh data
+              localStorage.removeItem('modelHub_modelStatus');
+              localStorage.removeItem('modelHub_cacheTimestamp');
+              // Clear current status state
+              setModelStatus({});
+              // Trigger fresh data fetch
+              fetchModelData();
+            }}
+            loading={initialLoading}
+          >
+            刷新状态
+          </Button>
+        </div>
       </div>
 
       {/* Show UI structure immediately, even during initial loading */}
