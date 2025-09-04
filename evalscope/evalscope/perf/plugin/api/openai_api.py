@@ -141,9 +141,10 @@ class OpenaiPlugin(DefaultApiPlugin):
                     
                     # For handling None content 
                     delta_content = None
-                    for k, v in delta.items():
-                        if v is not None:
-                            delta_content = v # delta['content']
+                    if 'content' in delta and delta['content'] is not None:
+                        delta_content = delta['content']                 
+                    elif 'reasoning_content' in delta and delta['reasoning_content'] is not None:
+                        delta_content = delta['reasoning_content']
 
                     if delta_content is not None:  # For handling None content and with reasoning tokens
                         delta_contents.setdefault(idx, []).append(delta_content)
