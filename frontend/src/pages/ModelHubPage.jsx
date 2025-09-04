@@ -350,11 +350,87 @@ const ModelHubPage = () => {
     fetchModelData();
   }, [fetchModelData]);
 
-  const handleCleanup = useCallback((modelKey) => {
-    // TODO: 实现清理资源逻辑
-    console.log(`Cleanup requested for model: ${modelKey}`);
-    // 这里以后会调用清理API
-    // message.info(`${modelKey} 清理功能开发中...`);
+  const handleCleanup = useCallback(async (modelKey) => {
+    try {
+      console.log(`Starting cleanup for model: ${modelKey}`);
+      
+      // Show loading state immediately
+      setModelStatus(prev => ({
+        ...prev,
+        [modelKey]: {
+          ...prev[modelKey],
+          status: 'deleting',
+          message: '正在停止模型...'
+        }
+      }));
+      
+      const response = await fetch('/api/delete-model', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ 
+          model_key: modelKey
+        })
+      });
+      
+      if (response.ok) {
+        const responseData = await response.json();
+        console.log('Deletion response:', responseData);
+        
+        if (responseData.success) {
+          message.success(`${modelKey} 停止成功`);
+          
+          // Update status to deleting (will be updated by status polling)
+          setModelStatus(prev => ({
+            ...prev,
+            [modelKey]: {
+              status: 'deleting',
+              message: '正在停止中...',
+              tag: responseData.tag
+            }
+          }));
+          
+        } else {
+          message.error(`停止失败: ${responseData.error || '未知错误'}`);
+          
+          // Revert status on failure
+          setModelStatus(prev => ({
+            ...prev,
+            [modelKey]: {
+              ...prev[modelKey],
+              message: `停止失败: ${responseData.error || '未知错误'}`
+            }
+          }));
+        }
+        
+      } else {
+        const errorText = await response.text();
+        console.error('Deletion failed:', response.status, errorText);
+        message.error(`停止请求失败 (${response.status}): ${errorText}`);
+        
+        // Revert status on failure
+        setModelStatus(prev => ({
+          ...prev,
+          [modelKey]: {
+            ...prev[modelKey],
+            message: `停止请求失败: ${errorText}`
+          }
+        }));
+      }
+    } catch (error) {
+      console.error('停止模型失败:', error);
+      message.error('停止请求失败');
+      
+      // Revert status on error
+      setModelStatus(prev => ({
+        ...prev,
+        [modelKey]: {
+          ...prev[modelKey],
+          message: '停止请求失败'
+        }
+      }));
+    }
   }, []);
 
 
@@ -386,6 +462,8 @@ const ModelHubPage = () => {
         return <Tag color="warning">部署失败</Tag>;
       case 'inprogress':
         return <Tag color="processing">部署中</Tag>;
+      case 'deleting':
+        return <Tag color="processing">停止中</Tag>;
       case 'init':
         return <Tag color="processing">初始化</Tag>;
       default:
@@ -398,9 +476,10 @@ const ModelHubPage = () => {
     
     const status = modelStatus[model.key];
     
-    // 如果已部署或正在部署中，不显示复选框
+    // 如果已部署或正在部署中或正在删除中，不显示复选框
     if (status?.status === 'available' || status?.status === 'deployed' || 
-        status?.status === 'inprogress' || status?.status === 'init') {
+        status?.status === 'inprogress' || status?.status === 'init' || 
+        status?.status === 'deleting') {
       return null;
     }
     
@@ -419,7 +498,7 @@ const ModelHubPage = () => {
     
     const status = modelStatus[model.key];
     
-    // 只有在已部署状态下才显示清理按钮
+    // 只有在已部署状态下才显示清理按钮，删除过程中显示禁用状态
     if (status?.status === 'available' || status?.status === 'deployed') {
       return (
         <Button 
@@ -430,6 +509,19 @@ const ModelHubPage = () => {
           style={{ width: '100%' }}
         >
           停止
+        </Button>
+      );
+    } else if (status?.status === 'deleting') {
+      return (
+        <Button 
+          danger
+          size="small"
+          icon={<DeleteOutlined />}
+          loading
+          disabled
+          style={{ width: '100%' }}
+        >
+          停止中
         </Button>
       );
     }

@@ -8,6 +8,7 @@ from datetime import datetime
 try:
     from emd.sdk.status import get_model_status
     from emd.sdk.deploy import deploy as emd_deploy
+    from emd.sdk.destroy import destroy as emd_destroy
     EMD_AVAILABLE = True
 except ImportError:
     EMD_AVAILABLE = False
@@ -629,6 +630,8 @@ class ModelService:
             "deployed": "deployed",
             "deploying": "inprogress",  # Map 'deploying' to 'inprogress' for frontend
             "inprogress": "inprogress",
+            "deleting": "deleting",
+            "delete_failed": "failed",
             "not_deployed": "not_deployed",
             "failed": "failed",
             "unknown": "unknown"
@@ -679,4 +682,118 @@ class ModelService:
             return {
                 "success": False,
                 "error": str(e)
+            }
+    
+    def delete_emd_model(self, model_key: str) -> Dict[str, Any]:
+        """Delete an EMD model deployment.
+        
+        Args:
+            model_key: Model to delete
+            
+        Returns:
+            Deletion result
+        """
+        if not self.registry.is_emd_model(model_key):
+            return {
+                "success": False,
+                "error": f"Model {model_key} not found in EMD registry"
+            }
+        
+        # Get current deployment info to find the tag
+        current_status = self.get_emd_deployment_status(model_key)
+        model_tag = current_status.get("tag")
+        
+        if not model_tag:
+            # Try to get tag from current EMD models
+            try:
+                current_models = self._get_current_emd_models()
+                for category in ["deployed", "inprogress", "failed"]:
+                    if model_key in current_models.get(category, {}):
+                        model_tag = current_models[category][model_key].get("tag")
+                        break
+            except Exception as e:
+                logger.warning(f"Failed to get current tag for {model_key}: {e}")
+        
+        if not model_tag:
+            return {
+                "success": False,
+                "error": f"Cannot find deployment tag for model {model_key}. Model may not be deployed."
+            }
+        
+        model_config = self.registry.get_model_info(model_key, "emd")
+        model_path = model_config.get("model_path", model_key)
+        
+        # Update status to indicate deletion in progress
+        self._deployment_status[model_key] = {
+            "status": "deleting",
+            "message": f"Deleting {model_key} with tag {model_tag}",
+            "tag": model_tag,
+            "started_at": datetime.now().isoformat()
+        }
+        
+        # Trigger actual EMD deletion
+        if EMD_AVAILABLE:
+            try:
+                logger.info(f"Starting EMD deletion for {model_key} (model_path: {model_path}) with tag {model_tag}")
+                print(f"🗑️ DEBUG: Starting EMD deletion for {model_key} (model_path: {model_path}) with tag {model_tag}")
+                
+                # Call EMD destroy using the new recommended format
+                model_identifier = f"{model_path}/{model_tag}"
+                result = emd_destroy(
+                    model_identifier=model_identifier,
+                    waiting_until_complete=False  # Don't wait, return immediately
+                )
+                
+                logger.info(f"EMD deletion initiated for {model_key}: {result}")
+                print(f"🗑️ DEBUG: EMD deletion result for {model_key}: {result}")
+                
+                # Update status to indicate deletion in progress
+                self._deployment_status[model_key] = {
+                    "status": "deleting",
+                    "message": f"Deletion in progress for {model_key}",
+                    "tag": model_tag,
+                    "started_at": datetime.now().isoformat()
+                }
+                
+                return {
+                    "success": True,
+                    "message": f"Deletion started for {model_key}",
+                    "tag": model_tag,
+                    "model_key": model_key,
+                    "deletion_result": result
+                }
+                
+            except Exception as e:
+                logger.error(f"Failed to delete {model_key} via EMD: {e}")
+                print(f"❌ DEBUG: Failed to delete {model_key} via EMD: {e}")
+                
+                # Update status to failed
+                self._deployment_status[model_key] = {
+                    "status": "delete_failed",
+                    "message": f"Deletion failed: {str(e)}",
+                    "tag": model_tag,
+                    "error": str(e)
+                }
+                return {
+                    "success": False,
+                    "error": f"Deletion failed: {str(e)}",
+                    "model_key": model_key
+                }
+        else:
+            logger.warning("EMD SDK not available - deletion will be mocked")
+            logger.info(f"Mock deletion started for {model_key} with tag {model_tag}")
+            
+            # For mock, immediately mark as not deployed
+            self._deployment_status[model_key] = {
+                "status": "not_deployed",
+                "message": "Model deleted (mock)",
+                "tag": None
+            }
+            
+            return {
+                "success": True,
+                "message": f"Mock deletion completed for {model_key}",
+                "tag": model_tag,
+                "model_key": model_key,
+                "note": "EMD SDK not available - this is a mock deletion"
             }

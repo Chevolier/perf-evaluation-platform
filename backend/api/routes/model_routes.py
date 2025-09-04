@@ -112,3 +112,19 @@ def set_emd_tag():
     except Exception as e:
         logger.error(f"Error setting EMD tag: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
+@model_bp.route('/delete-model', methods=['POST'])
+def delete_model():
+    """Delete an EMD model deployment."""
+    try:
+        data = request.get_json() or {}
+        model_key = data.get('model_key')
+        
+        if not model_key:
+            return jsonify({"success": False, "error": "Model key is required"}), 400
+        
+        result = model_service.delete_emd_model(model_key)
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Error deleting model: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
