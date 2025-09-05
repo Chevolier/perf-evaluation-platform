@@ -893,7 +893,7 @@ except Exception as e:
             # Calculate timeout based on cartesian product (evalscope runs all combinations)
             num_combinations = len(num_requests_list) * len(concurrency_list)
             base_timeout = 120  # 2 minutes per combination
-            total_timeout = max(600, num_combinations * base_timeout)  # At least 10 minutes
+            total_timeout = max(7200, num_combinations * base_timeout)  # At least 2 hours
             
             logger.info(f"[DEBUG] Running {num_combinations} combinations ({len(concurrency_list)} concurrency × {len(num_requests_list)} requests)")
             logger.info(f"[DEBUG] Setting timeout to {total_timeout} seconds ({total_timeout/60:.1f} minutes)")
