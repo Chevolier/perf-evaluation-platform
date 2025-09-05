@@ -689,12 +689,16 @@ class StressTestService:
         image_height = test_params.get('image_height', 512)
         image_num = test_params.get('image_num', 1)
         image_format = test_params.get('image_format', 'RGB')
+        connect_timeout = test_params.get('connect_timeout', 3600) # 1 hour
+        read_timeout = test_params.get('read_timeout', 3600)
         
         logger.info(f"[DEBUG] Raw parameters from frontend:")
         logger.info(f"[DEBUG]   num_requests: {num_requests_list} (type: {type(num_requests_list)})")
         logger.info(f"[DEBUG]   concurrency: {concurrency_list} (type: {type(concurrency_list)})")
         logger.info(f"[DEBUG]   input_tokens: {input_tokens} (type: {type(input_tokens)})")
         logger.info(f"[DEBUG]   output_tokens: {output_tokens} (type: {type(output_tokens)})")
+        logger.info(f"[DEBUG]  connect_timeout: {connect_timeout} (type: {type(connect_timeout)})")
+        logger.info(f"[DEBUG]  read_timeout: {read_timeout} (type: {type(read_timeout)})")
         
         # Convert to lists if single values were provided for backward compatibility
         if not isinstance(num_requests_list, list):
@@ -847,6 +851,8 @@ try:
         temperature={temperature},
         outputs_dir='{output_dir}',
         stream=True,
+        connect_timeout={connect_timeout},
+        read_timeout={read_timeout},
         seed=42{', image_width=' + str(image_width) + ', image_height=' + str(image_height) + ', image_format="' + image_format + '", image_num=' + str(image_num) if has_vlm_params else ''}
     )
     
@@ -893,7 +899,7 @@ except Exception as e:
             # Calculate timeout based on cartesian product (evalscope runs all combinations)
             num_combinations = len(num_requests_list) * len(concurrency_list)
             base_timeout = 120  # 2 minutes per combination
-            total_timeout = max(7200, num_combinations * base_timeout)  # At least 2 hours
+            total_timeout = max(3600, num_combinations * base_timeout)  # At least 2 hours
             
             logger.info(f"[DEBUG] Running {num_combinations} combinations ({len(concurrency_list)} concurrency × {len(num_requests_list)} requests)")
             logger.info(f"[DEBUG] Setting timeout to {total_timeout} seconds ({total_timeout/60:.1f} minutes)")
@@ -1887,6 +1893,9 @@ except Exception as e:
         temperature = test_params.get('temperature', 0.1)
         dataset = test_params.get('dataset', 'random')
         dataset_path = test_params.get('dataset_path', '')
+
+        connect_timeout = test_params.get("connect_timeout", 3600)
+        read_timeout = test_params.get("read_timeout", 3600)
         
         # VLM parameters
         image_width = test_params.get('image_width', 512)
@@ -1986,7 +1995,8 @@ except Exception as e:
             
             logger.info(f"[DEBUG] Custom API Token parameters: input_tokens={input_tokens}, output_tokens={output_tokens}")
             logger.info(f"[DEBUG] Custom API Evalscope config: min_prompt_length={min_prompt_length}, max_prompt_length={max_prompt_length}, min_tokens={min_tokens}, max_tokens={max_tokens}")
-            
+            logger.info(f"[DEBUG] Custom API Token parameters: connect_timeout={connect_timeout}, read_timeout={read_timeout}")
+
             # Get appropriate tokenizer path based on model name
             tokenizer_path = self._get_tokenizer_path(model_name)
             logger.info(f"[DEBUG] Using tokenizer path: {tokenizer_path}")
@@ -2037,6 +2047,8 @@ try:
         temperature={temperature},
         outputs_dir='{output_dir}',
         stream=True,
+        connect_timeout={connect_timeout},
+        read_timeout={read_timeout},
         seed=42{', image_width=' + str(image_width) + ', image_height=' + str(image_height) + ', image_format="' + image_format + '", image_num=' + str(image_num) if has_vlm_params else ''}
     )
     
@@ -2073,7 +2085,7 @@ except Exception as e:
             # Calculate timeout based on cartesian product (evalscope runs all combinations)
             num_combinations = len(num_requests_list) * len(concurrency_list)
             base_timeout = 120  # 2 minutes per combination
-            total_timeout = max(600, num_combinations * base_timeout)  # At least 10 minutes
+            total_timeout = max(3600, num_combinations * base_timeout)  # At least 1 hour
             
             logger.info(f"[DEBUG] Custom API - Running {num_combinations} combinations ({len(concurrency_list)} concurrency × {len(num_requests_list)} requests)")
             logger.info(f"[DEBUG] Custom API - Setting timeout to {total_timeout} seconds ({total_timeout/60:.1f} minutes)")
