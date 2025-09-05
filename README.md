@@ -133,10 +133,10 @@ cd frontend && npm start
 - **Health Check**: http://localhost:5000/health
 
 ## Model Deployment
-Currently, this platform supports 1-click model deployment using emd. But the vllm version may not be the latest version. To evaluate the model's best performance, it is sugggested to deploy a model on a local EC2 instance using the latest vllm or sglang version, then manually input api_url and model_name in the 在线体验 or 性能评测 pages. 
+Currently, this platform supports 1-click model deployment using emd. But the vllm version may not be the latest. To evaluate the model's best performance, it is sugggested to deploy a model on a local EC2 instance using the latest vllm or sglang, then manually input api_url and model_name on the 在线体验 or 性能评测 pages. 
 
 ### Local EC2 model deployment
-To use vllm to start a server on an g5.xlarge instance:
+To use vllm to start a server on an g5.2xlarge instance:
 
 ```bash
 # enable-prompt-tokens-details would help to show token usage info in response
@@ -311,17 +311,6 @@ python tests/test_new_system.py
 curl -X POST http://localhost:5000/api/check-model-status \
   -H "Content-Type: application/json" \
   -d '{"models": ["qwen2-vl-7b"]}'
-```
-
-### Logging and Debug
-
-**Backend Logs**: Located in `logs/` directory
-```bash
-# View backend logs
-tail -f logs/development.log
-
-# Enable debug logging endpoint
-curl http://localhost:5000/debug/logging
 ```
 
 **Frontend Debugging**: Use browser developer tools
