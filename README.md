@@ -82,6 +82,12 @@ export AWS_SECRET_ACCESS_KEY=your_secret
 export AWS_SESSION_TOKEN=your_token  # if using temporary credentials
 ```
 
+Configure easy-model-deployer (emd) for 1-click model deployment using emd.
+
+```bash
+emd bootstrap
+```
+
 **2. Frontend Environment**
 
 First, please install node js using the following commands in Linux. In other systems, please follow https://nodejs.org/en/download/ to install.
@@ -126,18 +132,27 @@ cd frontend && npm start
 - **Backend API**: http://localhost:5000
 - **Health Check**: http://localhost:5000/health
 
+## Model Deployment
+Currently, this platform supports 1-click model deployment using emd. But the vllm version may not be the latest version. To evaluate the model's best performance, it is sugggested to deploy a model on a local EC2 instance using the latest vllm or sglang version, then manually input api_url and model_name in the 在线体验 or 性能评测 pages. 
 
-## Local EC2 model deployment
+### Local EC2 model deployment
 To use vllm to start a server on an g5.xlarge instance:
 
 ```bash
 # enable-prompt-tokens-details would help to show token usage info in response
-vllm serve /home/ec2-user/SageMaker/efs/Models/Qwen3-8B \
+vllm serve Qwen/Qwen3-8B \
 	--gpu-memory-utilization 0.9 \
 	--max_model_len 2048 \
   --enable-prompt-tokens-details
 
-nohup vllm serve /home/ec2-user/SageMaker/efs/Models/Qwen2.5-VL-7B-Instruct --port 8000 --host 0.0.0.0 --dtype bfloat16 --gpu-memory-utilization 0.9 --max_model_len 2048 --limit-mm-per-prompt '{"images": 1, "videos": 1}' --enable-prompt-tokens-details >logs/serve_qwen2.5-vl-7bi.out 2>&1 &
+nohup vllm serve Qwen/Qwen2.5-VL-7B-Instruct \
+     --host 0.0.0.0 --port 8000 \
+     --dtype bfloat16\
+    --gpu-memory-utilization 0.9 \
+    --max_model_len 2048 \
+    --limit-mm-per-prompt '{"images": 1, "videos": 1}' \
+    --enable-prompt-tokens-details \
+    >logs/serve_qwen2.5-vl-7bi.out 2>&1 &
 ```
 You will obtain:
 Api url: http://0.0.0.0:8000/v1/chat/completions
@@ -148,10 +163,10 @@ Then use the above api url and model name to do stress test.
 ## 📖 Platform Overview
 
 ### The frontend has 4 pages:
-1. 模型部署: Used for 1-click model deployment using different deployment methods like Amazon SageMaker Endpoint, Amazon SageMaker HyperPod, EKS, and EC2, different instances like g5.xlarge, g6e.xlarge, p4d.xlarge, etc., different inference frameworks like vllm, sglang, etc.
-2. 在线体验: 
-3. 性能评测:
-4. 结果展示
+1. 模型部署: Supports 1-click model deployment on Amazon SageMaker Endpoint, standalone deployment on Amazon SageMaker HyperPod, EKS, and EC2, supports selecting among different instances like g5.xlarge, g6e.xlarge, p4d.xlarge, etc., different inference frameworks like vllm, sglang, etc.
+2. 在线体验: Supports two ways to test the model: a. If you deployed the model using step 1, you'll find the model in the list, and you can choose the model to test. b. If you deployed a model manually, you can input your OpenAI-compatible api url and model name and test it directly.
+3. 性能评测: Similarly, you can stress test on both the deployed model on this platform and manually-deployed model elsewhere by inputting your api url and model name. After stress test, you can click the button download to download the detailed evaluation results.
+4. 结果展示: You can select your previous results and compare them together. You can also click the download button to download a pdf file of the comparison results.
 
 
 ### Core Modules
@@ -222,21 +237,11 @@ Then use the above api url and model name to do stress test.
 - `GET /` - API version and status
 
 ## 🛠️ Development
-
-### Testing
-
-```bash
-# Test the modular system
-python tests/test_new_system.py
-
-# Test specific functionality
-python tests/test_deploy_api.py
-python tests/test_emd_response.py
-python tests/test_evalscope_sdk.py
-
-# Frontend tests
-cd frontend && npm test
-```
+ToDos:
+1. Stress test progress reflect real progress.
+2. Fix emd multimodal model tokenization error.
+3. Add custom data support.
+2. ...
 
 ### Configuration
 
