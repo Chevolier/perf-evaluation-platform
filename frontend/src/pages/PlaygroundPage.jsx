@@ -660,7 +660,7 @@ const PlaygroundPage = ({
             </Card>
 
             {/* 提示词输入 - 集成上传功能 */}
-            <Card title="提示词" size="small">
+            <Card title="输入" size="small">
               <div style={{ position: 'relative' }}>
                 {/* 文本输入区域 */}
                 <div style={{ position: 'relative' }}>

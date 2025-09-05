@@ -739,8 +739,8 @@ class StressTestService:
             model_path = model_info.get('model_path', model_key)
             deployment_tag = deployment_status.get('tag')
             
-            # Construct EMD API URL (based on emd status output)
-            api_url = "http://EMD-EC-Publi-xsr6eLH5Xcvy-365610787.us-west-2.elb.amazonaws.com/v1/chat/completions"
+            # Get dynamic EMD API URL from deployment status
+            api_url = self._get_emd_api_url(model_path, deployment_tag)
             
             # Use the full deployed model name with tag
             if deployment_tag:
@@ -2212,6 +2212,87 @@ except Exception as e:
         except Exception as e:
             logger.error(f"Custom API Evalscope execution failed for session {session_id}: {e}")
             raise Exception(f"Evalscope执行失败: {str(e)}")
+
+    def _get_emd_api_url(self, model_path: str, deployment_tag: str) -> str:
+        """Get EMD API URL dynamically from EMD status.
+        
+        Args:
+            model_path: Model path (e.g., "Qwen2-VL-7B-Instruct")
+            deployment_tag: Deployment tag
+            
+        Returns:
+            Complete API URL for the deployed model
+            
+        Raises:
+            Exception: If unable to find API URL
+        """
+        try:
+            from emd.sdk.status import get_model_status
+            
+            # Get all model deployment status
+            status = get_model_status()
+            logger.info(f"Looking for API URL for model {model_path} with tag {deployment_tag}")
+            
+            # Check completed deployments first
+            for model in status.get("completed", []):
+                model_id = model.get("model_id")
+                model_tag = model.get("model_tag")
+                
+                # Match by model_id and tag
+                if model_id == model_path and model_tag == deployment_tag:
+                    # Try to get base URL from DNSName field
+                    dns_name = model.get("DNSName")
+                    if dns_name:
+                        api_url = f"http://{dns_name}/v1/chat/completions"
+                        logger.info(f"Found API URL from DNSName: {api_url}")
+                        return api_url
+                    
+                    # Try to extract from outputs field
+                    outputs = model.get("outputs", "")
+                    if outputs and isinstance(outputs, str):
+                        try:
+                            import ast
+                            # Parse the outputs string as a Python dict
+                            outputs_dict = ast.literal_eval(outputs)
+                            base_url = outputs_dict.get("BaseURL")
+                            if base_url:
+                                api_url = f"{base_url}/v1/chat/completions"
+                                logger.info(f"Found API URL from outputs: {api_url}")
+                                return api_url
+                        except Exception as e:
+                            logger.warning(f"Failed to parse outputs field: {e}")
+                    
+                    logger.warning(f"Found model {model_id}/{model_tag} but no URL fields available")
+                    break
+            
+            # If not found in completed, check inprogress (shouldn't happen as we check status first)
+            for model in status.get("inprogress", []):
+                model_id = model.get("model_id")
+                model_tag = model.get("model_tag")
+                
+                if model_id == model_path and model_tag == deployment_tag:
+                    # Model is still deploying, this shouldn't happen as we check deployment status first
+                    logger.warning(f"Model {model_id}/{model_tag} is still in progress")
+                    break
+            
+            # Fallback - if we can't find the specific model, try to get any deployed model's DNS
+            # This can happen in some edge cases
+            for model in status.get("completed", []):
+                dns_name = model.get("DNSName")
+                if dns_name:
+                    api_url = f"http://{dns_name}/v1/chat/completions"
+                    logger.warning(f"Using fallback API URL from another deployed model: {api_url}")
+                    return api_url
+            
+            # If all else fails, raise an exception
+            raise Exception(f"无法找到模型 {model_path}/{deployment_tag} 的API端点。请检查模型是否已正确部署。")
+            
+        except ImportError:
+            logger.error("EMD SDK not available")
+            raise Exception("EMD SDK 不可用，无法获取API端点")
+        except Exception as e:
+            logger.error(f"Error getting EMD API URL: {e}")
+            raise Exception(f"获取EMD API端点失败: {str(e)}")
 
     def _get_tokenizer_path(self, model_name: str) -> str:
         """Get appropriate tokenizer path based on model name.

@@ -457,6 +457,17 @@ class ModelService:
                 logger.info(f"Starting EMD deployment for {model_key} (model_path: {model_path}) with tag {deployment_tag}")
                 print(f"🚀 DEBUG: Starting EMD deployment for {model_key} (model_path: {model_path}) with tag {deployment_tag}")
                 
+                if framework_type == 'vllm':
+                    extra_params = {
+                            "engine_params": {
+                                "cli_args": "--enable-prompt-tokens-details"  # This enables response to contain token usage info.
+                            }
+                        }
+                else:
+                    extra_params = {}
+                
+                print(f"extra_params: {extra_params}")
+                
                 # Call EMD deployment with correct parameters matching CLI format
                 result = emd_deploy(
                     model_id=model_path,
@@ -465,6 +476,7 @@ class ModelService:
                     service_type=service_type,  # Use the service_type parameter from API request
                     framework_type="fastapi",  # Default framework type
                     model_tag=deployment_tag,
+                    extra_params=extra_params,
                     waiting_until_deploy_complete=False  # Don't wait, return immediately
                 )
                 

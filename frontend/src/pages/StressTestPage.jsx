@@ -532,7 +532,7 @@ const StressTestPage = () => {
         concurrency: "1, 5, 10",
         input_tokens: 32,
         output_tokens: 32,
-        deployment_method: "EMD",
+        deployment_method: "SageMaker Endpoint",
         dataset: "random",
         image_width: 512,
         image_height: 512,
@@ -1298,7 +1298,7 @@ const StressTestPage = () => {
                 concurrency: "1, 5, 10",
                 input_tokens: 32,
                 output_tokens: 32,
-                deployment_method: "EMD",
+                deployment_method: "SageMaker Endpoint",
                 dataset: "random",
                 image_width: 512,
                 image_height: 512,
@@ -1371,12 +1371,12 @@ const StressTestPage = () => {
                         name="deployment_method"
                         label="部署方式"
                         rules={[{ required: true, message: '请选择部署方式' }]}
-                        initialValue="EMD"
+                        initialValue="SageMaker Endpoint"
                         style={{ marginBottom: 16 }}
                       >
                         <Select placeholder="选择部署方式">
-                          <Option value="EMD">EMD</Option>
-                          <Option value="HyperPod">HyperPod</Option>
+                          <Option value="SageMaker Endpoint">Endpoint</Option>
+                          <Option value="SageMaker HyperPod">HyperPod</Option>
                           <Option value="EKS">EKS</Option>
                           <Option value="EC2">EC2</Option>
                         </Select>
@@ -1550,12 +1550,12 @@ const StressTestPage = () => {
                         name="deployment_method"
                         label="部署方式"
                         rules={[{ required: true, message: '请选择部署方式' }]}
-                        initialValue="EMD"
+                        initialValue="SageMaker Endpoint"
                         style={{ marginBottom: 16 }}
                       >
                         <Select placeholder="选择部署方式">
-                          <Option value="EMD">EMD</Option>
-                          <Option value="HyperPod">HyperPod</Option>
+                          <Option value="SageMaker Endpoint">Endpoint</Option>
+                          <Option value="SageMaker HyperPod">HyperPod</Option>
                           <Option value="EKS">EKS</Option>
                           <Option value="EC2">EC2</Option>
                         </Select>
