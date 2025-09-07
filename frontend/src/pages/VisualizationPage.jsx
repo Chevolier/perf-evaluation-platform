@@ -42,6 +42,7 @@ const VisualizationPage = () => {
   const [error, setError] = useState(null);
   const [resultsTree, setResultsTree] = useState([]);
   const [expandedKeys, setExpandedKeys] = useState([]);
+  const [chartKey, setChartKey] = useState(0); // Force chart re-render
   
   // Load visualization state from localStorage
   const [selectedResults, setSelectedResults] = useState(() => {
@@ -64,6 +65,61 @@ const VisualizationPage = () => {
     }
   });
 
+  // Clean up stale selected results that no longer exist in the current tree structure
+  const cleanupStaleSelectedResults = (treeStructure) => {
+    // Get all valid session keys from the current tree structure
+    const getAllValidKeys = (nodes) => {
+      const validKeys = [];
+      
+      const traverse = (nodeList) => {
+        for (const node of nodeList) {
+          if (node.children) {
+            traverse(node.children);
+          } else if (node.sessions) {
+            // This is a leaf node with sessions
+            node.sessions.forEach(session => {
+              validKeys.push(session.key);
+            });
+          }
+        }
+      };
+      
+      traverse(nodes);
+      return new Set(validKeys);
+    };
+    
+    const validKeys = getAllValidKeys(treeStructure);
+    console.log('Valid keys from current tree:', Array.from(validKeys));
+    console.log('Current selectedResults:', selectedResults);
+    
+    // Filter out any selected results that don't exist in the current tree
+    const cleanedResults = selectedResults.filter(key => validKeys.has(key));
+    
+    if (cleanedResults.length !== selectedResults.length) {
+      console.log(`Cleaning up stale selectedResults: ${selectedResults.length} -> ${cleanedResults.length}`);
+      setSelectedResults(cleanedResults);
+      setChartKey(prev => prev + 1); // Force chart re-render
+      
+      // Also clean up resultData
+      setResultData(prev => {
+        const cleanedData = {};
+        cleanedResults.forEach(key => {
+          if (prev[key]) {
+            cleanedData[key] = prev[key];
+          }
+        });
+        return cleanedData;
+      });
+      
+      // Update localStorage
+      localStorage.setItem('visualization_selectedResults', JSON.stringify(cleanedResults));
+      localStorage.setItem('visualization_resultData', JSON.stringify({})); // Clear stale result data
+      if (cleanedResults.length < selectedResults.length) {
+        message.info(`Cleaned up ${selectedResults.length - cleanedResults.length} outdated selections due to structure changes`);
+      }
+    }
+  };
+
   // Fetch all results from outputs directory
   const fetchResultsStructure = async () => {
     try {
@@ -74,6 +130,9 @@ const VisualizationPage = () => {
       }
       const data = await response.json();
       setResultsTree(data.structure || []);
+      
+      // Clean up stale selectedResults that no longer exist in the tree
+      cleanupStaleSelectedResults(data.structure || []);
     } catch (err) {
       setError(`Failed to fetch results structure: ${err.message}`);
       message.error(`Failed to fetch results: ${err.message}`);
@@ -110,6 +169,7 @@ const VisualizationPage = () => {
       const resultInfo = findResultByKey(resultsTree, resultKey);
       if (resultInfo) {
         setSelectedResults(prev => [...prev, resultKey]);
+        setChartKey(prev => prev + 1); // Force chart re-render
         
         // Fetch data for this result
         const data = await fetchResultData(resultInfo.path);
@@ -126,6 +186,7 @@ const VisualizationPage = () => {
     } else {
       // Remove from selected results
       setSelectedResults(prev => prev.filter(key => key !== resultKey));
+      setChartKey(prev => prev + 1); // Force chart re-render
       setResultData(prev => {
         const newData = { ...prev };
         delete newData[resultKey];
@@ -162,10 +223,12 @@ const VisualizationPage = () => {
       }
       
       setSelectedResults(newSelectedResults);
+      setChartKey(prev => prev + 1); // Force chart re-render
       setResultData(newResultData);
     } else {
       // Remove all sessions in this group
       setSelectedResults(prev => prev.filter(key => !allSessionKeys.includes(key)));
+      setChartKey(prev => prev + 1); // Force chart re-render
       setResultData(prev => {
         const newData = { ...prev };
         allSessionKeys.forEach(key => {
@@ -256,6 +319,7 @@ const VisualizationPage = () => {
         
         // Remove from selected results if it was selected
         setSelectedResults(prev => prev.filter(key => key !== sessionKey));
+        setChartKey(prev => prev + 1); // Force chart re-render
         
         // Remove from result data
         setResultData(prev => {
@@ -476,11 +540,15 @@ const VisualizationPage = () => {
       [4, 2, 4, 6] // complex pattern
     ];
     
-    // Get all unique sessions sorted for consistent indexing
-    const uniqueSessions = [...new Set(Object.values(resultData).map(r => `${r.model}_${r.deployment_method || 'emd'}_${r.instance_type}_${r.framework}_${r.session_id}`))].sort();
-    console.log('Unique sessions for styling:', uniqueSessions);
+    // Get unique sessions from ONLY selected results for consistent indexing
+    const selectedResultData = selectedResults.map(key => resultData[key]).filter(Boolean);
+    const uniqueSessions = [...new Set(selectedResultData.map(r => `${r.model}_${r.deployment_method || 'emd'}_${r.instance_type}_${r.framework}_${r.session_id}`))].sort();
+    console.log('Unique sessions for styling (selected only):', uniqueSessions);
     
-    Object.entries(resultData).forEach(([key, result]) => {
+    // Process only selected results
+    selectedResults.forEach(key => {
+      const result = resultData[key];
+      if (!result) return;
       const performanceData = result.data?.performance_data || [];
       const modelLabel = `${result.model}_${result.deployment_method || 'emd'}_${result.instance_type}_${result.framework}_${result.session_id}`;
       
@@ -592,6 +660,7 @@ const VisualizationPage = () => {
               <Card title={metric} size="small">
                 <div style={{ height: 300 }}>
                   <Line
+                    key={`${metric}-${chartKey}`}
                     data={data}
                     xField="concurrency"
                     yField="yValue"
