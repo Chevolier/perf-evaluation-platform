@@ -1186,6 +1186,7 @@ const VisualizationPage = () => {
                             <Tag size="small">Deployment: {result.deployment_method || 'emd'}</Tag>
                             <Tag size="small">Instance: {result.instance_type}</Tag>
                             <Tag size="small">Framework: {result.framework}</Tag>
+                            <Tag size="small">TP Size: {result.tp_size || 1}</Tag>
                             <Tag size="small">Dataset: {result.dataset}</Tag>
                           </Space>
                           <Space wrap size="small">
