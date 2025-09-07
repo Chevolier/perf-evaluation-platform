@@ -719,8 +719,8 @@ class StressTestService:
         image_height = test_params.get('image_height', 512)
         image_num = test_params.get('image_num', 1)
         image_format = test_params.get('image_format', 'RGB')
-        connect_timeout = test_params.get('connect_timeout', 3600) # 1 hour
-        read_timeout = test_params.get('read_timeout', 3600)
+        connect_timeout = test_params.get('connect_timeout', 7200) # 1 hour
+        read_timeout = test_params.get('read_timeout', 7200)
         
         logger.info(f"[DEBUG] Raw parameters from frontend:")
         logger.info(f"[DEBUG]   num_requests: {num_requests_list} (type: {type(num_requests_list)})")
@@ -925,7 +925,7 @@ except Exception as e:
             # Calculate timeout based on cartesian product (evalscope runs all combinations)
             num_combinations = len(num_requests_list) * len(concurrency_list)
             base_timeout = 120  # 2 minutes per combination
-            total_timeout = max(3600, num_combinations * base_timeout)  # At least 2 hours
+            total_timeout = max(7200, num_combinations * base_timeout)  # At least 2 hours
             
             logger.info(f"[DEBUG] Running {num_combinations} combinations ({len(concurrency_list)} concurrency × {len(num_requests_list)} requests)")
             logger.info(f"[DEBUG] Setting timeout to {total_timeout} seconds ({total_timeout/60:.1f} minutes)")
@@ -941,11 +941,8 @@ except Exception as e:
             
             logger.info(f"Evalscope subprocess completed with return code: {result.returncode}")
             
-            # Clean up script file
-            try:
-                os.unlink(script_path)
-            except:
-                pass
+            # Keep the script file for download in the zip package
+            logger.info(f"Preserving evalscope script for zip download: {script_path}")
             
             if result.returncode != 0:
                 logger.error(f"Evalscope subprocess failed - stdout: {result.stdout}")
@@ -1939,8 +1936,8 @@ except Exception as e:
         dataset = test_params.get('dataset', 'random')
         dataset_path = test_params.get('dataset_path', '')
 
-        connect_timeout = test_params.get("connect_timeout", 3600)
-        read_timeout = test_params.get("read_timeout", 3600)
+        connect_timeout = test_params.get("connect_timeout", 7200)
+        read_timeout = test_params.get("read_timeout", 7200)
         
         # VLM parameters
         image_width = test_params.get('image_width', 512)
@@ -2128,7 +2125,7 @@ except Exception as e:
             # Calculate timeout based on cartesian product (evalscope runs all combinations)
             num_combinations = len(num_requests_list) * len(concurrency_list)
             base_timeout = 120  # 2 minutes per combination
-            total_timeout = max(3600, num_combinations * base_timeout)  # At least 1 hour
+            total_timeout = max(7200, num_combinations * base_timeout)  # At least 1 hour
             
             logger.info(f"[DEBUG] Custom API - Running {num_combinations} combinations ({len(concurrency_list)} concurrency × {len(num_requests_list)} requests)")
             logger.info(f"[DEBUG] Custom API - Setting timeout to {total_timeout} seconds ({total_timeout/60:.1f} minutes)")
