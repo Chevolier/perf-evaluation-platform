@@ -1265,7 +1265,7 @@ const StressTestPage = () => {
                 concurrency: "1, 5, 10",
                 input_tokens: 32,
                 output_tokens: 32,
-                deployment_method: "SageMaker Endpoint",
+                deployment_method: inputMode === 'dropdown' ? "SageMaker Endpoint" : "EC2",
                 dataset: "random",
                 image_width: 512,
                 image_height: 512,
@@ -1284,9 +1284,16 @@ const StressTestPage = () => {
                   <Radio.Group 
                     value={inputMode} 
                     onChange={(e) => {
-                      setInputMode(e.target.value);
+                      const newMode = e.target.value;
+                      setInputMode(newMode);
                       // Clear form fields when switching modes
                       form.resetFields(['model', 'deployment_method', 'dataset', 'dataset_path', 'api_url', 'model_name', 'instance_type', 'framework', 'tp_size', 'dp_size', 'image_width', 'image_height', 'image_num']);
+                      // Set default deployment method based on input mode
+                      if (newMode === 'dropdown') {
+                        form.setFieldsValue({ deployment_method: 'SageMaker Endpoint' });
+                      } else if (newMode === 'manual') {
+                        form.setFieldsValue({ deployment_method: 'EC2' });
+                      }
                     }}
                   >
                     <Radio value="dropdown" style={{ marginRight: '24px' }}>
@@ -1517,7 +1524,7 @@ const StressTestPage = () => {
                         name="deployment_method"
                         label="部署方式"
                         rules={[{ required: true, message: '请选择部署方式' }]}
-                        initialValue="SageMaker Endpoint"
+                        initialValue="EC2"
                         style={{ marginBottom: 16 }}
                       >
                         <Select placeholder="选择部署方式">

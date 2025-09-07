@@ -268,11 +268,14 @@ const PlaygroundModelSelector = ({
       }}
       hoverable
     >
-      <div onClick={() => handleModelToggle(model.key)} style={{ cursor: 'pointer' }}>
+      <div>
         <Space align="start" style={{ width: '100%' }}>
           <Checkbox 
             checked={selectedModels.includes(model.key)}
-            onChange={() => handleModelToggle(model.key)}
+            onChange={(e) => {
+              e.stopPropagation();
+              handleModelToggle(model.key);
+            }}
           />
           <div style={{ flex: 1 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -315,11 +318,42 @@ const PlaygroundModelSelector = ({
     >
       <div style={{ maxHeight: '60vh', overflowY: 'auto' }}>
         <Spin spinning={loading}>
-          <div style={{ marginBottom: 16 }}>
+          <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Text type="secondary">
               已选择 <Text strong style={{ color: '#1890ff' }}>{selectedModels.length}</Text> 个模型
               （共 {availableModelsCount} 个可用模型）
             </Text>
+            <div>
+              {selectedModels.length > 0 && (
+                <Button 
+                  type="link" 
+                  size="small"
+                  onClick={() => onModelChange([])}
+                  style={{ color: '#999', marginRight: 8 }}
+                >
+                  清除所有选择
+                </Button>
+              )}
+              <Button 
+                type="link" 
+                size="small"
+                onClick={() => {
+                  // Clear localStorage cache
+                  localStorage.removeItem('playground_selectedModels');
+                  localStorage.removeItem('playground_dataset');
+                  localStorage.removeItem('playground_params');
+                  localStorage.removeItem('playground_inferenceResults');
+                  localStorage.removeItem('playground_originalFiles');
+                  localStorage.removeItem('playground_inputMode');
+                  localStorage.removeItem('playground_manualConfig');
+                  onModelChange([]);
+                  window.location.reload();
+                }}
+                style={{ color: '#ff4d4f' }}
+              >
+                清除缓存
+              </Button>
+            </div>
           </div>
 
           {Object.keys(availableCategories).length === 0 && !loading && (
