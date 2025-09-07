@@ -41,6 +41,7 @@ const VisualizationPage = () => {
   const [deleting, setDeleting] = useState({});
   const [error, setError] = useState(null);
   const [resultsTree, setResultsTree] = useState([]);
+  const [expandedKeys, setExpandedKeys] = useState([]);
   
   // Load visualization state from localStorage
   const [selectedResults, setSelectedResults] = useState(() => {
@@ -445,7 +446,8 @@ const VisualizationPage = () => {
     return (
       <Tree
         treeData={treeData}
-        defaultExpandAll={false}
+        expandedKeys={expandedKeys}
+        onExpand={(keys) => setExpandedKeys(keys)}
         showLine={true}
         showIcon={false}
         blockNode={true}
