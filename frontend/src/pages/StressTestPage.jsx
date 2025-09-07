@@ -509,44 +509,11 @@ const StressTestPage = () => {
     if ((event.metaKey && event.key === 'r') || event.key === 'F5') {
       event.preventDefault();
       
-      // Clear all localStorage data
-      localStorage.removeItem('stressTest_sessions');
-      localStorage.removeItem('stressTest_currentSessionId');
-      
-      // Clear polling interval
-      if (pollingInterval) {
-        clearInterval(pollingInterval);
-        setPollingInterval(null);
-      }
-      
-      // Reset all state to defaults
-      setTestSessions({});
-      setCurrentSessionId(null);
-      setLoading(false);
-      setInputMode('dropdown');
-      
-      // Reset form to default values
-      form.resetFields();
-      form.setFieldsValue({
-        num_requests: "50, 100, 200",
-        concurrency: "1, 5, 10",
-        input_tokens: 32,
-        output_tokens: 32,
-        deployment_method: "SageMaker Endpoint",
-        dataset: "random",
-        image_width: 512,
-        image_height: 512,
-        image_num: 1,
-        instance_type: "g5.2xlarge",
-        framework: "vllm",
-        tp_size: 1,
-        dp_size: 1
-      });
-      
-      // Refresh the page
+      // Allow normal page refresh without clearing state
+      // State will be preserved through localStorage and restored on page load
       window.location.reload();
     }
-  }, [pollingInterval, form]);
+  }, []);
 
   useEffect(() => {
     fetchModels();

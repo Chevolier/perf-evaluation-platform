@@ -977,19 +977,8 @@ const VisualizationPage = () => {
     if ((event.metaKey && event.key === 'r') || event.key === 'F5') {
       event.preventDefault();
       
-      // Clear all localStorage data
-      localStorage.removeItem('visualization_selectedResults');
-      localStorage.removeItem('visualization_resultData');
-      
-      // Reset all state to defaults
-      setSelectedResults([]);
-      setResultData({});
-      setLoading(false);
-      setDownloading(false);
-      setError(null);
-      setResultsTree([]);
-      
-      // Refresh the page
+      // Allow normal page refresh without clearing state
+      // State will be preserved through localStorage and restored on page load
       window.location.reload();
     }
   }, []);
