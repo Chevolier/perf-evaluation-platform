@@ -145,15 +145,7 @@ vllm serve Qwen/Qwen3-8B \
 	--max_model_len 2048 \
   --enable-prompt-tokens-details
 
-nohup vllm serve /home/ec2-user/SageMaker/efs/Models/Qwen3-8B \
-     --host 0.0.0.0 --port 8000 \
-     --dtype bfloat16\
-    --gpu-memory-utilization 0.9 \
-    --max_model_len 2048 \
-    --enable-prompt-tokens-details \
-    >logs/serve_qwen3-8b.out 2>&1 &
-
-nohup vllm serve /home/ec2-user/SageMaker/efs/Models/Qwen2.5-VL-7B-Instruct \
+nohup vllm serve Qwen/Qwen2.5-VL-7B-Instruct \
      --host 0.0.0.0 --port 8000 \
      --dtype bfloat16\
     --gpu-memory-utilization 0.9 \
@@ -246,10 +238,9 @@ Then use the above api url and model name to do stress test.
 
 ## 🛠️ Development
 ToDos:
-1. Stress test progress reflect real progress.
-2. Fix emd multimodal model tokenization error.
-3. Add custom data support.
-2. ...
+1. Fix emd multimodal model tokenization error.
+2. Add custom data support.
+3. ...
 
 ### Configuration
 
