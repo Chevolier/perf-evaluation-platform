@@ -835,16 +835,28 @@ const VisualizationPage = () => {
           // Fetch config data from config.json
           let configData = {};
           try {
+            const configPath = result.path.replace('performance_metrics.csv', 'config.json');
+            console.log('Original result path:', result.path);
+            console.log('Config path to fetch:', configPath);
+            
             const configResponse = await fetch(`${API_BASE}/api/results/data`, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
               },
-              body: JSON.stringify({ result_path: result.path.replace('performance_metrics.csv', 'config.json') }),
+              body: JSON.stringify({ result_path: configPath }),
             });
+            
+            console.log('Config response status:', configResponse.status);
+            
             if (configResponse.ok) {
               const configResult = await configResponse.json();
-              configData = configResult || {};
+              console.log('Raw config response:', configResult);
+              // The actual config.json data is nested under the 'config' key
+              configData = configResult.config || {};
+              console.log('Final config data:', configData);
+            } else {
+              console.warn('Config response not ok:', configResponse.status, await configResponse.text());
             }
           } catch (error) {
             console.warn('Failed to fetch config.json:', error);
@@ -863,17 +875,64 @@ const VisualizationPage = () => {
           const configTableStartX = margin;
           const configTableStartY = currentY;
 
+          // Helper function to safely extract nested values
+          const getValue = (obj, path, fallback = 'N/A') => {
+            try {
+              console.log('getValue called with:', { obj: typeof obj, path, objKeys: obj ? Object.keys(obj) : 'null' });
+              
+              if (!obj || typeof obj !== 'object') {
+                console.log('Object is null or not an object');
+                return fallback;
+              }
+              
+              const keys = path.split('.');
+              let value = obj;
+              
+              for (let i = 0; i < keys.length; i++) {
+                const key = keys[i];
+                console.log(`Step ${i}: Looking for key '${key}' in:`, value);
+                
+                if (value && typeof value === 'object' && key in value) {
+                  value = value[key];
+                  console.log(`Found value:`, value);
+                } else {
+                  console.log(`Key '${key}' not found in object`);
+                  return fallback;
+                }
+              }
+              
+              const result = value !== null && value !== undefined ? value.toString() : fallback;
+              console.log(`Final result for path '${path}':`, result);
+              return result;
+            } catch (error) {
+              console.log('Error in getValue:', error);
+              return fallback;
+            }
+          };
+
           // Configuration parameters to display
+          const tpValue = result.tp?.toString() || getValue(configData, 'deployment_config.tp_size');
+          const dpValue = result.dp?.toString() || getValue(configData, 'deployment_config.dp_size');
+          const inputTokensValue = result.input_tokens?.toString() || getValue(configData, 'stress_test_config.input_tokens.average');
+          const outputTokensValue = result.output_tokens?.toString() || getValue(configData, 'stress_test_config.output_tokens.average');
+          
+          console.log('Extracted values:', {
+            tp: tpValue,
+            dp: dpValue,
+            inputTokens: inputTokensValue,
+            outputTokens: outputTokensValue
+          });
+          
           const configParams = [
-            { label: 'Model', value: result.model || configData.model || 'N/A' },
-            { label: 'Deployment Method', value: result.deployment_method || configData.deployment_method || 'emd' },
-            { label: 'Instance Type', value: result.instance_type || configData.instance_type || 'N/A' },
-            { label: 'Framework', value: result.framework || configData.framework || 'N/A' },
-            { label: 'Dataset', value: result.dataset || configData.dataset || 'N/A' },
-            { label: 'TP (Tensor Parallel)', value: result.tp?.toString() || configData.tp?.toString() || 'N/A' },
-            { label: 'DP (Data Parallel)', value: result.dp?.toString() || configData.dp?.toString() || 'N/A' },
-            { label: 'Input Tokens', value: result.input_tokens?.toString() || configData.input_tokens?.toString() || 'N/A' },
-            { label: 'Output Tokens', value: result.output_tokens?.toString() || configData.output_tokens?.toString() || 'N/A' }
+            { label: 'Model', value: result.model || getValue(configData, 'model.model_name') || 'N/A' },
+            { label: 'Deployment Method', value: result.deployment_method || getValue(configData, 'deployment_config.deployment_method') || 'emd' },
+            { label: 'Instance Type', value: result.instance_type || getValue(configData, 'deployment_config.instance_type') || 'N/A' },
+            { label: 'Framework', value: result.framework || getValue(configData, 'deployment_config.framework') || 'N/A' },
+            { label: 'Dataset', value: result.dataset || getValue(configData, 'stress_test_config.dataset') || 'N/A' },
+            { label: 'TP (Tensor Parallel)', value: tpValue || 'N/A' },
+            { label: 'DP (Data Parallel)', value: dpValue || 'N/A' },
+            { label: 'Input Tokens', value: inputTokensValue || 'N/A' },
+            { label: 'Output Tokens', value: outputTokensValue || 'N/A' }
           ];
 
           // Draw config table header
