@@ -2787,9 +2787,28 @@ except Exception as e:
                 logger.warning(f"Session directory does not exist: {output_directory}")
                 return False
             
+            # Get the parent model directory before deleting the session
+            model_directory = session_path.parent
+            
             # Delete the entire session directory
             logger.info(f"Deleting session directory: {output_directory}")
             shutil.rmtree(output_directory)
+            
+            # Check if the parent model directory is now empty and delete it if so
+            if model_directory.exists() and model_directory.is_dir():
+                try:
+                    # List all items in the model directory
+                    remaining_items = list(model_directory.iterdir())
+                    
+                    if not remaining_items:
+                        # Model directory is empty, delete it
+                        logger.info(f"Model directory is empty, deleting: {model_directory}")
+                        model_directory.rmdir()
+                        logger.info(f"Successfully deleted empty model directory: {model_directory}")
+                    else:
+                        logger.info(f"Model directory {model_directory} still contains {len(remaining_items)} items, keeping it")
+                except Exception as e:
+                    logger.warning(f"Could not check/delete model directory {model_directory}: {e}")
             
             # Remove from memory if present
             if session_id in self.test_sessions:
