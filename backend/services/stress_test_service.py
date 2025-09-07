@@ -41,7 +41,7 @@ class StressTestService:
         
         logger.info(f"Starting stress test for model {model_key} with session {session_id}")
         
-        # Initialize test session
+        # Initialize test session with 0% progress
         self.test_sessions[session_id] = {
             "status": "preparing",
             "model": model_key,
@@ -80,7 +80,7 @@ class StressTestService:
         
         logger.info(f"Starting custom API stress test for {model_name} at {api_url} with session {session_id}")
         
-        # Initialize test session
+        # Initialize test session with 0% progress
         self.test_sessions[session_id] = {
             "status": "preparing",
             "model": model_name,
@@ -115,11 +115,43 @@ class StressTestService:
         """
         session = self.test_sessions.get(session_id)
         
-        # Check if there's a stuck session that has results available
+        # Update progress for running sessions using real benchmark logs
         if session and session.get('status') == 'running':
             output_dir = session.get('output_directory')
-            logger.info(f"Checking stuck session {session_id}, output_dir: {output_dir}")
+            
             if output_dir:
+                # Parse benchmark logs to get real progress
+                progress_info = self._parse_benchmark_log_progress(output_dir, session_id)
+                
+                # Calculate total expected requests from test parameters
+                total_expected_requests = self._calculate_total_expected_requests(session.get('params', {}))
+                
+                if total_expected_requests > 0:
+                    if progress_info['total_processed'] > 0:
+                        # Calculate real progress percentage (rounded to integer)
+                        real_progress = round(min(100, (progress_info['total_processed'] / total_expected_requests) * 100))
+                        
+                        # Update session with real progress
+                        progress_message = f"已处理 {progress_info['total_processed']}/{total_expected_requests} 个请求"
+                        if progress_info['combinations_total'] > 0:
+                            progress_message += f" ({progress_info['combinations_completed']}/{progress_info['combinations_total']} 个组合完成)"
+                        
+                        self._update_session(session_id, {
+                            "progress": real_progress,
+                            "current_message": progress_message,
+                            "real_progress_info": progress_info
+                        })
+                        
+                        logger.info(f"[PROGRESS] Session {session_id}: {real_progress}% - {progress_message}")
+                    else:
+                        # No progress yet, but ensure we have a progress value (start from 0%)
+                        if session.get('progress') is None:
+                            self._update_session(session_id, {
+                                "progress": 0,
+                                "current_message": session.get('current_message', '正在执行压力测试...')
+                            })
+                
+                # Check if there's a stuck session that has results available
                 results_file = f"{output_dir}/benchmark_results.json"
                 logger.info(f"Checking for results file: {results_file}")
                 try:
@@ -568,10 +600,9 @@ class StressTestService:
             logger.info(f"[DEBUG] test_params content: {test_params}")
             logger.info(f"Running stress test for session {session_id}")
             
-            # Update status
+            # Update status - let real-time polling handle progress updates
             self._update_session(session_id, {
                 "status": "running", 
-                "progress": 10,
                 "message": "正在执行压力测试...",
                 "current_message": "开始发送测试请求..."
             })
@@ -621,10 +652,9 @@ class StressTestService:
         try:
             logger.info(f"Running custom API stress test for session {session_id}")
             
-            # Update status
+            # Update status - let real-time polling handle progress updates
             self._update_session(session_id, {
                 "status": "running", 
-                "progress": 10,
                 "message": "正在执行压力测试...",
                 "current_message": "开始发送测试请求..."
             })
@@ -729,7 +759,6 @@ class StressTestService:
         model_service = ModelService()
         
         self._update_session(session_id, {
-            "progress": 20,
             "current_message": "检查模型部署状态..."
         })
         
@@ -763,7 +792,6 @@ class StressTestService:
             raise Exception(f"未知模型类型: {model_key}")
         
         self._update_session(session_id, {
-            "progress": 30,
             "current_message": "测试模型端点连接..."
         })
         
@@ -785,7 +813,6 @@ class StressTestService:
             raise Exception(f"模型端点连接失败: {str(e)}")
         
         self._update_session(session_id, {
-            "progress": 40,
             "current_message": "配置evalscope测试参数..."
         })
         
@@ -806,7 +833,6 @@ class StressTestService:
             output_dir = self._create_output_dir(model_key, session_id)
             
             self._update_session(session_id, {
-                "progress": 50,
                 "current_message": f"执行evalscope基准测试 ({num_requests_list} 请求, {concurrency_list} 并发)...",
                 "output_directory": output_dir
             })
@@ -882,8 +908,8 @@ except Exception as e:
             
             logger.info(f"Created evalscope script: {script_path}")
             
+            # Let real-time polling handle all progress updates - no hardcoded progress here
             self._update_session(session_id, {
-                "progress": 60,
                 "current_message": "正在执行evalscope基准测试..."
             })
             
@@ -971,10 +997,29 @@ except Exception as e:
             
             # Note: We now rely on subfolder processing instead of stdout results
             
-            self._update_session(session_id, {
-                "progress": 90,
-                "current_message": "处理测试结果..."
-            })
+            # Parse real progress from benchmark logs before final processing
+            output_dir = self.test_sessions[session_id].get("output_directory")
+            if output_dir:
+                progress_info = self._parse_benchmark_log_progress(output_dir, session_id)
+                total_expected_requests = self._calculate_total_expected_requests(test_params)
+                
+                if total_expected_requests > 0 and progress_info['total_processed'] > 0:
+                    real_progress = round(min(90, (progress_info['total_processed'] / total_expected_requests) * 100))
+                    progress_message = f"已处理 {progress_info['total_processed']}/{total_expected_requests} 个请求，正在处理测试结果..."
+                    
+                    self._update_session(session_id, {
+                        "progress": real_progress,
+                        "current_message": progress_message,
+                        "real_progress_info": progress_info
+                    })
+                else:
+                    self._update_session(session_id, {
+                        "current_message": "处理测试结果..."
+                    })
+            else:
+                self._update_session(session_id, {
+                    "current_message": "处理测试结果..."
+                })
             
             logger.info(f"Evalscope benchmark completed, processing results")
             
@@ -1928,7 +1973,6 @@ except Exception as e:
         logger.info(f"Starting evalscope stress test with custom API: {num_requests_list} requests, {concurrency_list} concurrent")
         
         self._update_session(session_id, {
-            "progress": 20,
             "current_message": "测试自定义API端点连接..."
         })
         
@@ -1982,7 +2026,6 @@ except Exception as e:
             raise Exception(f"自定义API端点连接失败: {str(e)}")
         
         self._update_session(session_id, {
-            "progress": 40,
             "current_message": "配置evalscope测试参数..."
         })
         
@@ -2008,8 +2051,8 @@ except Exception as e:
             # Store output directory in session
             self.test_sessions[session_id]["output_directory"] = output_dir
             
+            # Let real-time polling handle all progress updates - no hardcoded progress here
             self._update_session(session_id, {
-                "progress": 60,
                 "current_message": f"正在执行evalscope基准测试 ({num_requests_list} 请求, {concurrency_list} 并发)..."
             })
             
@@ -2126,6 +2169,22 @@ except Exception as e:
             logger.info(f"Custom API Evalscope subprocess completed successfully")
             logger.info(f"Stdout: {result.stdout}")
             
+            # Parse real progress before processing results
+            output_dir = self.test_sessions[session_id].get("output_directory") 
+            if output_dir:
+                progress_info = self._parse_benchmark_log_progress(output_dir, session_id)
+                total_expected_requests = self._calculate_total_expected_requests(test_params)
+                
+                if total_expected_requests > 0 and progress_info['total_processed'] > 0:
+                    real_progress = round(min(90, (progress_info['total_processed'] / total_expected_requests) * 100))
+                    progress_message = f"已处理 {progress_info['total_processed']}/{total_expected_requests} 个请求，正在处理测试结果..."
+                    
+                    self._update_session(session_id, {
+                        "progress": real_progress,
+                        "current_message": progress_message,
+                        "real_progress_info": progress_info
+                    })
+
             # Check if evalscope generated subfolder results (new multi-combination format)
             subfolder_results = self._collect_subfolder_results(output_dir, session_id)
             if subfolder_results:
@@ -2359,6 +2418,323 @@ except Exception as e:
             logger.warning(f"Unknown model family for {model_name}, using base model name as tokenizer path")
             return base_model
     
+    def _parse_benchmark_log_progress(self, output_dir: str, session_id: str) -> Dict[str, Any]:
+        """Parse benchmark.log files to extract real progress information.
+        
+        Args:
+            output_dir: Base output directory path
+            session_id: Session ID for logging
+            
+        Returns:
+            Dictionary with progress information: {
+                'total_processed': int,
+                'total_succeed': int, 
+                'total_failed': int,
+                'combinations_completed': int,
+                'combinations_total': int,
+                'current_combination_progress': dict
+            }
+        """
+        import os
+        import json
+        import glob
+        import re
+        
+        try:
+            progress_info = {
+                'total_processed': 0,
+                'total_succeed': 0,
+                'total_failed': 0,
+                'combinations_completed': 0,
+                'combinations_total': 0,
+                'current_combination_progress': {}
+            }
+            
+            # Find all benchmark.log files - they could be in the main evaluation directory
+            # Pattern: outputs/model/session/timestamp/model_tag/benchmark.log
+            pattern = os.path.join(output_dir, "**", "benchmark.log")
+            log_files = glob.glob(pattern, recursive=True)
+            
+            logger.info(f"[PROGRESS] Found {len(log_files)} benchmark.log files for session {session_id}")
+            
+            combination_progress = {}
+            
+            for log_file in log_files:
+                # Get the parent directory to check for parallel_*_number_* subdirectories
+                log_dir = os.path.dirname(log_file)
+                logger.info(f"[PROGRESS] Processing log file: {log_file}")
+                logger.info(f"[PROGRESS] Log directory: {log_dir}")
+                
+                # Check if there are parallel_*_number_* subdirectories
+                try:
+                    subdirs = [d for d in os.listdir(log_dir) if os.path.isdir(os.path.join(log_dir, d)) and d.startswith('parallel_')]
+                    logger.info(f"[PROGRESS] Found parallel subdirs: {subdirs}")
+                    
+                    if subdirs:
+                        # Parse the main benchmark.log file and extract progress for each combination
+                        self._parse_combined_benchmark_log(log_file, subdirs, combination_progress, session_id)
+                    else:
+                        # Handle single combination case
+                        self._parse_single_combination_log(log_file, combination_progress, session_id)
+                        
+                except Exception as e:
+                    logger.error(f"Error processing log directory {log_dir}: {e}")
+                    continue
+            
+            # Calculate totals
+            total_processed = 0
+            total_succeed = 0
+            total_failed = 0
+            combinations_completed = 0
+            
+            for combo_key, combo_data in combination_progress.items():
+                processed = combo_data['succeed_requests'] + combo_data['failed_requests']
+                total_processed += processed
+                total_succeed += combo_data['succeed_requests']
+                total_failed += combo_data['failed_requests']
+                
+                if combo_data['is_completed']:
+                    combinations_completed += 1
+            
+            progress_info.update({
+                'total_processed': total_processed,
+                'total_succeed': total_succeed,
+                'total_failed': total_failed,
+                'combinations_completed': combinations_completed,
+                'combinations_total': len(combination_progress),
+                'current_combination_progress': combination_progress
+            })
+            
+            logger.info(f"[PROGRESS] Session {session_id} progress summary: {progress_info}")
+            return progress_info
+            
+        except Exception as e:
+            logger.error(f"Error parsing benchmark logs for session {session_id}: {e}")
+            return {
+                'total_processed': 0,
+                'total_succeed': 0,
+                'total_failed': 0,
+                'combinations_completed': 0,
+                'combinations_total': 0,
+                'current_combination_progress': {}
+            }
+    
+    def _parse_combined_benchmark_log(self, log_file: str, subdirs: list, combination_progress: dict, session_id: str):
+        """Parse a combined benchmark.log file that contains multiple combinations.
+        
+        Args:
+            log_file: Path to the benchmark.log file
+            subdirs: List of parallel_*_number_* subdirectory names
+            combination_progress: Dictionary to store progress results
+            session_id: Session ID for logging
+        """
+        import json
+        import re
+        
+        try:
+            logger.info(f"[PROGRESS] Parsing combined benchmark log: {log_file}")
+            
+            # Extract combination info from subdirectories
+            combinations = {}
+            for subdir in subdirs:
+                match = re.match(r'parallel_(\d+)_number_(\d+)', subdir)
+                if match:
+                    parallel = int(match.group(1))
+                    number = int(match.group(2))
+                    combinations[f"{parallel}_{number}"] = {
+                        'parallel': parallel,
+                        'number': number,
+                        'total_requests': number,
+                        'succeed_requests': 0,
+                        'failed_requests': 0,
+                        'is_completed': False
+                    }
+            
+            logger.info(f"[PROGRESS] Expected combinations: {combinations}")
+            
+            # Parse the log file to find progress for each combination
+            current_combination = None
+            
+            with open(log_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+                
+            # Split content into blocks based on evalscope INFO log entries
+            blocks = content.split('- evalscope - INFO: ')
+            
+            for block in blocks:
+                if not block.strip():
+                    continue
+                
+                # Look for combination markers in the block (outputs_dir patterns)
+                for combo_key, combo_info in combinations.items():
+                    parallel = combo_info['parallel']
+                    number = combo_info['number']
+                    
+                    # Check if this block indicates we're starting this combination
+                    if f"parallel_{parallel}_number_{number}" in block:
+                        current_combination = combo_key
+                        logger.info(f"[PROGRESS] Found start of combination {combo_key}")
+                        break
+                
+                # Look for JSON blocks that start with {
+                json_start = block.find('{')
+                if json_start == -1:
+                    continue
+                
+                json_part = block[json_start:].strip()
+                
+                # Find the end of the JSON object by looking for the closing brace
+                brace_count = 0
+                json_end = -1
+                for i, char in enumerate(json_part):
+                    if char == '{':
+                        brace_count += 1
+                    elif char == '}':
+                        brace_count -= 1
+                        if brace_count == 0:
+                            json_end = i + 1
+                            break
+                
+                if json_end == -1:
+                    continue
+                
+                json_string = json_part[:json_end]
+                
+                # Try to parse JSON progress data
+                try:
+                    data = json.loads(json_string)
+                    
+                    if (isinstance(data, dict) and 
+                        'Total requests' in data and 
+                        'Succeed requests' in data and 
+                        'Failed requests' in data):
+                        
+                        # If we know which combination this belongs to, update it
+                        if current_combination and current_combination in combinations:
+                            combinations[current_combination].update({
+                                'succeed_requests': data.get('Succeed requests', 0),
+                                'failed_requests': data.get('Failed requests', 0),
+                                'is_completed': data.get('Total requests', 0) == (
+                                    data.get('Succeed requests', 0) + data.get('Failed requests', 0)
+                                )
+                            })
+                            logger.debug(f"[PROGRESS] Updated {current_combination}: succeed={data.get('Succeed requests', 0)}, failed={data.get('Failed requests', 0)}")
+                
+                except json.JSONDecodeError as e:
+                    logger.debug(f"[PROGRESS] JSON decode error: {e}")
+                    continue
+            
+            # Add to combination_progress
+            for combo_key, combo_data in combinations.items():
+                combination_progress[combo_key] = combo_data
+                
+            logger.info(f"[PROGRESS] Parsed {len(combinations)} combinations from combined log")
+            
+        except Exception as e:
+            logger.error(f"Error parsing combined benchmark log {log_file}: {e}")
+    
+    def _parse_single_combination_log(self, log_file: str, combination_progress: dict, session_id: str):
+        """Parse a single combination benchmark.log file.
+        
+        Args:
+            log_file: Path to the benchmark.log file
+            combination_progress: Dictionary to store progress results  
+            session_id: Session ID for logging
+        """
+        try:
+            latest_progress = self._extract_latest_progress_from_log(log_file)
+            if latest_progress:
+                # Use default values for single combination
+                combination_key = "1_50"  # Default fallback
+                combination_progress[combination_key] = {
+                    'parallel': 1,
+                    'number': 50,
+                    'total_requests': latest_progress.get('Total requests', 0),
+                    'succeed_requests': latest_progress.get('Succeed requests', 0),
+                    'failed_requests': latest_progress.get('Failed requests', 0),
+                    'is_completed': latest_progress.get('Total requests', 0) == (
+                        latest_progress.get('Succeed requests', 0) + latest_progress.get('Failed requests', 0)
+                    )
+                }
+                logger.info(f"[PROGRESS] Single combination: {combination_progress[combination_key]}")
+                
+        except Exception as e:
+            logger.error(f"Error parsing single combination log {log_file}: {e}")
+
+    def _extract_latest_progress_from_log(self, log_file_path: str) -> Optional[Dict[str, Any]]:
+        """Extract the latest progress information from a benchmark.log file.
+        
+        Args:
+            log_file_path: Path to the benchmark.log file
+            
+        Returns:
+            Dictionary with latest progress data or None if not found
+        """
+        import json
+        
+        try:
+            latest_progress = None
+            
+            with open(log_file_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    
+                    # Look for JSON objects containing progress information
+                    try:
+                        data = json.loads(line)
+                        
+                        # Check if this line contains progress information
+                        if (isinstance(data, dict) and 
+                            'Total requests' in data and 
+                            'Succeed requests' in data and 
+                            'Failed requests' in data):
+                            
+                            latest_progress = data
+                            logger.debug(f"[PROGRESS] Found progress in log: {data}")
+                    
+                    except json.JSONDecodeError:
+                        # Skip non-JSON lines
+                        continue
+            
+            return latest_progress
+            
+        except Exception as e:
+            logger.error(f"Error reading log file {log_file_path}: {e}")
+            return None
+    
+    def _calculate_total_expected_requests(self, test_params: Dict[str, Any]) -> int:
+        """Calculate total expected requests from test parameters.
+        
+        Args:
+            test_params: Test parameters containing concurrency and num_requests lists
+            
+        Returns:
+            Total number of expected requests across all combinations
+        """
+        try:
+            num_requests_list = test_params.get('num_requests', [])
+            concurrency_list = test_params.get('concurrency', [])
+            
+            # Ensure lists
+            if not isinstance(num_requests_list, list):
+                num_requests_list = [num_requests_list]
+            if not isinstance(concurrency_list, list):
+                concurrency_list = [concurrency_list]
+            
+            # Calculate total expected requests
+            # Each combination (parallel, number) should process 'number' requests
+            total_expected = sum(num_requests_list)
+            
+            logger.info(f"[PROGRESS] Calculated total expected requests: {total_expected} from params: num_requests={num_requests_list}, concurrency={concurrency_list}")
+            
+            return total_expected
+            
+        except Exception as e:
+            logger.error(f"Error calculating total expected requests: {e}")
+            return 0
+
     def _update_session(self, session_id: str, updates: Dict[str, Any]):
         """Update session data.
         
