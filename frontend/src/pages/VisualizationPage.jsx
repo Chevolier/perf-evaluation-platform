@@ -13,7 +13,9 @@ import {
   Tree,
   Divider,
   Empty,
-  message
+  message,
+  Modal,
+  Popconfirm
 } from 'antd';
 import { Line } from '@ant-design/plots';
 import {
@@ -24,7 +26,8 @@ import {
   FolderOutlined,
   FileTextOutlined,
   CheckCircleOutlined,
-  DownloadOutlined
+  DownloadOutlined,
+  DeleteOutlined
 } from '@ant-design/icons';
 
 const { Title, Text } = Typography;
@@ -35,6 +38,7 @@ const API_BASE = process.env.REACT_APP_API_BASE || '';
 const VisualizationPage = () => {
   const [loading, setLoading] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [deleting, setDeleting] = useState({});
   const [error, setError] = useState(null);
   const [resultsTree, setResultsTree] = useState([]);
   
@@ -231,6 +235,47 @@ const VisualizationPage = () => {
     return searchNode(tree);
   };
 
+  // Delete a session
+  const handleDeleteSession = async (sessionId, sessionKey) => {
+    try {
+      setDeleting(prev => ({ ...prev, [sessionId]: true }));
+      
+      const response = await fetch(`${API_BASE}/api/stress-test/delete/${sessionId}`, {
+        method: 'DELETE'
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      
+      if (result.status === 'success') {
+        message.success(`Session ${sessionId} deleted successfully`);
+        
+        // Remove from selected results if it was selected
+        setSelectedResults(prev => prev.filter(key => key !== sessionKey));
+        
+        // Remove from result data
+        setResultData(prev => {
+          const newData = { ...prev };
+          delete newData[sessionKey];
+          return newData;
+        });
+        
+        // Refresh the results tree
+        fetchResultsStructure();
+      } else {
+        throw new Error(result.message || 'Failed to delete session');
+      }
+    } catch (error) {
+      console.error('Delete error:', error);
+      message.error(`Failed to delete session: ${error.message}`);
+    } finally {
+      setDeleting(prev => ({ ...prev, [sessionId]: false }));
+    }
+  };
+
   // Render hierarchical tree structure with checkboxes
   const renderResultsTree = () => {
     if (!resultsTree || resultsTree.length === 0) {
@@ -302,16 +347,36 @@ const VisualizationPage = () => {
               title: (
                 <Card size="small" style={{ marginBottom: 4, width: '100%' }}>
                   <Space direction="vertical" style={{ width: '100%' }}>
-                    <Space>
-                      <Checkbox
-                        checked={selectedResults.includes(session.key)}
-                        onChange={(e) => handleResultCheck(session.key, e.target.checked)}
+                    <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+                      <Space>
+                        <Checkbox
+                          checked={selectedResults.includes(session.key)}
+                          onChange={(e) => handleResultCheck(session.key, e.target.checked)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                        <Text strong>{session.session_id}</Text>
+                        {selectedResults.includes(session.key) && (
+                          <CheckCircleOutlined style={{ color: '#52c41a' }} />
+                        )}
+                      </Space>
+                      <Popconfirm
+                        title="Delete Session"
+                        description="Are you sure you want to delete this session? This will permanently remove all session files from disk."
+                        onConfirm={() => handleDeleteSession(session.session_id, session.key)}
+                        okText="Yes, Delete"
+                        cancelText="Cancel"
+                        okType="danger"
                         onClick={(e) => e.stopPropagation()}
-                      />
-                      <Text strong>{session.session_id}</Text>
-                      {selectedResults.includes(session.key) && (
-                        <CheckCircleOutlined style={{ color: '#52c41a' }} />
-                      )}
+                      >
+                        <Button
+                          type="text" 
+                          danger
+                          size="small"
+                          icon={<DeleteOutlined />}
+                          loading={deleting[session.session_id]}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </Popconfirm>
                     </Space>
                     <Text type="secondary" style={{ fontSize: 11 }}>
                       {new Date(session.timestamp).toLocaleString()}

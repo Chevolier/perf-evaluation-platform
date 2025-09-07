@@ -142,3 +142,26 @@ def recover_stress_test_session(session_id):
     except Exception as e:
         logger.error(f"Error recovering stress test session: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
+
+@stress_test_bp.route('/stress-test/delete/<session_id>', methods=['DELETE'])
+def delete_stress_test_session(session_id):
+    """Delete a stress test session and its associated files."""
+    try:
+        logger.info(f"Delete request for session: {session_id}")
+        
+        success = stress_test_service.delete_session_folder(session_id)
+        
+        if success:
+            return jsonify({
+                "status": "success", 
+                "message": f"Session {session_id} deleted successfully"
+            })
+        else:
+            return jsonify({
+                "status": "error", 
+                "message": f"Failed to delete session {session_id} - session not found or already deleted"
+            }), 404
+        
+    except Exception as e:
+        logger.error(f"Error deleting stress test session: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500

@@ -2742,6 +2742,67 @@ except Exception as e:
         if session_id in self.test_sessions:
             self.test_sessions[session_id].update(updates)
     
+    def delete_session_folder(self, session_id: str) -> bool:
+        """Delete a session folder and all its contents from disk.
+        
+        Args:
+            session_id: Session ID to delete
+            
+        Returns:
+            True if deletion was successful, False otherwise
+        """
+        import shutil
+        
+        try:
+            # First try to find session in memory to get output directory
+            session = self.test_sessions.get(session_id)
+            output_directory = None
+            
+            if session:
+                output_directory = session.get('output_directory')
+                logger.info(f"Found session {session_id} in memory with output directory: {output_directory}")
+            
+            # If not in memory or no output directory, search for session directory
+            if not output_directory:
+                project_root = Path(__file__).parent.parent.parent
+                outputs_dir = project_root / 'outputs'
+                
+                if outputs_dir.exists():
+                    for model_dir in outputs_dir.iterdir():
+                        if model_dir.is_dir():
+                            potential_session_dir = model_dir / session_id
+                            if potential_session_dir.exists():
+                                output_directory = str(potential_session_dir)
+                                logger.info(f"Found session directory by search: {output_directory}")
+                                break
+            
+            # If still not found, return False
+            if not output_directory:
+                logger.warning(f"Session {session_id} directory not found")
+                return False
+            
+            # Check if directory exists
+            session_path = Path(output_directory)
+            if not session_path.exists():
+                logger.warning(f"Session directory does not exist: {output_directory}")
+                return False
+            
+            # Delete the entire session directory
+            logger.info(f"Deleting session directory: {output_directory}")
+            shutil.rmtree(output_directory)
+            
+            # Remove from memory if present
+            if session_id in self.test_sessions:
+                del self.test_sessions[session_id]
+                logger.info(f"Removed session {session_id} from memory")
+            
+            logger.info(f"Successfully deleted session {session_id} and its folder")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error deleting session {session_id}: {e}")
+            return False
+    
     def generate_pdf_report_and_zip_session(self, session_id: str) -> Optional[bytes]:
         """Generate comprehensive PDF report and zip the entire session folder.
         
