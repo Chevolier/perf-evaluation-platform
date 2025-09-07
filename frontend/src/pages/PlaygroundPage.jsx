@@ -596,7 +596,7 @@ const PlaygroundPage = ({
                       <Text strong>模型名称：</Text>
                       <Input
                         name="model_name"
-                        autoComplete="off"
+                        autoComplete="model-name"
                         value={manualConfig.model_name}
                         onChange={(e) => setManualConfig({ ...manualConfig, model_name: e.target.value })}
                         placeholder="gpt-3.5-turbo"
