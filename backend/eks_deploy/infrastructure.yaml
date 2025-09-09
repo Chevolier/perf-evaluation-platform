@@ -258,13 +258,6 @@ Resources:
         - Key: Name
           Value: ApplicationSecurityGroup
 
-  ApplicationSecurityGroupInboundRule:
-    Type: AWS::EC2::SecurityGroupIngress
-    Properties:
-      GroupId: !Ref ApplicationSecurityGroup
-      IpProtocol: "-1"
-      SourceSecurityGroupId: !Ref ApplicationSecurityGroup
-
   EKSClusterSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -279,6 +272,21 @@ Resources:
       Tags:
         - Key: Name
           Value: EKSClusterSecurityGroup
+
+  ApplicationSecurityGroupInboundRuleForSelf:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ApplicationSecurityGroup
+      IpProtocol: "-1"
+      SourceSecurityGroupId: !Ref ApplicationSecurityGroup
+
+  ApplicationSecurityGroupInboundRuleForEKSCluster:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ApplicationSecurityGroup
+      IpProtocol: "-1"
+      SourceSecurityGroupId: !Ref EKSClusterSecurityGroup
+      dependsOn: EKSClusterSecurityGroup
 
   # EKS Auto Mode Cluster
   EKSCluster:
