@@ -449,17 +449,29 @@ def _get_bearer_token(cluster_name, region):
 
 if __name__ == '__main__':
 
-    # example output
+    # # example output
+    # cfn_output = {
+    #     "ClusterArn": "arn:aws:eks:us-east-1:867533378352:cluster/infplat-eksNHwAP",
+    #     "EKSClusterRole": "arn:aws:iam::867533378352:role/inference-platform-NHwAP-EKSClusterRole-9AS28ZKzVeOn",
+    #     "ApplicationSecurityGroup": "sg-04ccbe56577b13b2e",
+    #     "VpcId": "vpc-08aab5a0249482aed",
+    #     "ClusterName": "infplat-eksNHwAP",
+    #     "EKSClusterNodeRole": "arn:aws:iam::867533378352:role/inference-platform-NHwAP-EKSNodeRole-XJdRVRoHitRh",
+    #     "KubeconfigCommand": "aws eks update-kubeconfig --region us-east-1 --name infplat-eksNHwAP",
+    #     "ClusterEndpoint": "https://620FA7999A0DAC15B8BDDC8E259DF8D6.gr7.us-east-1.eks.amazonaws.com",
+    #     "Region": "us-east-1"
+    # }
+
     cfn_output = {
-        "ClusterArn": "arn:aws:eks:us-east-1:867533378352:cluster/infplat-eksNHwAP",
-        "EKSClusterRole": "arn:aws:iam::867533378352:role/inference-platform-NHwAP-EKSClusterRole-9AS28ZKzVeOn",
-        "ApplicationSecurityGroup": "sg-04ccbe56577b13b2e",
-        "VpcId": "vpc-08aab5a0249482aed",
-        "ClusterName": "infplat-eksNHwAP",
-        "EKSClusterNodeRole": "arn:aws:iam::867533378352:role/inference-platform-NHwAP-EKSNodeRole-XJdRVRoHitRh",
-        "KubeconfigCommand": "aws eks update-kubeconfig --region us-east-1 --name infplat-eksNHwAP",
-        "ClusterEndpoint": "https://620FA7999A0DAC15B8BDDC8E259DF8D6.gr7.us-east-1.eks.amazonaws.com",
-        "Region": "us-east-1"
+        'ClusterArn': 'arn:aws:eks:us-west-2:452145973879:cluster/infplat-eks2yjFk', 
+        'EKSClusterRole': 'arn:aws:iam::452145973879:role/inference-platform-2yjFk-EKSClusterRole-k8UPB7CRv2F4', 
+        'ApplicationSecurityGroup': 'sg-000c66aca1c27d3fd', 
+        'VpcId': 'vpc-09bc06bc0f85b8f1c', 
+        'ClusterName': 'infplat-eks2yjFk', 
+        'EKSClusterNodeRole': 'arn:aws:iam::452145973879:role/inference-platform-2yjFk-EKSNodeRole-CXRwYEdNqDba', 
+        'Region': 'us-west-2', 
+        'KubeconfigCommand': 'aws eks update-kubeconfig --region us-west-2 --name infplat-eks2yjFk', 
+        'ClusterEndpoint': 'https://40182EBBF41B37B20BD4FEE4A0F58FAB.gr7.us-west-2.eks.amazonaws.com'
     }
 
     api_client = get_eks_api_client(cluster_name=cfn_output['ClusterName'],

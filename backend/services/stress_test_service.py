@@ -1944,6 +1944,8 @@ except Exception as e:
         image_height = test_params.get('image_height', 512)
         image_num = test_params.get('image_num', 1)
         image_format = test_params.get('image_format', 'RGB')
+
+        print(f"test_params: {test_params}")
         
         logger.info(f"[DEBUG] Custom API - Raw parameters from frontend:")
         logger.info(f"[DEBUG]   num_requests: {num_requests_list} (type: {type(num_requests_list)})")
@@ -2382,6 +2384,9 @@ except Exception as e:
         else:
             base_model = model_name
         
+        if "Qwen-Qwen" in base_model:
+            base_model = base_model[5:]
+
         logger.info(f"[DEBUG] Extracting tokenizer for model: {model_name} -> base: {base_model}")
         
         # Map model families to their tokenizer paths
