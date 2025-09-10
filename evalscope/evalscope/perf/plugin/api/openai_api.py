@@ -106,9 +106,7 @@ class OpenaiPlugin(DefaultApiPlugin):
         
         # when stream, the last response is the full usage
         # when non-stream, the last response is the first response
-        # print(f"responses: {responses}")
         last_response_js = responses[-1]
-        # print(f"\nlast_response_js: {last_response_js}")
         if 'usage' in last_response_js and last_response_js['usage']:
             input_tokens = last_response_js['usage']['prompt_tokens']
             output_tokens = last_response_js['usage']['completion_tokens']
