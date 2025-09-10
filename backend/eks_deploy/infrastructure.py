@@ -2,6 +2,7 @@ import logging
 import random
 import string
 import time
+from dataclasses import dataclass
 
 import boto3
 
@@ -13,45 +14,83 @@ def random_string():
     return ''.join(random.sample(string.ascii_letters + string.digits, 5))
 
 
-def create_infrastructure_stack():
+@dataclass
+class InfrastructureOutput:
 
-    caller_identity = boto3.client('sts').get_caller_identity()
-    template = open('./infrastructure.yaml', 'r').read().replace(
-        '${{__CLIENT_CALLER_ARN__}}', caller_identity['Arn'])
+    cluster_arn: str
 
-    c = boto3.client('cloudformation')
+    eks_cluster_role: str
 
-    rs = random_string()
-    stack_name = "inference-platform-" + rs
-    stack = c.create_stack(
-        StackName=stack_name, TemplateBody=template,
-        Parameters=[
-            {'ParameterKey': 'ClusterName', 'ParameterValue': 'infplat-eks' + rs}
-        ],
-        Capabilities=['CAPABILITY_IAM', 'CAPABILITY_NAMED_IAM'],
-    )
+    application_security_group: str
 
-    while (True):
-        resp = c.describe_stacks(StackName=stack_name)
-        status = resp['Stacks'][0]['StackStatus']
-        if status == 'CREATE_COMPLETE':
-            result = {}
-            outputs = resp['Stacks'][0]['Outputs']
-            for item in outputs:
-                result[item['OutputKey']] = item['OutputValue']
-            return result
-        elif status == 'CREATE_IN_PROGRESS':
-            logging.info("waiting for cloudformation complete...")
-            time.sleep(30)
-        else:
-            raise ValueError(
-                "Stack {} in status {}".format(stack_name, status))
+    vpc_id: str
+
+    cluster_name: str
+
+    eks_cluster_node_role: str
+
+    kubeconfig_command: str
+
+    cluster_endpoint: str
+
+    region: str
 
 
-if __name__ == '__main__':
-    outputs = create_infrastructure_stack()
+class Infrastructure:
 
-    # example result:
-    #
-    # {'ClusterArn': 'arn:aws:eks:us-east-1:867533378352:cluster/infplat-eksNHwAP', 'EKSClusterRole': 'arn:aws:iam::867533378352:role/inference-platform-NHwAP-EKSClusterRole-9AS28ZKzVeOn', 'ApplicationSecurityGroup': 'sg-04ccbe56577b13b2e', 'VpcId': 'vpc-08aab5a0249482aed', 'ClusterName': 'infplat-eksNHwAP', 'EKSClusterNodeRole': 'arn:aws:iam::867533378352:role/inference-platform-NHwAP-EKSNodeRole-XJdRVRoHitRh', 'KubeconfigCommand': 'aws eks update-kubeconfig --region us-east-1 --name infplat-eksNHwAP', 'ClusterEndpoint': 'https://620FA7999A0DAC15B8BDDC8E259DF8D6.gr7.us-east-1.eks.amazonaws.com', 'Region': 'us-east-1'}
-    print(outputs)
+    def __init__(self, cfn_tpl_file):
+        self.cfn_tpl_file = cfn_tpl_file
+        self.stack_name = "perf-infplat-" + random_string()
+        self.cfn_client = boto3.client('cloudformation')
+
+    def _create_stack(self):
+        tpl_body = open(self.cfn_tpl_file).read()
+        return self.cfn_client.create_stack(
+            StackName=self.stack_name,
+            TemplateBody=tpl_body,
+            Parameters=[
+                {'ParameterKey': 'ClusterName',
+                    'ParameterValue': self.stack_name + '-eks'}
+            ],
+            Capabilities=['CAPABILITY_IAM', 'CAPABILITY_NAMED_IAM'],
+        )
+
+    def _wait_for_complete(self):
+        while (True):
+            resp = self.cfn_client.describe_stacks(StackName=self.stack_name)
+            status = resp['Stacks'][0]['StackStatus']
+            if status == 'CREATE_COMPLETE':
+                return True
+            elif status == 'CREATE_IN_PROGRESS':
+                logging.info(
+                    f"waiting for cloudformation complete, stack name: {self.stack_name}...")
+                time.sleep(30)
+            else:
+                raise ValueError(
+                    "Stack {} in status {}".format(self.stack_name, status))
+
+    def _get_stack_output(self):
+        resp = self.cfn_client.describe_stacks(StackName=self.stack_name)
+        outputs = resp['Stacks'][0]['Outputs']
+        result = {}
+        for item in outputs:
+            result[item['OutputKey']] = item['OutputValue']
+
+        output = InfrastructureOutput(
+            cluster_arn=result['ClusterArn'],
+            eks_cluster_role=result['EKSClusterRole'],
+            application_security_group=result['ApplicationSecurityGroup'],
+            vpc_id=result['VpcId'],
+            cluster_name=result['ClusterName'],
+            eks_cluster_node_role=result['EKSClusterNodeRole'],
+            kubeconfig_command=result['KubeconfigCommand'],
+            cluster_endpoint=result['ClusterEndpoint'],
+            region=result['Region']
+        )
+
+        return output
+
+    def create_stack_and_wait_for_complete(self):
+        self._create_stack()
+        self._wait_for_complete()
+        return self._get_stack_output()
