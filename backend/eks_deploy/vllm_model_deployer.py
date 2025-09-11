@@ -16,7 +16,9 @@ class VllmModelDeployer:
         self.k8s_api_client = EksApiClient(
             eks_cluster_name, region).eks_api_client()
 
-    def create_server_deployment(self, replicas: int = 1, vllm_model: str = "Qwen/Qwen3-8B", tp_size: int = 1, gpu_request: int = 1):
+    def create_server_deployment(self, replicas: int = 1, vllm_model: str = "Qwen/Qwen3-8B", tp_size: int = 1, gpu_request: int = 1,
+                                 gpu_memory_utilization: float = 0.9, max_model_len: int = 2048):
+
         manifest = {
             "apiVersion": "apps/v1",
             "kind": "Deployment",
@@ -48,7 +50,11 @@ class VllmModelDeployer:
                                     "--model",
                                     f"{vllm_model}",
                                     "--tensor-parallel-size",
-                                    f"{tp_size}"
+                                    f"{tp_size}",
+                                    "--gpu-memory-utilization",
+                                    f"{gpu_memory_utilization}",
+                                    "--max-model-len",
+                                    f"{max_model_len}",
                                 ],
                                 "ports": [
                                     {
