@@ -509,8 +509,7 @@ const StressTestPage = () => {
               color: ['#1890ff', '#52c41a', '#faad14', '#f5222d', '#722ed1', '#13c2c2'][index % 6]
             },
             hovertemplate: '<b>' + metric.title + '</b><br>' +
-                          'Concurrency: %{x}<br>' +
-                          metric.yLabel + ': %{y}<br>' +
+                          '%{y}<br>' +
                           '<extra></extra>'
           }];
 

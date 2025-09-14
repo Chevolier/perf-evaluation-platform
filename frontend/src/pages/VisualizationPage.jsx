@@ -745,8 +745,7 @@ const VisualizationPage = () => {
                     color: colors[index % colors.length]
                   },
                   hovertemplate: '<b>%{fullData.name}</b><br>' +
-                                'Concurrency: %{x}<br>' +
-                                '${metric}: %{y}<br>' +
+                                '%{y}<br>' +
                                 '<extra></extra>'
                 };
               });
