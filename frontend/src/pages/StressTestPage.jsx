@@ -516,16 +516,28 @@ const StressTestPage = () => {
           return `
             <div class="chart-container">
               <div class="chart-title">${metric.title}</div>
-              <div id="chart-${metric.key}" style="height: 400px;"></div>
+              <div id="chart-${metric.key}" style="width: 100%; height: 400px;"></div>
               <script>
-                Plotly.newPlot('chart-${metric.key}', ${JSON.stringify(traces)}, {
-                  title: false,
-                  xaxis: { title: 'Concurrency Level' },
-                  yaxis: { title: '${metric.yLabel}' },
-                  hovermode: 'x unified',
-                  showlegend: false,
-                  margin: { t: 20, r: 20, b: 60, l: 80 }
-                }, {responsive: true});
+                (function() {
+                    var chartDiv = document.getElementById('chart-${metric.key}');
+                    Plotly.newPlot(chartDiv, ${JSON.stringify(traces)}, {
+                      title: false,
+                      xaxis: { title: 'Concurrency Level' },
+                      yaxis: { title: '${metric.yLabel}' },
+                      hovermode: 'x unified',
+                      showlegend: false,
+                      margin: { t: 10, r: 40, b: 60, l: 60 },
+                      autosize: true
+                    }, {
+                      responsive: true,
+                      displayModeBar: false
+                    });
+
+                    // Ensure proper resize
+                    window.addEventListener('resize', function() {
+                        Plotly.Plots.resize(chartDiv);
+                    });
+                })();
               </script>
             </div>
           `;
@@ -594,7 +606,7 @@ const StressTestPage = () => {
         }
         .charts-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+            grid-template-columns: repeat(2, 1fr);
             gap: 30px;
             margin: 30px 0;
         }
@@ -604,6 +616,13 @@ const StressTestPage = () => {
             border-radius: 8px;
             padding: 20px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            min-height: 500px;
+            display: flex;
+            flex-direction: column;
+        }
+        .chart-container > div:last-child {
+            flex: 1;
+            min-height: 400px;
         }
         .chart-title {
             font-size: 18px;
@@ -636,6 +655,11 @@ const StressTestPage = () => {
         .performance-table th {
             background-color: #f0f0f0;
             font-size: 11px;
+        }
+        @media (max-width: 1200px) {
+            .charts-grid {
+                grid-template-columns: 1fr;
+            }
         }
     </style>
 </head>
