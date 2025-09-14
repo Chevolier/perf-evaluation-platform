@@ -36,6 +36,23 @@ import { Line } from '@ant-design/plots';
 const { Title, Text } = Typography;
 const { Option } = Select;
 
+// AWS Instance pricing per hour (USD) - on-demand pricing
+const INSTANCE_PRICING = {
+  'g5.xlarge': 1.006,
+  'g5.2xlarge': 1.212,
+  'g5.4xlarge': 1.624,
+  'g5.8xlarge': 2.472,
+  'g5.12xlarge': 4.944,
+  'g5.16xlarge': 6.592,
+  'g5.24xlarge': 9.888,
+  'g5.48xlarge': 19.776,
+  'p4d.24xlarge': 32.7726,
+  'p4de.24xlarge': 40.9656,
+  'p5.48xlarge': 98.32,
+  // Default fallback for unknown instances
+  'default': 2.0
+};
+
 const StressTestPage = () => {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
@@ -489,23 +506,41 @@ const StressTestPage = () => {
           { key: 'total_toks_per_sec', title: 'Total Throughput vs Concurrency', yLabel: 'Tokens per Second' },
           { key: 'avg_latency', title: 'Average Latency vs Concurrency', yLabel: 'Latency (seconds)' },
           { key: 'avg_ttft', title: 'Average TTFT vs Concurrency', yLabel: 'TTFT (seconds)' },
-          { key: 'avg_tpot', title: 'Average TPOT vs Concurrency', yLabel: 'TPOT (seconds)' }
+          { key: 'avg_tpot', title: 'Average TPOT vs Concurrency', yLabel: 'TPOT (seconds)' },
+          { key: 'avg_itl', title: 'Average ITL vs Concurrency', yLabel: 'ITL (seconds)' },
+          { key: 'pricing', title: 'Output Pricing vs Concurrency', yLabel: 'USD per 1M tokens' }
         ];
 
         chartsHtml = metrics.map((metric, index) => {
+          // Special handling for pricing calculation
+          let yValues;
+          if (metric.key === 'pricing') {
+            yValues = chartData.map(d => {
+              const outputThroughput = d.gen_toks_per_sec || 0;
+              const instanceType = 'g5.2xlarge'; // Default instance type
+              const hourlyPrice = INSTANCE_PRICING[instanceType] || INSTANCE_PRICING['default'];
+
+              // Calculate cost: time to generate 1M tokens (hours) * hourly price
+              const timeForMillionTokensHours = outputThroughput > 0 ? (1000000 / outputThroughput) / 3600 : 0;
+              return timeForMillionTokensHours * hourlyPrice;
+            });
+          } else {
+            yValues = chartData.map(d => d[metric.key] || 0);
+          }
+
           const traces = [{
             x: chartData.map(d => d.concurrency),
-            y: chartData.map(d => d[metric.key] || 0),
+            y: yValues,
             type: 'scatter',
             mode: 'lines+markers',
             name: metric.title,
             line: {
-              color: ['#1890ff', '#52c41a', '#faad14', '#f5222d', '#722ed1', '#13c2c2'][index % 6],
+              color: ['#1890ff', '#52c41a', '#faad14', '#f5222d', '#722ed1', '#13c2c2', '#eb2f96', '#fa8c16'][index % 8],
               width: 3
             },
             marker: {
               size: 8,
-              color: ['#1890ff', '#52c41a', '#faad14', '#f5222d', '#722ed1', '#13c2c2'][index % 6]
+              color: ['#1890ff', '#52c41a', '#faad14', '#f5222d', '#722ed1', '#13c2c2', '#eb2f96', '#fa8c16'][index % 8]
             },
             hovertemplate: '<b>' + metric.title + '</b><br>' +
                           '%{y}<br>' +
@@ -1117,7 +1152,7 @@ const StressTestPage = () => {
       yField: 'avg_tpot',
       smooth: true,
       color: '#13c2c2',
-      point: { 
+      point: {
         size: 4,
         shape: 'circle'
       },
@@ -1129,6 +1164,66 @@ const StressTestPage = () => {
       yAxis: {
         title: {
           text: 'Average TPOT (s)'
+        }
+      }
+    };
+
+    const itlConfig = {
+      data: chartData,
+      xField: 'concurrency',
+      yField: 'avg_itl',
+      smooth: true,
+      color: '#eb2f96',
+      point: {
+        size: 4,
+        shape: 'circle'
+      },
+      xAxis: {
+        title: {
+          text: 'Concurrency'
+        }
+      },
+      yAxis: {
+        title: {
+          text: 'Average ITL (s)'
+        }
+      }
+    };
+
+    // Calculate output pricing data
+    const pricingData = chartData.map(row => {
+      const outputThroughput = row.gen_toks_per_sec || 0;
+      const instanceType = 'g5.2xlarge'; // Default instance type - could be made dynamic
+      const hourlyPrice = INSTANCE_PRICING[instanceType] || INSTANCE_PRICING['default'];
+
+      // Calculate cost: time to generate 1M tokens (hours) * hourly price
+      const timeForMillionTokensHours = outputThroughput > 0 ? (1000000 / outputThroughput) / 3600 : 0;
+      const outputPricingPerMillionTokens = timeForMillionTokensHours * hourlyPrice;
+
+      return {
+        ...row,
+        pricing: outputPricingPerMillionTokens
+      };
+    });
+
+    const pricingConfig = {
+      data: pricingData,
+      xField: 'concurrency',
+      yField: 'pricing',
+      smooth: true,
+      color: '#fa8c16',
+      point: {
+        size: 4,
+        shape: 'circle'
+      },
+      xAxis: {
+        title: {
+          text: 'Concurrency'
+        }
+      },
+      yAxis: {
+        title: {
+          text: 'Output Pricing ($/1M tokens)'
         }
       }
     };
@@ -1171,6 +1266,18 @@ const StressTestPage = () => {
               <Text strong>Average TPOT vs Concurrency</Text>
             </div>
             <Line {...tpotConfig} height={200} />
+          </Col>
+          <Col span={12}>
+            <div style={{ textAlign: 'center', marginBottom: '16px' }}>
+              <Text strong>Average ITL vs Concurrency</Text>
+            </div>
+            <Line {...itlConfig} height={200} />
+          </Col>
+          <Col span={12}>
+            <div style={{ textAlign: 'center', marginBottom: '16px' }}>
+              <Text strong>Output Pricing vs Concurrency</Text>
+            </div>
+            <Line {...pricingConfig} height={200} />
           </Col>
         </Row>
       </Card>
