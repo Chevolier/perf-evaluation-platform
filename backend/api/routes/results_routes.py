@@ -221,13 +221,69 @@ def get_result_data():
                             processed_row[key] = value
                     performance_data.append(processed_row)
             
+            # Load benchmark summary data for each concurrency level to get inter-token latency
+            benchmark_summaries = {}
+
+            # Look for benchmark_summary.json files in parallel_*_number_* subdirectories
+            # The structure can be:
+            # session_dir/parallel_*/benchmark_summary.json
+            # session_dir/model/parallel_*/benchmark_summary.json
+            # session_dir/timestamp/model/parallel_*/benchmark_summary.json
+
+            def find_parallel_dirs(directory):
+                """Recursively find parallel_* directories containing benchmark_summary.json"""
+                parallel_dirs = []
+                try:
+                    for item in directory.iterdir():
+                        if item.is_dir():
+                            if item.name.startswith('parallel_'):
+                                benchmark_file = item / 'benchmark_summary.json'
+                                if benchmark_file.exists():
+                                    parallel_dirs.append(benchmark_file)
+                            else:
+                                # Recursively search subdirectories (max 3 levels deep to avoid infinite loops)
+                                parallel_dirs.extend(find_parallel_dirs(item))
+                except Exception as e:
+                    logger.debug(f"Could not search directory {directory}: {e}")
+                return parallel_dirs
+
+            # Find all benchmark_summary.json files
+            benchmark_files = find_parallel_dirs(session_dir)
+            logger.info(f"Found {len(benchmark_files)} benchmark_summary.json files")
+
+            for benchmark_summary_file in benchmark_files:
+                try:
+                    with open(benchmark_summary_file, 'r', encoding='utf-8') as f:
+                        benchmark_data = json.load(f)
+                        concurrency = benchmark_data.get('Number of concurrency', 0)
+                        benchmark_summaries[concurrency] = benchmark_data
+                        logger.info(f"Loaded benchmark summary for concurrency {concurrency} from {benchmark_summary_file}")
+                except Exception as e:
+                    logger.warning(f"Failed to load benchmark summary from {benchmark_summary_file}: {e}")
+
+            # Enrich performance data with inter-token latency from benchmark summaries
+            logger.info(f"Found {len(benchmark_summaries)} benchmark summaries: {list(benchmark_summaries.keys())}")
+            for row in performance_data:
+                concurrency = int(row.get('Concurrency', 0))
+                if concurrency in benchmark_summaries:
+                    # Add inter-token latency from benchmark summary
+                    itl_value = benchmark_summaries[concurrency].get('Average inter-token latency (s)', row.get('Avg_TPOT_s', 0))
+                    tpot_value = row.get('Avg_TPOT_s', 0)
+                    row['Avg_ITL_s'] = itl_value
+                    logger.info(f"Enhanced concurrency {concurrency}: TPOT={tpot_value}, ITL={itl_value}")
+                else:
+                    # Fallback to TPOT if no benchmark summary available
+                    fallback_value = row.get('Avg_TPOT_s', 0)
+                    row['Avg_ITL_s'] = fallback_value
+                    logger.info(f"Fallback for concurrency {concurrency}: using TPOT={fallback_value} as ITL")
+
             # Prepare summary data in the format expected by frontend
             summary_data = {}
             percentile_data = []
-            
+
             for row in performance_data:
                 concurrency = row.get('Concurrency', 0)
-                
+
                 # Add each row as a summary point
                 summary_data[f"concurrency_{int(concurrency)}"] = {
                     'Request throughput (req/s)': row.get('RPS_req_s', 0),
@@ -236,6 +292,7 @@ def get_result_data():
                     'Average latency (s)': row.get('Avg_Latency_s', 0),
                     'Average time to first token (s)': row.get('Avg_TTFT_s', 0),
                     'Average time per output token (s)': row.get('Avg_TPOT_s', 0),
+                    'Average inter-token latency (s)': row.get('Avg_ITL_s', row.get('Avg_TPOT_s', 0)),
                     'concurrency': concurrency
                 }
                 

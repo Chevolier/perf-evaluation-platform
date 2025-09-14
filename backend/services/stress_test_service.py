@@ -1281,6 +1281,7 @@ except Exception as e:
                 p99_ttft = avg_ttft * 1.5  # Approximate P99 from average
                 avg_tpot = result.get('Average time per output token (s)', 0)
                 p99_tpot = avg_tpot * 1.2  # Approximate P99 from average
+                avg_itl = result.get('Average inter-token latency (s)', avg_tpot)  # Get inter-token latency, fallback to TPOT if not available
                 success_rate = (result.get('Succeed requests', 0) / max(result.get('Total requests', 1), 1)) * 100
                 
                 # Update totals for summary
@@ -1297,7 +1298,7 @@ except Exception as e:
                 
                 table_entry = {
                     'concurrency': concurrency,
-                    'requests': requests, 
+                    'requests': requests,
                     'rps': rps,
                     'avg_latency': avg_latency,
                     'p99_latency': p99_latency,
@@ -1307,6 +1308,7 @@ except Exception as e:
                     'p99_ttft': p99_ttft,
                     'avg_tpot': avg_tpot,
                     'p99_tpot': p99_tpot,
+                    'avg_itl': avg_itl,
                     'success_rate': success_rate
                 }
                 table_data.append(table_entry)
@@ -1497,6 +1499,7 @@ except Exception as e:
                 p99_ttft = avg_ttft * 1.5  # Approximate P99 from average
                 avg_tpot = data.get('Average time per output token (s)', 0)
                 p99_tpot = avg_tpot * 1.2  # Approximate P99 from average
+                avg_itl = data.get('Average inter-token latency (s)', avg_tpot)  # Get inter-token latency, fallback to TPOT if not available
                 success_rate = (data.get('Succeed requests', 0) / max(data.get('Total requests', 1), 1)) * 100
                 
                 # Update totals for summary
@@ -1513,7 +1516,7 @@ except Exception as e:
                 
                 table_entry = {
                     'concurrency': concurrency,
-                    'requests': requests, 
+                    'requests': requests,
                     'rps': rps,
                     'avg_latency': avg_latency,
                     'p99_latency': p99_latency,
@@ -1523,6 +1526,7 @@ except Exception as e:
                     'p99_ttft': p99_ttft,
                     'avg_tpot': avg_tpot,
                     'p99_tpot': p99_tpot,
+                    'avg_itl': avg_itl,
                     'success_rate': success_rate
                 }
                 table_data.append(table_entry)
