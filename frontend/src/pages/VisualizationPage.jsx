@@ -565,14 +565,15 @@ const VisualizationPage = () => {
         performanceData.forEach(row => {
           const concurrency = row.Concurrency || 0;
           
-          // Add data points for the 6 specific metrics requested
+          // Add data points for the 7 specific metrics requested
           const metrics = [
             { name: 'Request throughput (req/s)', value: row.RPS_req_s },
             { name: 'Output token throughput (tok/s)', value: row.Gen_Throughput_tok_s },
             { name: 'Total token throughput (tok/s)', value: row.Total_Throughput_tok_s },
             { name: 'Average latency (s)', value: row.Avg_Latency_s },
             { name: 'Average time to first token (s)', value: row.Avg_TTFT_s },
-            { name: 'Average time per output token (s)', value: row.Avg_TPOT_s }
+            { name: 'Average time per output token (s)', value: row.Avg_TPOT_s },
+            { name: 'Average inter-token latency (s)', value: row.Avg_ITL_s || row.Avg_TPOT_s } // Use TPOT as fallback
           ];
           
           metrics.forEach(metric => {
@@ -616,14 +617,15 @@ const VisualizationPage = () => {
       return <Empty description="No summary data available" />;
     }
 
-    // Define the 6 specific metrics requested (in display order)
+    // Define the 7 specific metrics requested (in display order)
     const allowedMetrics = [
       'Request throughput (req/s)',
       'Output token throughput (tok/s)',
       'Total token throughput (tok/s)',
       'Average latency (s)',
       'Average time to first token (s)',
-      'Average time per output token (s)'
+      'Average time per output token (s)',
+      'Average inter-token latency (s)'
     ];
 
     // Group by metric type and filter to only allowed metrics
@@ -725,7 +727,7 @@ const VisualizationPage = () => {
     if (metric === 'Output token throughput (tok/s)' || metric === 'Total token throughput (tok/s)') {
       return 'tok/s';
     }
-    if (metric === 'Average latency (s)' || metric === 'Average time to first token (s)' || metric === 'Average time per output token (s)') {
+    if (metric === 'Average latency (s)' || metric === 'Average time to first token (s)' || metric === 'Average time per output token (s)' || metric === 'Average inter-token latency (s)') {
       return 'seconds';
     }
     return '';
@@ -1285,7 +1287,7 @@ const VisualizationPage = () => {
                     <DashboardOutlined /> Performance Metrics vs Concurrency
                   </Title>
                   <Text type="secondary">
-                    RPS, Gen Throughput, Total Throughput, Avg Latency, Avg Time to First Token, and Avg Time per Output Token vs Concurrency
+                    RPS, Gen Throughput, Total Throughput, Avg Latency, Avg Time to First Token, Avg Time per Output Token, and Avg Inter-token Latency vs Concurrency
                   </Text>
                   <Divider />
                   {renderSummaryCharts()}

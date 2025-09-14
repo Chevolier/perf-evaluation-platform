@@ -18,6 +18,8 @@ logger = get_logger(__name__)
 
 # Test logging immediately when module loads
 logger.info("🔧 StressTestService module loaded - testing logger functionality")
+logger.debug("🧪 DEBUG: StressTestService module debug logging test")
+logger.warning("⚠️ WARNING: StressTestService module warning logging test")
 
 class StressTestService:
     """Service for managing stress tests."""
@@ -313,6 +315,7 @@ class StressTestService:
                                 'p99_ttft': float(row['P99_TTFT_s']),
                                 'avg_tpot': float(row['Avg_TPOT_s']),
                                 'p99_tpot': float(row['P99_TPOT_s']),
+                                'avg_itl': float(row.get('Avg_ITL_s', row['Avg_TPOT_s'])),  # Inter-token latency, fallback to TPOT if not present
                                 'success_rate': float(row['Success_Rate_%'])
                             })
                     
@@ -1757,7 +1760,7 @@ except Exception as e:
             headers = [
                 'Concurrency', 'Total_Requests', 'Succeed_Requests', 'Failed_Requests',
                 'RPS_req_s', 'Avg_Latency_s', 'P99_Latency_s', 'Avg_TTFT_s', 'P99_TTFT_s',
-                'Avg_TPOT_s', 'P99_TPOT_s', 'Gen_Throughput_tok_s', 'Total_Throughput_tok_s',
+                'Avg_TPOT_s', 'P99_TPOT_s', 'Avg_ITL_s', 'Gen_Throughput_tok_s', 'Total_Throughput_tok_s',
                 'Success_Rate_%'
             ]
             
@@ -1784,6 +1787,7 @@ except Exception as e:
                         round(row.get('p99_ttft', 0), 4),
                         round(row.get('avg_tpot', 0), 4),
                         round(row.get('p99_tpot', 0), 4),
+                        round(row.get('avg_itl', row.get('avg_tpot', 0)), 4),  # Inter-token latency, fallback to TPOT
                         round(row.get('gen_toks_per_sec', 0), 4),
                         round(row.get('total_toks_per_sec', 0), 4),
                         round(success_rate, 1)
@@ -1944,8 +1948,6 @@ except Exception as e:
         image_height = test_params.get('image_height', 512)
         image_num = test_params.get('image_num', 1)
         image_format = test_params.get('image_format', 'RGB')
-
-        print(f"test_params: {test_params}")
         
         logger.info(f"[DEBUG] Custom API - Raw parameters from frontend:")
         logger.info(f"[DEBUG]   num_requests: {num_requests_list} (type: {type(num_requests_list)})")
