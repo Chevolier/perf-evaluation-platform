@@ -522,11 +522,11 @@ const StressTestPage = () => {
                     var chartDiv = document.getElementById('chart-${metric.key}');
                     Plotly.newPlot(chartDiv, ${JSON.stringify(traces)}, {
                       title: false,
-                      xaxis: { title: 'Concurrency Level' },
+                      xaxis: { title: 'Concurrency' },
                       yaxis: { title: '${metric.yLabel}' },
                       hovermode: 'x unified',
                       showlegend: false,
-                      margin: { t: 10, r: 40, b: 60, l: 60 },
+                      margin: { t: 10, r: 40, b: 80, l: 60 },
                       autosize: true
                     }, {
                       responsive: true,

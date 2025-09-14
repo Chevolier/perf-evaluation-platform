@@ -771,12 +771,12 @@ const VisualizationPage = () => {
                             var chartDiv = document.getElementById('chart-${metric.replace(/[^a-zA-Z0-9]/g, '')}');
                             Plotly.newPlot(chartDiv, ${JSON.stringify(traces)}, {
                                 title: false,
-                                xaxis: { title: 'Concurrency Level' },
+                                xaxis: { title: 'Concurrency' },
                                 yaxis: { title: '${getMetricUnit(metric)}' },
                                 hovermode: 'x unified',
                                 showlegend: true,
-                                legend: { orientation: 'h', y: -0.15 },
-                                margin: { t: 10, r: 40, b: 80, l: 60 },
+                                legend: { orientation: 'h', y: -0.25, x: 0.5, xanchor: 'center' },
+                                margin: { t: 10, r: 40, b: 120, l: 60 },
                                 autosize: true
                             }, {
                                 responsive: true,
