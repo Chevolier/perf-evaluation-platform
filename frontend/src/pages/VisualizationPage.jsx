@@ -1028,8 +1028,8 @@ const VisualizationPage = () => {
           currentY += 10;
 
           // Table setup
-          const headers = ['Concurrency', 'RPS', 'Gen Tput', 'Total Tput', 'Avg Lat', 'Avg TTFT', 'Avg TPOT'];
-          const colWidths = [20, 20, 20, 22, 20, 20, 22];
+          const headers = ['Concurrency', 'RPS', 'Gen Tput', 'Total Tput', 'Avg Lat', 'Avg TTFT', 'Avg TPOT', 'Avg ITL', 'Cost/1M$'];
+          const colWidths = [18, 18, 18, 20, 18, 18, 18, 18, 20];
           const tableWidth = colWidths.reduce((sum, width) => sum + width, 0);
           const tableStartX = margin;
           const tableStartY = currentY;
@@ -1048,7 +1048,7 @@ const VisualizationPage = () => {
           doc.rect(tableStartX, tableStartY - 2, tableWidth, 8);
 
           // Table column headers
-          doc.setFontSize(8);
+          doc.setFontSize(7); // Smaller font for more columns
           doc.setFont('helvetica', 'bold');
           doc.setTextColor(0, 0, 0);
           let xPos = tableStartX + 2;
@@ -1067,6 +1067,7 @@ const VisualizationPage = () => {
 
           // Table data rows
           doc.setFont('helvetica', 'normal');
+          doc.setFontSize(6); // Smaller font for data rows to fit more columns
           let rowIndex = 0;
           
           performanceData.forEach(row => {
@@ -1080,15 +1081,15 @@ const VisualizationPage = () => {
               doc.setFont('helvetica', 'bold');
               doc.text(`${result.model} - ${result.session_id} Performance Metrics (continued)`, margin, currentY);
               currentY += 12;
-              
-              // Repeat headers
+
+              // Repeat headers with new table width
               const newTableStartY = currentY;
               doc.setFillColor(240, 240, 240);
               doc.rect(tableStartX, newTableStartY - 2, tableWidth, 8, 'F');
               doc.setDrawColor(0, 0, 0);
               doc.rect(tableStartX, newTableStartY - 2, tableWidth, 8);
-              
-              doc.setFontSize(8);
+
+              doc.setFontSize(7); // Smaller font for more columns
               doc.setFont('helvetica', 'bold');
               xPos = tableStartX + 2;
               headers.forEach((header, i) => {
@@ -1101,6 +1102,7 @@ const VisualizationPage = () => {
               });
               currentY += 8;
               doc.setFont('helvetica', 'normal');
+              doc.setFontSize(6); // Smaller font for data rows
               rowIndex = 0;
             }
 
@@ -1115,6 +1117,14 @@ const VisualizationPage = () => {
             doc.rect(tableStartX, currentY - 2, tableWidth, 6);
 
             xPos = tableStartX + 2;
+
+            // Calculate output pricing for this row
+            const outputThroughput = row.Gen_Throughput_tok_s || 0;
+            const instanceType = result.instance_type || 'default';
+            const hourlyPrice = INSTANCE_PRICING[instanceType] || INSTANCE_PRICING['default'];
+            const timeForMillionTokensHours = outputThroughput > 0 ? (1000000 / outputThroughput) / 3600 : 0;
+            const outputPricingPerMillionTokens = timeForMillionTokensHours * hourlyPrice;
+
             const values = [
               row.Concurrency || 0,
               (row.RPS_req_s || 0).toFixed(2),
@@ -1122,7 +1132,9 @@ const VisualizationPage = () => {
               (row.Total_Throughput_tok_s || 0).toFixed(2),
               (row.Avg_Latency_s || 0).toFixed(3),
               (row.Avg_TTFT_s || 0).toFixed(3),
-              (row.Avg_TPOT_s || 0).toFixed(4)
+              (row.Avg_TPOT_s || 0).toFixed(4),
+              (row.Avg_ITL_s || row.Avg_TPOT_s || 0).toFixed(4),
+              outputPricingPerMillionTokens.toFixed(3)
             ];
 
             values.forEach((value, i) => {
@@ -1144,42 +1156,80 @@ const VisualizationPage = () => {
         }
       }
 
-      // Capture charts
-      const chartRows = document.querySelectorAll('[data-chart-row]');
-      
-      for (let i = 0; i < chartRows.length; i++) {
-        const row = chartRows[i];
-        
+      // Add charts section header
+      if (currentY > pageHeight - 50) {
+        doc.addPage();
+        currentY = margin;
+      }
+
+      doc.setFontSize(14);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Performance Charts', margin, currentY);
+      currentY += 15;
+
+      // Capture charts - process individual chart cards instead of the entire row
+      const chartCards = document.querySelectorAll('[data-chart-row] .ant-card');
+
+      for (let i = 0; i < chartCards.length; i++) {
+        const chartCard = chartCards[i];
+
         try {
-          // Check if we need a new page
-          if (currentY > pageHeight - 100) {
+          // Check if we need a new page before adding chart
+          if (currentY > pageHeight - 120) {
             doc.addPage();
             currentY = margin;
           }
 
-          const canvas = await html2canvas(row, {
-            scale: 2,
+          const canvas = await html2canvas(chartCard, {
+            scale: 1.5, // Reduced scale for better performance and smaller size
             useCORS: true,
             backgroundColor: '#ffffff',
-            width: row.offsetWidth,
-            height: row.offsetHeight
+            width: chartCard.offsetWidth,
+            height: chartCard.offsetHeight
           });
 
           const imgData = canvas.toDataURL('image/png');
-          const imgWidth = pageWidth - (margin * 2);
-          const imgHeight = (canvas.height * imgWidth) / canvas.width;
+          const maxImgWidth = pageWidth - (margin * 2);
+          const aspectRatio = canvas.height / canvas.width;
+          let imgWidth = maxImgWidth;
+          let imgHeight = imgWidth * aspectRatio;
 
-          // Check if image fits in current page
-          if (currentY + imgHeight > pageHeight - margin) {
+          // Limit chart height to fit on page
+          const maxImgHeight = pageHeight - currentY - 20; // Leave margin at bottom
+          if (imgHeight > maxImgHeight) {
+            imgHeight = maxImgHeight;
+            imgWidth = imgHeight / aspectRatio;
+          }
+
+          // If still doesn't fit, start new page
+          if (currentY + imgHeight > pageHeight - 20) {
             doc.addPage();
             currentY = margin;
+
+            // Recalculate with full page
+            const fullPageMaxHeight = pageHeight - currentY - 20;
+            if (imgHeight > fullPageMaxHeight) {
+              imgHeight = fullPageMaxHeight;
+              imgWidth = imgHeight / aspectRatio;
+            }
           }
 
           doc.addImage(imgData, 'PNG', margin, currentY, imgWidth, imgHeight);
           currentY += imgHeight + 10;
 
+          // Add some space between charts
+          if (i < chartCards.length - 1 && currentY < pageHeight - 100) {
+            currentY += 5;
+          }
+
         } catch (error) {
           console.error(`Error capturing chart ${i}:`, error);
+          // Add error message to PDF
+          doc.setFontSize(10);
+          doc.setTextColor(255, 0, 0);
+          doc.text(`Error capturing chart ${i + 1}: Chart generation failed`, margin, currentY);
+          currentY += 15;
+          doc.setTextColor(0, 0, 0);
         }
       }
 
