@@ -423,7 +423,7 @@ const StressTestPage = () => {
     setPollingInterval(interval);
   };
 
-  // 下载报告 - Generate interactive HTML report in ZIP format
+  // 下载报告 - Generate interactive HTML report
   const downloadReport = async (sessionId) => {
     const session = testSessions[sessionId];
     if (!session || !session.results) {
@@ -432,12 +432,8 @@ const StressTestPage = () => {
     }
 
     try {
-      // Import JSZip dynamically
-      const JSZip = (await import('jszip')).default;
-
       message.loading('正在生成HTML报告...', 0);
 
-      const zip = new JSZip();
       const timestamp = new Date().toLocaleString();
       const results = session.results;
 
@@ -675,15 +671,12 @@ const StressTestPage = () => {
 </body>
 </html>`;
 
-      // Add files to zip
-      zip.file('stress-test-report.html', htmlContent);
-
-      // Generate and download zip
-      const content = await zip.generateAsync({type: 'blob'});
-      const url = window.URL.createObjectURL(content);
+      // Create blob and download HTML file directly
+      const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
+      const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `stress-test-report-${sessionId}-${new Date().toISOString().slice(0, 10)}.zip`;
+      link.download = `stress-test-report-${sessionId}-${new Date().toISOString().slice(0, 10)}.html`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);

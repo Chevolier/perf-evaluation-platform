@@ -113,6 +113,7 @@ npm -v # Should print "10.9.3".
 ```bash
 # Install Node.js dependencies
 cd frontend
+npm install jszip
 npm install
 ```
 

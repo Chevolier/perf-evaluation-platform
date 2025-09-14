@@ -44,59 +44,39 @@ def setup_logging(
     if not isinstance(numeric_level, int):
         raise ValueError(f'Invalid log level: {log_level}')
     
-    # Configure root logger
+    # Get root logger and clear all existing handlers for a fresh start
     logger = logging.getLogger()
+    
+    # Remove all existing handlers to avoid conflicts
+    for handler in logger.handlers[:]:
+        logger.removeHandler(handler)
+    
+    # Set logger level
     logger.setLevel(numeric_level)
-    
-    # Check if we already have a file handler for this specific log file to avoid duplicates
-    if log_file:
-        abs_log_file = os.path.abspath(log_file)
-        existing_file_handlers = [h for h in logger.handlers 
-                                if isinstance(h, (logging.FileHandler, logging.handlers.RotatingFileHandler))
-                                and hasattr(h, 'baseFilename') 
-                                and h.baseFilename == abs_log_file]
-        
-        # If we already have a handler for this exact file, don't add another
-        if existing_file_handlers:
-            print(f"📋 File handler already exists for: {log_file}")
-            return
-    
-    # Clear existing handlers only if we're setting up fresh logging
-    if not logger.handlers:
-        pass  # No handlers to remove
-    else:
-        # Only remove if we don't have the right file handler
-        for handler in logger.handlers[:]:
-            logger.removeHandler(handler)
     
     # Create formatter
     formatter = logging.Formatter(log_format)
     
-    # Console handler
+    # Always add console handler
     console_handler = logging.StreamHandler()
     console_handler.setLevel(numeric_level)
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
     
-    # File handler (if specified)
+    # Add file handler if specified
     if log_file:
         # Ensure log directory exists
         log_path = Path(log_file)
         log_path.parent.mkdir(parents=True, exist_ok=True)
         
-        # Print debug info to help troubleshoot
+        # Print debug info
         print(f"📝 Setting up file logging: {log_file}")
         print(f"📝 Log level: {log_level}")
         print(f"📝 Log directory exists: {log_path.parent.exists()}")
         
         try:
-            # Use custom flushing file handler to ensure immediate writes
-            class ImmediateFlushFileHandler(logging.FileHandler):
-                def emit(self, record):
-                    super().emit(record)
-                    self.flush()
-            
-            file_handler = ImmediateFlushFileHandler(
+            # Create file handler with immediate flushing
+            file_handler = logging.FileHandler(
                 log_file,
                 mode='a',
                 encoding='utf-8'
@@ -105,14 +85,15 @@ def setup_logging(
             file_handler.setFormatter(formatter)
             logger.addHandler(file_handler)
             
-            # Test the file logging immediately with forced flush
+            # Configure Flask and Werkzeug loggers for propagation
+            _configure_flask_logging(logger, numeric_level, formatter)
+            
+            # Test the file logging immediately
             test_logger = logging.getLogger('setup_logging_test')
             test_logger.info("✅ File logging setup complete and tested")
             
-            # Force flush all handlers
-            for handler in logger.handlers:
-                if hasattr(handler, 'flush'):
-                    handler.flush()
+            # Force flush to ensure immediate write
+            file_handler.flush()
             
             print(f"✅ File handler added successfully to: {log_file}")
             
@@ -123,6 +104,39 @@ def setup_logging(
             raise
 
 
+def _configure_flask_logging(root_logger, log_level, formatter):
+    """Configure Flask and Werkzeug logging to use the same handlers as root logger.
+    
+    Args:
+        root_logger: The configured root logger
+        log_level: Logging level
+        formatter: Log formatter to use
+    """
+    # Get Flask app logger
+    flask_logger = logging.getLogger('werkzeug')
+    flask_logger.setLevel(log_level)
+    flask_logger.handlers = []  # Remove default handlers
+    flask_logger.propagate = True  # Ensure it propagates to root logger
+    
+    # Configure other common loggers to propagate to root
+    loggers_to_configure = [
+        'flask',
+        'werkzeug', 
+        'backend',
+        'backend.services',
+        'backend.services.stress_test_service',
+        'backend.services.model_service',
+        'backend.core',
+        'inference_platform'
+    ]
+    
+    for logger_name in loggers_to_configure:
+        child_logger = logging.getLogger(logger_name)
+        child_logger.setLevel(log_level)
+        child_logger.propagate = True  # Ensure propagation to root logger
+        # Don't add handlers - let them inherit from root
+
+
 def get_logger(name: str) -> logging.Logger:
     """Get a logger instance with the specified name.
     
@@ -130,9 +144,19 @@ def get_logger(name: str) -> logging.Logger:
         name: Logger name (typically __name__)
         
     Returns:
-        Logger instance
+        Logger instance configured for proper propagation
     """
-    return logging.getLogger(name)
+    logger = logging.getLogger(name)
+    
+    # Ensure logger propagates to root logger (where our file handler is)
+    logger.propagate = True
+    
+    # Don't add duplicate handlers - let it inherit from root logger
+    # This prevents duplicate log entries
+    if not logger.handlers:
+        logger.handlers = []
+    
+    return logger
 
 
 class RequestLogger:
