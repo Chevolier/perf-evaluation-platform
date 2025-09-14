@@ -35,6 +35,23 @@ const { Title, Text } = Typography;
 // API base URL - connect to our Flask backend
 const API_BASE = process.env.REACT_APP_API_BASE || '';
 
+// AWS Instance pricing per hour (USD) - on-demand pricing
+const INSTANCE_PRICING = {
+  'g5.xlarge': 1.006,
+  'g5.2xlarge': 1.212,
+  'g5.4xlarge': 1.624,
+  'g5.8xlarge': 2.472,
+  'g5.12xlarge': 4.944,
+  'g5.16xlarge': 6.592,
+  'g5.24xlarge': 9.888,
+  'g5.48xlarge': 19.776,
+  'p4d.24xlarge': 32.7726,
+  'p4de.24xlarge': 40.9656,
+  'p5.48xlarge': 98.32,
+  // Default fallback for unknown instances
+  'default': 2.0
+};
+
 const VisualizationPage = () => {
   const [loading, setLoading] = useState(false);
   const [downloading, setDownloading] = useState(false);
@@ -565,7 +582,16 @@ const VisualizationPage = () => {
         performanceData.forEach(row => {
           const concurrency = row.Concurrency || 0;
           
-          // Add data points for the 7 specific metrics requested
+          // Calculate output pricing per million tokens
+          const outputThroughput = row.Gen_Throughput_tok_s || 0;
+          const instanceType = result.instance_type || 'default';
+          const hourlyPrice = INSTANCE_PRICING[instanceType] || INSTANCE_PRICING['default'];
+
+          // Calculate cost: time to generate 1M tokens (hours) * hourly price
+          const timeForMillionTokensHours = outputThroughput > 0 ? (1000000 / outputThroughput) / 3600 : 0;
+          const outputPricingPerMillionTokens = timeForMillionTokensHours * hourlyPrice;
+
+          // Add data points for the 8 specific metrics requested
           const metrics = [
             { name: 'Request throughput (req/s)', value: row.RPS_req_s },
             { name: 'Output token throughput (tok/s)', value: row.Gen_Throughput_tok_s },
@@ -573,7 +599,8 @@ const VisualizationPage = () => {
             { name: 'Average latency (s)', value: row.Avg_Latency_s },
             { name: 'Average time to first token (s)', value: row.Avg_TTFT_s },
             { name: 'Average time per output token (s)', value: row.Avg_TPOT_s },
-            { name: 'Average inter-token latency (s)', value: row.Avg_ITL_s || row.Avg_TPOT_s } // Use TPOT as fallback
+            { name: 'Average inter-token latency (s)', value: row.Avg_ITL_s || row.Avg_TPOT_s }, // Use TPOT as fallback
+            { name: 'Output pricing per million tokens ($)', value: outputPricingPerMillionTokens }
           ];
           
           metrics.forEach(metric => {
@@ -617,7 +644,7 @@ const VisualizationPage = () => {
       return <Empty description="No summary data available" />;
     }
 
-    // Define the 7 specific metrics requested (in display order)
+    // Define the 8 specific metrics requested (in display order)
     const allowedMetrics = [
       'Request throughput (req/s)',
       'Output token throughput (tok/s)',
@@ -625,7 +652,8 @@ const VisualizationPage = () => {
       'Average latency (s)',
       'Average time to first token (s)',
       'Average time per output token (s)',
-      'Average inter-token latency (s)'
+      'Average inter-token latency (s)',
+      'Output pricing per million tokens ($)'
     ];
 
     // Group by metric type and filter to only allowed metrics
@@ -729,6 +757,9 @@ const VisualizationPage = () => {
     }
     if (metric === 'Average latency (s)' || metric === 'Average time to first token (s)' || metric === 'Average time per output token (s)' || metric === 'Average inter-token latency (s)') {
       return 'seconds';
+    }
+    if (metric === 'Output pricing per million tokens ($)') {
+      return 'USD per 1M tokens';
     }
     return '';
   };
@@ -1287,7 +1318,7 @@ const VisualizationPage = () => {
                     <DashboardOutlined /> Performance Metrics vs Concurrency
                   </Title>
                   <Text type="secondary">
-                    RPS, Gen Throughput, Total Throughput, Avg Latency, Avg Time to First Token, Avg Time per Output Token, and Avg Inter-token Latency vs Concurrency
+                    RPS, Throughput, Latency metrics, Inter-token Latency, and Output Pricing per Million Tokens vs Concurrency
                   </Text>
                   <Divider />
                   {renderSummaryCharts()}
