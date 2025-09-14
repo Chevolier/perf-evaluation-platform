@@ -423,28 +423,279 @@ const StressTestPage = () => {
     setPollingInterval(interval);
   };
 
-  // 下载报告
+  // 下载报告 - Generate interactive HTML report in ZIP format
   const downloadReport = async (sessionId) => {
+    const session = testSessions[sessionId];
+    if (!session || !session.results) {
+      message.error('No test results available for download');
+      return;
+    }
+
     try {
-      const response = await fetch(`/api/stress-test/download/${sessionId}`);
-      if (response.ok) {
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.style.display = 'none';
-        a.href = url;
-        a.download = `stress_test_session_${sessionId}.zip`;
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
-        message.success('测试结果已下载，包含完整会话数据和PDF报告');
-      } else {
-        message.error('下载报告失败');
+      // Import JSZip dynamically
+      const JSZip = (await import('jszip')).default;
+
+      message.loading('正在生成HTML报告...', 0);
+
+      const zip = new JSZip();
+      const timestamp = new Date().toLocaleString();
+      const results = session.results;
+
+      // Generate performance tables HTML for comprehensive results
+      let tablesHtml = '';
+      if (results.is_comprehensive && results.performance_table) {
+        tablesHtml = `
+          <h3>📊 Comprehensive Performance Metrics</h3>
+          <table class="performance-table">
+            <thead>
+              <tr>
+                <th>Concurrency</th>
+                <th>RPS</th>
+                <th>Avg Latency (s)</th>
+                <th>P99 Latency (s)</th>
+                <th>Gen Throughput (tok/s)</th>
+                <th>Total Throughput (tok/s)</th>
+                <th>Avg TTFT (s)</th>
+                <th>P99 TTFT (s)</th>
+                <th>Avg TPOT (s)</th>
+                <th>P99 TPOT (s)</th>
+                <th>Success Rate (%)</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${results.performance_table.map(row => `
+                <tr>
+                  <td>${row.concurrency || 0}</td>
+                  <td>${(row.rps || 0).toFixed(2)}</td>
+                  <td>${(row.avg_latency || 0).toFixed(3)}</td>
+                  <td>${(row.p99_latency || 0).toFixed(3)}</td>
+                  <td>${(row.gen_toks_per_sec || 0).toFixed(0)}</td>
+                  <td>${(row.total_toks_per_sec || 0).toFixed(0)}</td>
+                  <td>${(row.avg_ttft || 0).toFixed(3)}</td>
+                  <td>${(row.p99_ttft || 0).toFixed(3)}</td>
+                  <td>${(row.avg_tpot || 0).toFixed(3)}</td>
+                  <td>${(row.p99_tpot || 0).toFixed(3)}</td>
+                  <td>${(row.success_rate || 0).toFixed(1)}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        `;
       }
+
+      // Prepare chart data for interactive charts
+      let chartsHtml = '';
+      if (results.is_comprehensive && results.performance_table) {
+        const chartData = results.performance_table.sort((a, b) => a.concurrency - b.concurrency);
+
+        const metrics = [
+          { key: 'rps', title: 'RPS vs Concurrency', yLabel: 'Requests per Second' },
+          { key: 'gen_toks_per_sec', title: 'Generation Throughput vs Concurrency', yLabel: 'Tokens per Second' },
+          { key: 'total_toks_per_sec', title: 'Total Throughput vs Concurrency', yLabel: 'Tokens per Second' },
+          { key: 'avg_latency', title: 'Average Latency vs Concurrency', yLabel: 'Latency (seconds)' },
+          { key: 'avg_ttft', title: 'Average TTFT vs Concurrency', yLabel: 'TTFT (seconds)' },
+          { key: 'avg_tpot', title: 'Average TPOT vs Concurrency', yLabel: 'TPOT (seconds)' }
+        ];
+
+        chartsHtml = metrics.map((metric, index) => {
+          const traces = [{
+            x: chartData.map(d => d.concurrency),
+            y: chartData.map(d => d[metric.key] || 0),
+            type: 'scatter',
+            mode: 'lines+markers',
+            name: metric.title,
+            line: {
+              color: ['#1890ff', '#52c41a', '#faad14', '#f5222d', '#722ed1', '#13c2c2'][index % 6],
+              width: 3
+            },
+            marker: {
+              size: 8,
+              color: ['#1890ff', '#52c41a', '#faad14', '#f5222d', '#722ed1', '#13c2c2'][index % 6]
+            },
+            hovertemplate: '<b>' + metric.title + '</b><br>' +
+                          'Concurrency: %{x}<br>' +
+                          metric.yLabel + ': %{y}<br>' +
+                          '<extra></extra>'
+          }];
+
+          return `
+            <div class="chart-container">
+              <div class="chart-title">${metric.title}</div>
+              <div id="chart-${metric.key}" style="height: 400px;"></div>
+              <script>
+                Plotly.newPlot('chart-${metric.key}', ${JSON.stringify(traces)}, {
+                  title: false,
+                  xaxis: { title: 'Concurrency Level' },
+                  yaxis: { title: '${metric.yLabel}' },
+                  hovermode: 'closest',
+                  showlegend: false,
+                  margin: { t: 20, r: 20, b: 60, l: 80 }
+                }, {responsive: true});
+              </script>
+            </div>
+          `;
+        }).join('');
+      }
+
+      // Generate complete HTML content
+      const htmlContent = `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stress Test Results Report</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #1890ff;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 28px;
+        }
+        h2 {
+            color: #333;
+            border-bottom: 2px solid #1890ff;
+            padding-bottom: 10px;
+            margin-top: 40px;
+        }
+        h3 {
+            color: #555;
+            margin-top: 30px;
+        }
+        .timestamp {
+            text-align: center;
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 30px;
+        }
+        .session-summary {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 30px;
+        }
+        .summary-item {
+            margin: 10px 0;
+            font-size: 16px;
+        }
+        .summary-label {
+            font-weight: bold;
+            color: #1890ff;
+        }
+        .charts-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+            gap: 30px;
+            margin: 30px 0;
+        }
+        .chart-container {
+            background: white;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        .chart-title {
+            font-size: 18px;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            font-size: 14px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #f5f5f5;
+            font-weight: bold;
+        }
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        .performance-table {
+            font-size: 12px;
+        }
+        .performance-table th {
+            background-color: #f0f0f0;
+            font-size: 11px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 Stress Test Results Report</h1>
+        <div class="timestamp">Generated on: ${timestamp}</div>
+
+        <h2>📊 Test Session Summary</h2>
+        <div class="session-summary">
+            <div class="summary-item"><span class="summary-label">Model:</span> ${session.model}</div>
+            <div class="summary-item"><span class="summary-label">Session ID:</span> ${sessionId}</div>
+            <div class="summary-item"><span class="summary-label">Status:</span> ${session.status}</div>
+            <div class="summary-item"><span class="summary-label">Start Time:</span> ${session.startTime || 'N/A'}</div>
+            ${results.comprehensive_summary ? `
+            <div class="summary-item"><span class="summary-label">Total Generated Tokens:</span> ${results.comprehensive_summary.total_generated_tokens || 0}</div>
+            <div class="summary-item"><span class="summary-label">Total Test Time:</span> ${(results.comprehensive_summary.total_test_time || 0).toFixed(2)} seconds</div>
+            <div class="summary-item"><span class="summary-label">Average Output Rate:</span> ${(results.comprehensive_summary.avg_output_rate || 0).toFixed(2)} tokens/sec</div>
+            ` : ''}
+        </div>
+
+        ${results.is_comprehensive && chartsHtml ? `
+        <h2>📈 Interactive Performance Charts</h2>
+        <div class="charts-grid">
+            ${chartsHtml}
+        </div>
+        ` : ''}
+
+        <h2>📋 Performance Metrics Tables</h2>
+        ${tablesHtml}
+    </div>
+</body>
+</html>`;
+
+      // Add files to zip
+      zip.file('stress-test-report.html', htmlContent);
+
+      // Generate and download zip
+      const content = await zip.generateAsync({type: 'blob'});
+      const url = window.URL.createObjectURL(content);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `stress-test-report-${sessionId}-${new Date().toISOString().slice(0, 10)}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+
+      message.destroy();
+      message.success('HTML测试报告已生成并下载');
+
     } catch (error) {
-      console.error('下载报告失败:', error);
-      message.error('下载报告失败');
+      message.destroy();
+      console.error('Error generating HTML report:', error);
+      message.error('生成HTML报告时出现错误');
     }
   };
 
@@ -1895,7 +2146,7 @@ const StressTestPage = () => {
                         icon={<DownloadOutlined />}
                         onClick={() => downloadReport(currentSessionId)}
                       >
-                        下载完整结果
+                        下载HTML报告
                       </Button>
                     )}
                   </Col>

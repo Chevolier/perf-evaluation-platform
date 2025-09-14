@@ -14,7 +14,6 @@ import {
   Divider,
   Empty,
   message,
-  Modal,
   Popconfirm
 } from 'antd';
 import { Line } from '@ant-design/plots';
@@ -138,7 +137,7 @@ const VisualizationPage = () => {
   };
 
   // Fetch all results from outputs directory
-  const fetchResultsStructure = async () => {
+  const fetchResultsStructure = useCallback(async () => {
     try {
       setLoading(true);
       const response = await fetch(`${API_BASE}/api/results/structure`);
@@ -156,7 +155,7 @@ const VisualizationPage = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedResults]);
 
   // Fetch specific result data
   const fetchResultData = async (resultPath) => {
@@ -358,6 +357,456 @@ const VisualizationPage = () => {
     }
   };
 
+
+  // Prepare summary chart data (metrics vs concurrency) with styling info
+  const prepareSummaryChartData = () => {
+    const chartData = [];
+    
+    // Create stable style mapping first
+    const colors = ['#1890ff', '#52c41a', '#faad14', '#f5222d', '#722ed1', '#13c2c2', '#eb2f96', '#fa8c16', '#a0d911', '#2f54eb'];
+    const shapes = ['circle', 'square', 'diamond', 'triangle', 'triangle-down', 'hexagon', 'bowtie', 'cross', 'tick', 'plus'];
+    const dashPatterns = [
+      [0], // solid
+      [4, 4], // dashed
+      [2, 2], // dotted
+      [8, 4, 2, 4], // dash-dot
+      [8, 4, 2, 4, 2, 4], // dash-dot-dot
+      [12, 4], // long dash
+      [2, 6], // sparse dot
+      [6, 2, 2, 2], // dash-dot short
+      [10, 2], // long dash short
+      [4, 2, 4, 6] // complex pattern
+    ];
+    
+    // Get unique sessions from ONLY selected results for consistent indexing
+    const selectedResultData = selectedResults.map(key => resultData[key]).filter(Boolean);
+    const uniqueSessions = [...new Set(selectedResultData.map(r => `${r.model}_${r.deployment_method || 'emd'}_${r.instance_type}_${r.framework}_${r.session_id}`))].sort();
+    console.log('Unique sessions for styling (selected only):', uniqueSessions);
+    
+    // Process only selected results
+    selectedResults.forEach(key => {
+      const result = resultData[key];
+      if (!result) return;
+      const performanceData = result.data?.performance_data || [];
+      const modelLabel = `${result.model}_${result.deployment_method || 'emd'}_${result.instance_type}_${result.framework}_${result.session_id}`;
+      
+      // Get style index for this session
+      const styleIndex = uniqueSessions.indexOf(modelLabel);
+      const sessionColor = colors[styleIndex % colors.length];
+      const sessionShape = shapes[styleIndex % shapes.length];
+      const sessionDashPattern = dashPatterns[styleIndex % dashPatterns.length];
+      
+      console.log(`Session ${modelLabel} gets index ${styleIndex}, color ${sessionColor}, shape ${sessionShape}`);
+      
+      if (performanceData && Array.isArray(performanceData)) {
+        // Process each concurrency level from the CSV data
+        performanceData.forEach(row => {
+          const concurrency = row.Concurrency || 0;
+          
+          // Calculate output pricing per million tokens
+          const outputThroughput = row.Gen_Throughput_tok_s || 0;
+          const instanceType = result.instance_type || 'default';
+          const hourlyPrice = INSTANCE_PRICING[instanceType] || INSTANCE_PRICING['default'];
+
+          // Calculate cost: time to generate 1M tokens (hours) * hourly price
+          const timeForMillionTokensHours = outputThroughput > 0 ? (1000000 / outputThroughput) / 3600 : 0;
+          const outputPricingPerMillionTokens = timeForMillionTokensHours * hourlyPrice;
+
+          // Add data points for the 8 specific metrics requested
+          const metrics = [
+            { name: 'Request throughput (req/s)', value: row.RPS_req_s },
+            { name: 'Output token throughput (tok/s)', value: row.Gen_Throughput_tok_s },
+            { name: 'Total token throughput (tok/s)', value: row.Total_Throughput_tok_s },
+            { name: 'Average latency (s)', value: row.Avg_Latency_s },
+            { name: 'Average time to first token (s)', value: row.Avg_TTFT_s },
+            { name: 'Average time per output token (s)', value: row.Avg_TPOT_s },
+            { name: 'Average inter-token latency (s)', value: row.Avg_ITL_s },
+            { name: 'Output pricing per million tokens ($)', value: outputPricingPerMillionTokens }
+          ];
+          
+          metrics.forEach(metric => {
+            console.log(`Processing metric ${metric.name}: value=${metric.value}, type=${typeof metric.value}`);
+            if (typeof metric.value === 'number' && !isNaN(metric.value)) {
+              const dataPoint = {
+                concurrency,
+                metric: metric.name,
+                yValue: metric.value,
+                modelLabel,
+                session: result.session_id,
+                // Add styling info directly to data points
+                seriesColor: sessionColor,
+                seriesShape: sessionShape,
+                seriesDashPattern: sessionDashPattern,
+                seriesIndex: styleIndex,
+                // Add color field for the chart library
+                color: sessionColor,
+                // Add shape field for markers
+                shape: sessionShape
+              };
+              chartData.push(dataPoint);
+              console.log(`Added datapoint: ${modelLabel}, metric: ${metric.name}, yValue: ${metric.value}, concurrency: ${concurrency}`);
+            } else {
+              console.log(`Skipping invalid metric ${metric.name}: value=${metric.value}, type=${typeof metric.value}`);
+            }
+          });
+        });
+      }
+    });
+    
+    return chartData;
+  };
+
+
+
+
+  // Get metric unit for display
+  const getMetricUnit = (metric) => {
+    if (metric === 'Request throughput (req/s)') {
+      return 'req/s';
+    }
+    if (metric === 'Output token throughput (tok/s)' || metric === 'Total token throughput (tok/s)') {
+      return 'tok/s';
+    }
+    if (metric === 'Average latency (s)' || metric === 'Average time to first token (s)' || metric === 'Average time per output token (s)' || metric === 'Average inter-token latency (s)') {
+      return 'seconds';
+    }
+    if (metric === 'Output pricing per million tokens ($)') {
+      return 'USD per 1M tokens';
+    }
+    return '';
+  };
+
+  // Save visualization state to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('visualization_selectedResults', JSON.stringify(selectedResults));
+    } catch (error) {
+      console.error('Failed to save selected results to localStorage:', error);
+    }
+  }, [selectedResults]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('visualization_resultData', JSON.stringify(resultData));
+    } catch (error) {
+      console.error('Failed to save result data to localStorage:', error);
+    }
+  }, [resultData]);
+
+  // Download report as HTML ZIP
+  const downloadReport = async () => {
+    if (selectedResults.length === 0) {
+      message.warning('请先选择要导出的结果');
+      return;
+    }
+
+    setDownloading(true);
+
+    try {
+      // Import JSZip dynamically
+      const JSZip = (await import('jszip')).default;
+
+      message.loading('正在生成HTML报告...', 0);
+
+      const zip = new JSZip();
+      const timestamp = new Date().toLocaleString();
+
+      // Prepare chart data for HTML generation
+      const chartData = prepareSummaryChartData();
+      const allowedMetrics = [
+        'Request throughput (req/s)',
+        'Output token throughput (tok/s)',
+        'Total token throughput (tok/s)',
+        'Average latency (s)',
+        'Average time to first token (s)',
+        'Average time per output token (s)',
+        'Average inter-token latency (s)',
+        'Output pricing per million tokens ($)'
+      ];
+
+      // Group chart data by metrics
+      const metricGroups = chartData.reduce((acc, item) => {
+        if (allowedMetrics.includes(item.metric)) {
+          if (!acc[item.metric]) {
+            acc[item.metric] = [];
+          }
+          acc[item.metric].push(item);
+        }
+        return acc;
+      }, {});
+
+      // Generate performance tables HTML
+      let tablesHtml = '';
+      for (const resultKey of selectedResults) {
+        const result = resultData[resultKey];
+        if (!result || !result.data?.performance_data) continue;
+
+        const performanceData = result.data.performance_data;
+
+        tablesHtml += `
+          <h3>📊 ${result.model} - ${result.session_id}</h3>
+          <table class="performance-table">
+            <thead>
+              <tr>
+                <th>Concurrency</th>
+                <th>RPS</th>
+                <th>Gen Throughput</th>
+                <th>Total Throughput</th>
+                <th>Avg Latency</th>
+                <th>Avg TTFT</th>
+                <th>Avg TPOT</th>
+                <th>Avg ITL</th>
+                <th>Cost/1M$ Tokens</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${performanceData.map(row => {
+                const outputThroughput = row.Gen_Throughput_tok_s || 0;
+                const instanceType = result.instance_type || 'default';
+                const hourlyPrice = INSTANCE_PRICING[instanceType] || INSTANCE_PRICING['default'];
+                const timeForMillionTokensHours = outputThroughput > 0 ? (1000000 / outputThroughput) / 3600 : 0;
+                const outputPricingPerMillionTokens = timeForMillionTokensHours * hourlyPrice;
+
+                return `
+                  <tr>
+                    <td>${row.Concurrency || 0}</td>
+                    <td>${(row.RPS_req_s || 0).toFixed(2)}</td>
+                    <td>${(row.Gen_Throughput_tok_s || 0).toFixed(2)}</td>
+                    <td>${(row.Total_Throughput_tok_s || 0).toFixed(2)}</td>
+                    <td>${(row.Avg_Latency_s || 0).toFixed(3)}</td>
+                    <td>${(row.Avg_TTFT_s || 0).toFixed(3)}</td>
+                    <td>${(row.Avg_TPOT_s || 0).toFixed(4)}</td>
+                    <td>${(row.Avg_ITL_s || row.Avg_TPOT_s || 0).toFixed(4)}</td>
+                    <td>$${outputPricingPerMillionTokens.toFixed(3)}</td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        `;
+      }
+
+      // Generate complete HTML
+      const htmlContent = `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Benchmark Results Visualization Report</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #1890ff;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 28px;
+        }
+        h2 {
+            color: #333;
+            border-bottom: 2px solid #1890ff;
+            padding-bottom: 10px;
+            margin-top: 40px;
+        }
+        h3 {
+            color: #555;
+            margin-top: 30px;
+        }
+        .timestamp {
+            text-align: center;
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 30px;
+        }
+        .results-summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .result-card {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            padding: 20px;
+        }
+        .result-title {
+            font-weight: bold;
+            font-size: 16px;
+            color: #1890ff;
+            margin-bottom: 10px;
+        }
+        .result-detail {
+            margin: 5px 0;
+            font-size: 14px;
+        }
+        .charts-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+            gap: 30px;
+            margin: 30px 0;
+        }
+        .chart-container {
+            background: white;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        .chart-title {
+            font-size: 18px;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            font-size: 14px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #f5f5f5;
+            font-weight: bold;
+        }
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        .performance-table {
+            font-size: 12px;
+        }
+        .performance-table th {
+            background-color: #f0f0f0;
+            font-size: 11px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 Benchmark Results Visualization Report</h1>
+        <div class="timestamp">Generated on: ${timestamp}</div>
+
+        <h2>📊 Selected Results Summary</h2>
+        <div class="results-summary">
+            ${selectedResults.map((resultKey, index) => {
+              const result = resultData[resultKey];
+              if (!result) return '';
+              return `
+                <div class="result-card">
+                    <div class="result-title">${index + 1}. ${result.model} - ${result.session_id}</div>
+                    <div class="result-detail"><strong>Deployment:</strong> ${result.deployment_method || 'emd'}</div>
+                    <div class="result-detail"><strong>Instance:</strong> ${result.instance_type}</div>
+                    <div class="result-detail"><strong>Framework:</strong> ${result.framework}</div>
+                    <div class="result-detail"><strong>Dataset:</strong> ${result.dataset || 'N/A'}</div>
+                    <div class="result-detail"><strong>Tokens:</strong> ${result.tokens_desc || 'N/A'}</div>
+                </div>
+              `;
+            }).join('')}
+        </div>
+
+        <h2>📈 Interactive Performance Charts</h2>
+        <div class="charts-grid">
+            ${allowedMetrics.filter(metric => metricGroups[metric]).map(metric => {
+              const data = metricGroups[metric];
+              const uniqueSeries = [...new Set(data.map(d => d.modelLabel))].sort();
+
+              // Prepare data for Plotly
+              const traces = uniqueSeries.map((series, index) => {
+                const seriesData = data.filter(d => d.modelLabel === series).sort((a, b) => a.concurrency - b.concurrency);
+                const colors = ['#1890ff', '#52c41a', '#faad14', '#f5222d', '#722ed1', '#13c2c2', '#eb2f96', '#fa8c16'];
+
+                return {
+                  x: seriesData.map(d => d.concurrency),
+                  y: seriesData.map(d => d.yValue),
+                  type: 'scatter',
+                  mode: 'lines+markers',
+                  name: series,
+                  line: {
+                    color: colors[index % colors.length],
+                    width: 3
+                  },
+                  marker: {
+                    size: 8,
+                    color: colors[index % colors.length]
+                  },
+                  hovertemplate: '<b>%{fullData.name}</b><br>' +
+                                'Concurrency: %{x}<br>' +
+                                '${metric}: %{y}<br>' +
+                                '<extra></extra>'
+                };
+              });
+
+              return `
+                <div class="chart-container">
+                    <div class="chart-title">${metric}</div>
+                    <div id="chart-${metric.replace(/[^a-zA-Z0-9]/g, '')}" style="height: 400px;"></div>
+                    <script>
+                        Plotly.newPlot('chart-${metric.replace(/[^a-zA-Z0-9]/g, '')}', ${JSON.stringify(traces)}, {
+                            title: false,
+                            xaxis: { title: 'Concurrency Level' },
+                            yaxis: { title: '${getMetricUnit(metric)}' },
+                            hovermode: 'closest',
+                            showlegend: true,
+                            legend: { orientation: 'h', y: -0.2 },
+                            margin: { t: 20, r: 20, b: 80, l: 80 }
+                        }, {responsive: true});
+                    </script>
+                </div>
+              `;
+            }).join('')}
+        </div>
+
+        <h2>📋 Performance Metrics Tables</h2>
+        ${tablesHtml}
+    </div>
+</body>
+</html>`;
+
+      // Add files to zip
+      zip.file('benchmark-report.html', htmlContent);
+
+      // Generate and download zip
+      const content = await zip.generateAsync({type: 'blob'});
+      const url = window.URL.createObjectURL(content);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `benchmark-visualization-report-${new Date().toISOString().slice(0, 10)}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+
+      message.destroy();
+      message.success('HTML报告已生成并下载');
+
+    } catch (error) {
+      message.destroy();
+      console.error('Error generating HTML report:', error);
+      message.error('生成HTML报告时出现错误');
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   // Render hierarchical tree structure with checkboxes
   const renderResultsTree = () => {
     if (!resultsTree || resultsTree.length === 0) {
@@ -374,7 +823,7 @@ const VisualizationPage = () => {
           const selectedCount = allSessionKeys.filter(key => selectedResults.includes(key)).length;
           const allSelected = selectedCount === totalSessions && totalSessions > 0;
           const someSelected = selectedCount > 0 && selectedCount < totalSessions;
-          
+
           return {
             title: (
               <Space>
@@ -404,7 +853,7 @@ const VisualizationPage = () => {
           const selectedCount = allSessionKeys.filter(key => selectedResults.includes(key)).length;
           const allSelected = selectedCount === node.sessions.length && node.sessions.length > 0;
           const someSelected = selectedCount > 0 && selectedCount < node.sessions.length;
-          
+
           return {
             title: (
               <Space>
@@ -451,7 +900,7 @@ const VisualizationPage = () => {
                         onClick={(e) => e.stopPropagation()}
                       >
                         <Button
-                          type="text" 
+                          type="text"
                           danger
                           size="small"
                           icon={<DeleteOutlined />}
@@ -537,109 +986,10 @@ const VisualizationPage = () => {
     );
   };
 
-  // Prepare summary chart data (metrics vs concurrency) with styling info
-  const prepareSummaryChartData = () => {
-    const chartData = [];
-    
-    // Create stable style mapping first
-    const colors = ['#1890ff', '#52c41a', '#faad14', '#f5222d', '#722ed1', '#13c2c2', '#eb2f96', '#fa8c16', '#a0d911', '#2f54eb'];
-    const shapes = ['circle', 'square', 'diamond', 'triangle', 'triangle-down', 'hexagon', 'bowtie', 'cross', 'tick', 'plus'];
-    const dashPatterns = [
-      [0], // solid
-      [4, 4], // dashed
-      [2, 2], // dotted
-      [8, 4, 2, 4], // dash-dot
-      [8, 4, 2, 4, 2, 4], // dash-dot-dot
-      [12, 4], // long dash
-      [2, 6], // sparse dot
-      [6, 2, 2, 2], // dash-dot short
-      [10, 2], // long dash short
-      [4, 2, 4, 6] // complex pattern
-    ];
-    
-    // Get unique sessions from ONLY selected results for consistent indexing
-    const selectedResultData = selectedResults.map(key => resultData[key]).filter(Boolean);
-    const uniqueSessions = [...new Set(selectedResultData.map(r => `${r.model}_${r.deployment_method || 'emd'}_${r.instance_type}_${r.framework}_${r.session_id}`))].sort();
-    console.log('Unique sessions for styling (selected only):', uniqueSessions);
-    
-    // Process only selected results
-    selectedResults.forEach(key => {
-      const result = resultData[key];
-      if (!result) return;
-      const performanceData = result.data?.performance_data || [];
-      const modelLabel = `${result.model}_${result.deployment_method || 'emd'}_${result.instance_type}_${result.framework}_${result.session_id}`;
-      
-      // Get style index for this session
-      const styleIndex = uniqueSessions.indexOf(modelLabel);
-      const sessionColor = colors[styleIndex % colors.length];
-      const sessionShape = shapes[styleIndex % shapes.length];
-      const sessionDashPattern = dashPatterns[styleIndex % dashPatterns.length];
-      
-      console.log(`Session ${modelLabel} gets index ${styleIndex}, color ${sessionColor}, shape ${sessionShape}`);
-      
-      if (performanceData && Array.isArray(performanceData)) {
-        // Process each concurrency level from the CSV data
-        performanceData.forEach(row => {
-          const concurrency = row.Concurrency || 0;
-          
-          // Calculate output pricing per million tokens
-          const outputThroughput = row.Gen_Throughput_tok_s || 0;
-          const instanceType = result.instance_type || 'default';
-          const hourlyPrice = INSTANCE_PRICING[instanceType] || INSTANCE_PRICING['default'];
-
-          // Calculate cost: time to generate 1M tokens (hours) * hourly price
-          const timeForMillionTokensHours = outputThroughput > 0 ? (1000000 / outputThroughput) / 3600 : 0;
-          const outputPricingPerMillionTokens = timeForMillionTokensHours * hourlyPrice;
-
-          // Add data points for the 8 specific metrics requested
-          const metrics = [
-            { name: 'Request throughput (req/s)', value: row.RPS_req_s },
-            { name: 'Output token throughput (tok/s)', value: row.Gen_Throughput_tok_s },
-            { name: 'Total token throughput (tok/s)', value: row.Total_Throughput_tok_s },
-            { name: 'Average latency (s)', value: row.Avg_Latency_s },
-            { name: 'Average time to first token (s)', value: row.Avg_TTFT_s },
-            { name: 'Average time per output token (s)', value: row.Avg_TPOT_s },
-            { name: 'Average inter-token latency (s)', value: row.Avg_ITL_s || row.Avg_TPOT_s }, // Use TPOT as fallback
-            { name: 'Output pricing per million tokens ($)', value: outputPricingPerMillionTokens }
-          ];
-          
-          metrics.forEach(metric => {
-            console.log(`Processing metric ${metric.name}: value=${metric.value}, type=${typeof metric.value}`);
-            if (typeof metric.value === 'number' && !isNaN(metric.value)) {
-              const dataPoint = {
-                concurrency,
-                metric: metric.name,
-                yValue: metric.value,
-                modelLabel,
-                session: result.session_id,
-                // Add styling info directly to data points
-                seriesColor: sessionColor,
-                seriesShape: sessionShape,
-                seriesDashPattern: sessionDashPattern,
-                seriesIndex: styleIndex,
-                // Add color field for the chart library
-                color: sessionColor,
-                // Add shape field for markers
-                shape: sessionShape
-              };
-              chartData.push(dataPoint);
-              console.log(`Added datapoint: ${modelLabel}, metric: ${metric.name}, yValue: ${metric.value}, concurrency: ${concurrency}`);
-            } else {
-              console.log(`Skipping invalid metric ${metric.name}: value=${metric.value}, type=${typeof metric.value}`);
-            }
-          });
-        });
-      }
-    });
-    
-    return chartData;
-  };
-
-
   // Render summary charts (metrics vs concurrency)
   const renderSummaryCharts = () => {
     const chartData = prepareSummaryChartData();
-    
+
     if (chartData.length === 0) {
       return <Empty description="No summary data available" />;
     }
@@ -673,18 +1023,18 @@ const VisualizationPage = () => {
           const data = metricGroups[metric];
           console.log(`Rendering chart for metric ${metric}:`, data);
           console.log(`Sample data point for ${metric}:`, data[0]);
-          
+
           // Create simple color array - the chart library expects colors in series order
           const uniqueSeries = [...new Set(data.map(d => d.modelLabel))].sort();
           const colorArray = uniqueSeries.map(series => {
             const firstDataPoint = data.find(d => d.modelLabel === series);
             return firstDataPoint.seriesColor;
           });
-          
+
           console.log(`Series order for ${metric}:`, uniqueSeries);
           console.log(`Color array for ${metric}:`, colorArray);
           console.log(`Sample data points for ${metric}:`, data.slice(0, 2));
-          
+
           return (
             <Col span={12} key={metric}>
               <Card title={metric} size="small">
@@ -698,7 +1048,7 @@ const VisualizationPage = () => {
                     colorField="modelLabel"
                     smooth={true}
                     color={colorArray}
-                    point={{ 
+                    point={{
                       size: 20,
                       shape: 'circle',
                       style: {
@@ -744,509 +1094,6 @@ const VisualizationPage = () => {
         })}
       </Row>
     );
-  };
-
-
-  // Get metric unit for display
-  const getMetricUnit = (metric) => {
-    if (metric === 'Request throughput (req/s)') {
-      return 'req/s';
-    }
-    if (metric === 'Output token throughput (tok/s)' || metric === 'Total token throughput (tok/s)') {
-      return 'tok/s';
-    }
-    if (metric === 'Average latency (s)' || metric === 'Average time to first token (s)' || metric === 'Average time per output token (s)' || metric === 'Average inter-token latency (s)') {
-      return 'seconds';
-    }
-    if (metric === 'Output pricing per million tokens ($)') {
-      return 'USD per 1M tokens';
-    }
-    return '';
-  };
-
-  // Save visualization state to localStorage
-  useEffect(() => {
-    try {
-      localStorage.setItem('visualization_selectedResults', JSON.stringify(selectedResults));
-    } catch (error) {
-      console.error('Failed to save selected results to localStorage:', error);
-    }
-  }, [selectedResults]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('visualization_resultData', JSON.stringify(resultData));
-    } catch (error) {
-      console.error('Failed to save result data to localStorage:', error);
-    }
-  }, [resultData]);
-
-  // Download report as PDF
-  const downloadReport = async () => {
-    if (selectedResults.length === 0) {
-      message.warning('请先选择要导出的结果');
-      return;
-    }
-
-    setDownloading(true);
-    
-    try {
-      // Import libraries dynamically to avoid bundle size issues
-      const html2canvas = (await import('html2canvas')).default;
-      const jsPDF = (await import('jspdf')).default;
-
-      message.loading('正在生成PDF报告...', 0);
-
-      const doc = new jsPDF('p', 'mm', 'a4');
-      const pageWidth = doc.internal.pageSize.getWidth();
-      const pageHeight = doc.internal.pageSize.getHeight();
-      const margin = 20;
-      let currentY = margin;
-
-      // Title
-      doc.setFontSize(20);
-      doc.setFont('helvetica', 'bold');
-      doc.text('Benchmark Results Visualization Report', pageWidth / 2, currentY, { align: 'center' });
-      currentY += 20;
-
-      // Generated timestamp
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'normal');
-      const timestamp = new Date().toLocaleString();
-      doc.text(`Generated on: ${timestamp}`, margin, currentY);
-      currentY += 15;
-
-      // Selected results summary
-      doc.setFontSize(12);
-      doc.setFont('helvetica', 'bold');
-      doc.text('Selected Results:', margin, currentY);
-      currentY += 8;
-
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'normal');
-      selectedResults.forEach((resultKey, index) => {
-        const result = resultData[resultKey];
-        if (result && currentY < pageHeight - 30) {
-          const summaryText = `${index + 1}. ${result.model} - ${result.session_id} (${result.deployment_method || 'emd'}, ${result.instance_type}, ${result.framework})`;
-          doc.text(summaryText, margin + 5, currentY);
-          currentY += 6;
-        } else if (result && currentY >= pageHeight - 30) {
-          doc.addPage();
-          currentY = margin;
-          const summaryText = `${index + 1}. ${result.model} - ${result.session_id} (${result.deployment_method || 'emd'}, ${result.instance_type}, ${result.framework})`;
-          doc.text(summaryText, margin + 5, currentY);
-          currentY += 6;
-        }
-      });
-
-      currentY += 10;
-
-      // Add performance metrics tables for each selected session
-      doc.setFontSize(14);
-      doc.setFont('helvetica', 'bold');
-      doc.text('Performance Metrics Tables', margin, currentY);
-      currentY += 12;
-
-      for (const resultKey of selectedResults) {
-        const result = resultData[resultKey];
-        if (result && result.data?.performance_data) {
-          const performanceData = result.data.performance_data;
-          
-          // Check if we need a new page for the table and parameters
-          const tableHeight = (performanceData.length + 4) * 6 + 80; // Estimate table height with borders + parameters
-          if (currentY + tableHeight > pageHeight - margin) {
-            doc.addPage();
-            currentY = margin;
-          }
-
-          // Table header with background
-          doc.setFontSize(14);
-          doc.setFont('helvetica', 'bold');
-          doc.text(`${result.model} - ${result.session_id} Performance Metrics`, margin, currentY);
-          currentY += 15;
-
-          // Fetch config data from config.json
-          let configData = {};
-          try {
-            const configPath = result.path.replace('performance_metrics.csv', 'config.json');
-            console.log('Original result path:', result.path);
-            console.log('Config path to fetch:', configPath);
-            
-            const configResponse = await fetch(`${API_BASE}/api/results/data`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({ result_path: configPath }),
-            });
-            
-            console.log('Config response status:', configResponse.status);
-            
-            if (configResponse.ok) {
-              const configResult = await configResponse.json();
-              console.log('Raw config response:', configResult);
-              // The actual config.json data is nested under the 'config' key
-              configData = configResult.config || {};
-              console.log('Final config data:', configData);
-            } else {
-              console.warn('Config response not ok:', configResponse.status, await configResponse.text());
-            }
-          } catch (error) {
-            console.warn('Failed to fetch config.json:', error);
-          }
-
-          // Add key parameters table
-          doc.setFontSize(10);
-          doc.setFont('helvetica', 'bold');
-          doc.text('Configuration Parameters', margin, currentY);
-          currentY += 8;
-
-          // Configuration table setup
-          const configHeaders = ['Parameter', 'Value'];
-          const configColWidths = [60, 80];
-          const configTableWidth = configColWidths.reduce((sum, width) => sum + width, 0);
-          const configTableStartX = margin;
-          const configTableStartY = currentY;
-
-          // Helper function to safely extract nested values
-          const getValue = (obj, path, fallback = 'N/A') => {
-            try {
-              console.log('getValue called with:', { obj: typeof obj, path, objKeys: obj ? Object.keys(obj) : 'null' });
-              
-              if (!obj || typeof obj !== 'object') {
-                console.log('Object is null or not an object');
-                return fallback;
-              }
-              
-              const keys = path.split('.');
-              let value = obj;
-              
-              for (let i = 0; i < keys.length; i++) {
-                const key = keys[i];
-                console.log(`Step ${i}: Looking for key '${key}' in:`, value);
-                
-                if (value && typeof value === 'object' && key in value) {
-                  value = value[key];
-                  console.log(`Found value:`, value);
-                } else {
-                  console.log(`Key '${key}' not found in object`);
-                  return fallback;
-                }
-              }
-              
-              const result = value !== null && value !== undefined ? value.toString() : fallback;
-              console.log(`Final result for path '${path}':`, result);
-              return result;
-            } catch (error) {
-              console.log('Error in getValue:', error);
-              return fallback;
-            }
-          };
-
-          // Configuration parameters to display
-          const tpValue = result.tp?.toString() || getValue(configData, 'deployment_config.tp_size');
-          const dpValue = result.dp?.toString() || getValue(configData, 'deployment_config.dp_size');
-          const inputTokensValue = result.input_tokens?.toString() || getValue(configData, 'stress_test_config.input_tokens.average');
-          const outputTokensValue = result.output_tokens?.toString() || getValue(configData, 'stress_test_config.output_tokens.average');
-          
-          console.log('Extracted values:', {
-            tp: tpValue,
-            dp: dpValue,
-            inputTokens: inputTokensValue,
-            outputTokens: outputTokensValue
-          });
-          
-          const configParams = [
-            { label: 'Model', value: result.model || getValue(configData, 'model.model_name') || 'N/A' },
-            { label: 'Deployment Method', value: result.deployment_method || getValue(configData, 'deployment_config.deployment_method') || 'emd' },
-            { label: 'Instance Type', value: result.instance_type || getValue(configData, 'deployment_config.instance_type') || 'N/A' },
-            { label: 'Framework', value: result.framework || getValue(configData, 'deployment_config.framework') || 'N/A' },
-            { label: 'Dataset', value: result.dataset || getValue(configData, 'stress_test_config.dataset') || 'N/A' },
-            { label: 'TP (Tensor Parallel)', value: tpValue || 'N/A' },
-            { label: 'DP (Data Parallel)', value: dpValue || 'N/A' },
-            { label: 'Input Tokens', value: inputTokensValue || 'N/A' },
-            { label: 'Output Tokens', value: outputTokensValue || 'N/A' }
-          ];
-
-          // Draw config table header
-          doc.setFillColor(240, 240, 240);
-          doc.rect(configTableStartX, configTableStartY - 2, configTableWidth, 8, 'F');
-          doc.setDrawColor(0, 0, 0);
-          doc.rect(configTableStartX, configTableStartY - 2, configTableWidth, 8);
-
-          // Config table column headers
-          doc.setFontSize(9);
-          doc.setFont('helvetica', 'bold');
-          doc.setTextColor(0, 0, 0);
-          let configXPos = configTableStartX + 2;
-          
-          configHeaders.forEach((header, i) => {
-            doc.text(header, configXPos, currentY + 3);
-            
-            // Draw vertical lines between columns
-            if (i < configHeaders.length - 1) {
-              const lineX = configXPos + configColWidths[i] - 2;
-              doc.line(lineX, configTableStartY - 2, lineX, configTableStartY + 6);
-            }
-            configXPos += configColWidths[i];
-          });
-          currentY += 8;
-
-          // Config table data rows
-          doc.setFont('helvetica', 'normal');
-          doc.setFontSize(8);
-          let configRowIndex = 0;
-          
-          configParams.forEach(param => {
-            // Alternate row colors
-            if (configRowIndex % 2 === 1) {
-              doc.setFillColor(248, 248, 248);
-              doc.rect(configTableStartX, currentY - 2, configTableWidth, 6, 'F');
-            }
-
-            // Draw row border
-            doc.setDrawColor(0, 0, 0);
-            doc.rect(configTableStartX, currentY - 2, configTableWidth, 6);
-
-            configXPos = configTableStartX + 2;
-            const configValues = [param.label, param.value];
-
-            configValues.forEach((value, i) => {
-              doc.text(String(value), configXPos, currentY + 2);
-              
-              // Draw vertical lines between columns
-              if (i < configValues.length - 1) {
-                const lineX = configXPos + configColWidths[i] - 2;
-                doc.line(lineX, currentY - 2, lineX, currentY + 4);
-              }
-              configXPos += configColWidths[i];
-            });
-            currentY += 6;
-            configRowIndex++;
-          });
-
-          currentY += 10;
-
-          // Table setup
-          const headers = ['Concurrency', 'RPS', 'Gen Tput', 'Total Tput', 'Avg Lat', 'Avg TTFT', 'Avg TPOT', 'Avg ITL', 'Cost/1M$'];
-          const colWidths = [18, 18, 18, 20, 18, 18, 18, 18, 20];
-          const tableWidth = colWidths.reduce((sum, width) => sum + width, 0);
-          const tableStartX = margin;
-          const tableStartY = currentY;
-
-          // Draw table border
-          doc.setDrawColor(0, 0, 0);
-          doc.setLineWidth(0.5);
-          doc.rect(tableStartX, tableStartY - 2, tableWidth, 8); // Header background rectangle
-          
-          // Fill header background (light gray)
-          doc.setFillColor(240, 240, 240);
-          doc.rect(tableStartX, tableStartY - 2, tableWidth, 8, 'F');
-          
-          // Draw header border again (on top of fill)
-          doc.setDrawColor(0, 0, 0);
-          doc.rect(tableStartX, tableStartY - 2, tableWidth, 8);
-
-          // Table column headers
-          doc.setFontSize(7); // Smaller font for more columns
-          doc.setFont('helvetica', 'bold');
-          doc.setTextColor(0, 0, 0);
-          let xPos = tableStartX + 2;
-          
-          headers.forEach((header, i) => {
-            doc.text(header, xPos, currentY + 3);
-            
-            // Draw vertical lines between columns
-            if (i < headers.length - 1) {
-              const lineX = xPos + colWidths[i] - 2;
-              doc.line(lineX, tableStartY - 2, lineX, tableStartY + 6);
-            }
-            xPos += colWidths[i];
-          });
-          currentY += 8;
-
-          // Table data rows
-          doc.setFont('helvetica', 'normal');
-          doc.setFontSize(6); // Smaller font for data rows to fit more columns
-          let rowIndex = 0;
-          
-          performanceData.forEach(row => {
-            // Check if we need a new page mid-table
-            if (currentY > pageHeight - 35) {
-              doc.addPage();
-              currentY = margin;
-              
-              // Repeat table header on new page
-              doc.setFontSize(12);
-              doc.setFont('helvetica', 'bold');
-              doc.text(`${result.model} - ${result.session_id} Performance Metrics (continued)`, margin, currentY);
-              currentY += 12;
-
-              // Repeat headers with new table width
-              const newTableStartY = currentY;
-              doc.setFillColor(240, 240, 240);
-              doc.rect(tableStartX, newTableStartY - 2, tableWidth, 8, 'F');
-              doc.setDrawColor(0, 0, 0);
-              doc.rect(tableStartX, newTableStartY - 2, tableWidth, 8);
-
-              doc.setFontSize(7); // Smaller font for more columns
-              doc.setFont('helvetica', 'bold');
-              xPos = tableStartX + 2;
-              headers.forEach((header, i) => {
-                doc.text(header, xPos, currentY + 3);
-                if (i < headers.length - 1) {
-                  const lineX = xPos + colWidths[i] - 2;
-                  doc.line(lineX, newTableStartY - 2, lineX, newTableStartY + 6);
-                }
-                xPos += colWidths[i];
-              });
-              currentY += 8;
-              doc.setFont('helvetica', 'normal');
-              doc.setFontSize(6); // Smaller font for data rows
-              rowIndex = 0;
-            }
-
-            // Alternate row colors
-            if (rowIndex % 2 === 1) {
-              doc.setFillColor(248, 248, 248);
-              doc.rect(tableStartX, currentY - 2, tableWidth, 6, 'F');
-            }
-
-            // Draw row border
-            doc.setDrawColor(0, 0, 0);
-            doc.rect(tableStartX, currentY - 2, tableWidth, 6);
-
-            xPos = tableStartX + 2;
-
-            // Calculate output pricing for this row
-            const outputThroughput = row.Gen_Throughput_tok_s || 0;
-            const instanceType = result.instance_type || 'default';
-            const hourlyPrice = INSTANCE_PRICING[instanceType] || INSTANCE_PRICING['default'];
-            const timeForMillionTokensHours = outputThroughput > 0 ? (1000000 / outputThroughput) / 3600 : 0;
-            const outputPricingPerMillionTokens = timeForMillionTokensHours * hourlyPrice;
-
-            const values = [
-              row.Concurrency || 0,
-              (row.RPS_req_s || 0).toFixed(2),
-              (row.Gen_Throughput_tok_s || 0).toFixed(2),
-              (row.Total_Throughput_tok_s || 0).toFixed(2),
-              (row.Avg_Latency_s || 0).toFixed(3),
-              (row.Avg_TTFT_s || 0).toFixed(3),
-              (row.Avg_TPOT_s || 0).toFixed(4),
-              (row.Avg_ITL_s || row.Avg_TPOT_s || 0).toFixed(4),
-              outputPricingPerMillionTokens.toFixed(3)
-            ];
-
-            values.forEach((value, i) => {
-              doc.text(String(value), xPos, currentY + 2);
-              
-              // Draw vertical lines between columns
-              if (i < values.length - 1) {
-                const lineX = xPos + colWidths[i] - 2;
-                doc.line(lineX, currentY - 2, lineX, currentY + 4);
-              }
-              xPos += colWidths[i];
-            });
-            currentY += 6;
-            rowIndex++;
-          });
-
-          // Add spacing after table
-          currentY += 15;
-        }
-      }
-
-      // Add charts section header
-      if (currentY > pageHeight - 50) {
-        doc.addPage();
-        currentY = margin;
-      }
-
-      doc.setFontSize(14);
-      doc.setFont('helvetica', 'bold');
-      doc.text('Performance Charts', margin, currentY);
-      currentY += 15;
-
-      // Capture charts - process individual chart cards instead of the entire row
-      const chartCards = document.querySelectorAll('[data-chart-row] .ant-card');
-
-      for (let i = 0; i < chartCards.length; i++) {
-        const chartCard = chartCards[i];
-
-        try {
-          // Check if we need a new page before adding chart
-          if (currentY > pageHeight - 120) {
-            doc.addPage();
-            currentY = margin;
-          }
-
-          const canvas = await html2canvas(chartCard, {
-            scale: 1.5, // Reduced scale for better performance and smaller size
-            useCORS: true,
-            backgroundColor: '#ffffff',
-            width: chartCard.offsetWidth,
-            height: chartCard.offsetHeight
-          });
-
-          const imgData = canvas.toDataURL('image/png');
-          const maxImgWidth = pageWidth - (margin * 2);
-          const aspectRatio = canvas.height / canvas.width;
-          let imgWidth = maxImgWidth;
-          let imgHeight = imgWidth * aspectRatio;
-
-          // Limit chart height to fit on page
-          const maxImgHeight = pageHeight - currentY - 20; // Leave margin at bottom
-          if (imgHeight > maxImgHeight) {
-            imgHeight = maxImgHeight;
-            imgWidth = imgHeight / aspectRatio;
-          }
-
-          // If still doesn't fit, start new page
-          if (currentY + imgHeight > pageHeight - 20) {
-            doc.addPage();
-            currentY = margin;
-
-            // Recalculate with full page
-            const fullPageMaxHeight = pageHeight - currentY - 20;
-            if (imgHeight > fullPageMaxHeight) {
-              imgHeight = fullPageMaxHeight;
-              imgWidth = imgHeight / aspectRatio;
-            }
-          }
-
-          doc.addImage(imgData, 'PNG', margin, currentY, imgWidth, imgHeight);
-          currentY += imgHeight + 10;
-
-          // Add some space between charts
-          if (i < chartCards.length - 1 && currentY < pageHeight - 100) {
-            currentY += 5;
-          }
-
-        } catch (error) {
-          console.error(`Error capturing chart ${i}:`, error);
-          // Add error message to PDF
-          doc.setFontSize(10);
-          doc.setTextColor(255, 0, 0);
-          doc.text(`Error capturing chart ${i + 1}: Chart generation failed`, margin, currentY);
-          currentY += 15;
-          doc.setTextColor(0, 0, 0);
-        }
-      }
-
-      // Save the PDF
-      const filename = `benchmark-visualization-report-${new Date().toISOString().slice(0, 10)}.pdf`;
-      doc.save(filename);
-
-      message.destroy();
-      message.success('PDF报告已生成并下载');
-
-    } catch (error) {
-      message.destroy();
-      console.error('Error generating PDF:', error);
-      message.error('生成PDF报告时出现错误');
-    } finally {
-      setDownloading(false);
-    }
   };
 
   // Handle page refresh (Command+R on Mac, F5 on Windows/Linux)
