@@ -760,7 +760,7 @@ const VisualizationPage = () => {
                             title: false,
                             xaxis: { title: 'Concurrency Level' },
                             yaxis: { title: '${getMetricUnit(metric)}' },
-                            hovermode: 'closest',
+                            hovermode: 'x unified',
                             showlegend: true,
                             legend: { orientation: 'h', y: -0.2 },
                             margin: { t: 20, r: 20, b: 80, l: 80 }

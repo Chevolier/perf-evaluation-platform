@@ -523,7 +523,7 @@ const StressTestPage = () => {
                   title: false,
                   xaxis: { title: 'Concurrency Level' },
                   yaxis: { title: '${metric.yLabel}' },
-                  hovermode: 'closest',
+                  hovermode: 'x unified',
                   showlegend: false,
                   margin: { t: 20, r: 20, b: 60, l: 80 }
                 }, {responsive: true});
