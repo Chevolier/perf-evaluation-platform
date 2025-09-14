@@ -474,22 +474,33 @@ const StressTestPage = () => {
                 <th>Avg TPOT (s)</th>
                 <th>Avg ITL (s)</th>
                 <th>Success Rate (%)</th>
+                <th>Cost ($/1M tok)</th>
               </tr>
             </thead>
             <tbody>
-              ${results.performance_table.map(row => `
-                <tr>
-                  <td>${row.concurrency || 0}</td>
-                  <td>${(row.rps || 0).toFixed(2)}</td>
-                  <td>${(row.avg_latency || 0).toFixed(3)}</td>
-                  <td>${(row.gen_toks_per_sec || 0).toFixed(0)}</td>
-                  <td>${(row.total_toks_per_sec || 0).toFixed(0)}</td>
-                  <td>${(row.avg_ttft || 0).toFixed(3)}</td>
-                  <td>${(row.avg_tpot || 0).toFixed(3)}</td>
-                  <td>${(row.avg_itl || 0).toFixed(3)}</td>
-                  <td>${(row.success_rate || 0).toFixed(1)}</td>
-                </tr>
-              `).join('')}
+              ${results.performance_table.map(row => {
+                // Calculate cost for this row
+                const outputThroughput = row.gen_toks_per_sec || 0;
+                const instanceType = 'g5.2xlarge'; // Default instance type
+                const hourlyPrice = INSTANCE_PRICING[instanceType] || INSTANCE_PRICING['default'];
+                const timeForMillionTokensHours = outputThroughput > 0 ? (1000000 / outputThroughput) / 3600 : 0;
+                const cost = timeForMillionTokensHours * hourlyPrice;
+
+                return `
+                  <tr>
+                    <td>${row.concurrency || 0}</td>
+                    <td>${(row.rps || 0).toFixed(2)}</td>
+                    <td>${(row.avg_latency || 0).toFixed(3)}</td>
+                    <td>${(row.gen_toks_per_sec || 0).toFixed(0)}</td>
+                    <td>${(row.total_toks_per_sec || 0).toFixed(0)}</td>
+                    <td>${(row.avg_ttft || 0).toFixed(3)}</td>
+                    <td>${(row.avg_tpot || 0).toFixed(3)}</td>
+                    <td>${(row.avg_itl || 0).toFixed(3)}</td>
+                    <td>${(row.success_rate || 0).toFixed(1)}</td>
+                    <td>$${cost.toFixed(3)}</td>
+                  </tr>
+                `;
+              }).join('')}
             </tbody>
           </table>
         `;
@@ -950,6 +961,25 @@ const StressTestPage = () => {
         width: 100,
         align: 'center',
         render: (value) => `${value?.toFixed(1) || 0}%`
+      },
+      {
+        title: 'Cost ($/1M tok)',
+        dataIndex: 'cost_per_million_tokens',
+        key: 'cost_per_million_tokens',
+        width: 120,
+        align: 'center',
+        render: (_, record) => {
+          // Calculate cost using the same logic as the chart
+          const outputThroughput = record.gen_toks_per_sec || 0;
+          const instanceType = 'g5.2xlarge'; // Default instance type
+          const hourlyPrice = INSTANCE_PRICING[instanceType] || INSTANCE_PRICING['default'];
+
+          // Calculate cost: time to generate 1M tokens (hours) * hourly price
+          const timeForMillionTokensHours = outputThroughput > 0 ? (1000000 / outputThroughput) / 3600 : 0;
+          const outputPricingPerMillionTokens = timeForMillionTokensHours * hourlyPrice;
+
+          return `$${outputPricingPerMillionTokens.toFixed(3)}`;
+        }
       }
     ];
 
