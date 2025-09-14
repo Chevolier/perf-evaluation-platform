@@ -308,15 +308,11 @@ class StressTestService:
                                 'requests': int(row['Total_Requests']),
                                 'rps': float(row['RPS_req_s']),
                                 'avg_latency': float(row['Avg_Latency_s']),
-                                'p99_latency': float(row['P99_Latency_s']),
                                 'gen_toks_per_sec': float(row['Gen_Throughput_tok_s']),
                                 'total_toks_per_sec': float(row['Total_Throughput_tok_s']),
                                 'avg_ttft': float(row['Avg_TTFT_s']),
-                                'p99_ttft': float(row['P99_TTFT_s']),
                                 'avg_tpot': float(row['Avg_TPOT_s']),
-                                'p99_tpot': float(row['P99_TPOT_s']),
                                 'avg_itl': float(row.get('Avg_ITL_s', row['Avg_TPOT_s'])),  # Inter-token latency, fallback to TPOT if not present
-                                'p99_itl': float(row.get('P99_ITL_s', row['P99_TPOT_s'])),  # P99 Inter-token latency, fallback to P99 TPOT if not present
                                 'success_rate': float(row['Success_Rate_%'])
                             })
                     
@@ -1490,51 +1486,15 @@ except Exception as e:
                 concurrency = result['concurrency']
                 requests = result['requests']
                 
-                # Extract key metrics
+                # Extract key metrics (average values only, from benchmark_summary.json)
                 rps = data.get('Request throughput (req/s)', 0)
                 avg_latency = data.get('Average latency (s)', 0)
-                p99_latency = avg_latency * 1.2  # Approximate P99 from average
                 gen_toks_per_sec = data.get('Output token throughput (tok/s)', 0)
                 total_toks_per_sec = data.get('Total token throughput (tok/s)', 0)
                 avg_ttft = data.get('Average time to first token (s)', 0)
-                p99_ttft = avg_ttft * 1.5  # Approximate P99 from average
                 avg_tpot = data.get('Average time per output token (s)', 0)
-                p99_tpot = avg_tpot * 1.2  # Approximate P99 from average
-
-                # Load ITL data from benchmark_percentile.json file
-                avg_itl = avg_tpot  # Default fallback
-                p99_itl = p99_tpot  # Default fallback
-
-                try:
-                    # Look for benchmark_percentile.json in the same directory as the summary file
-                    summary_dir = os.path.dirname(result['folder_path'])
-                    percentile_file = os.path.join(summary_dir, 'benchmark_percentile.json')
-
-                    if os.path.exists(percentile_file):
-                        with open(percentile_file, 'r', encoding='utf-8') as f:
-                            percentile_data = json.load(f)
-
-                        # Extract ITL values from percentile data
-                        if isinstance(percentile_data, list) and len(percentile_data) > 0:
-                            # Find average ITL (around 50th percentile)
-                            middle_idx = len(percentile_data) // 2
-                            if middle_idx < len(percentile_data):
-                                avg_itl = percentile_data[middle_idx].get('ITL (s)', avg_tpot)
-
-                            # Find P99 ITL (last few percentiles)
-                            p99_idx = int(len(percentile_data) * 0.99)
-                            if p99_idx < len(percentile_data):
-                                p99_itl = percentile_data[p99_idx].get('ITL (s)', p99_tpot)
-
-                            logger.info(f"Loaded ITL data from percentile file: avg_itl={avg_itl:.4f}, p99_itl={p99_itl:.4f}")
-                        else:
-                            logger.warning(f"Invalid or empty percentile data structure in {percentile_file}")
-                    else:
-                        logger.warning(f"Percentile file not found: {percentile_file}")
-
-                except Exception as e:
-                    logger.error(f"Failed to load ITL data from percentile file: {e}")
-                    # Keep fallback values
+                # Get ITL data from benchmark_summary.json
+                avg_itl = data.get('Average inter-token latency (s)', avg_tpot)  # Fallback to TPOT if not available
                 success_rate = (data.get('Succeed requests', 0) / max(data.get('Total requests', 1), 1)) * 100
 
                 # Update totals for summary
@@ -1554,15 +1514,11 @@ except Exception as e:
                     'requests': requests,
                     'rps': rps,
                     'avg_latency': avg_latency,
-                    'p99_latency': p99_latency,
                     'gen_toks_per_sec': gen_toks_per_sec,
                     'total_toks_per_sec': total_toks_per_sec,
                     'avg_ttft': avg_ttft,
-                    'p99_ttft': p99_ttft,
                     'avg_tpot': avg_tpot,
-                    'p99_tpot': p99_tpot,
                     'avg_itl': avg_itl,
-                    'p99_itl': p99_itl,
                     'success_rate': success_rate
                 }
                 table_data.append(table_entry)
@@ -1799,9 +1755,8 @@ except Exception as e:
             # Define CSV headers
             headers = [
                 'Concurrency', 'Total_Requests', 'Succeed_Requests', 'Failed_Requests',
-                'RPS_req_s', 'Avg_Latency_s', 'P99_Latency_s', 'Avg_TTFT_s', 'P99_TTFT_s',
-                'Avg_TPOT_s', 'P99_TPOT_s', 'Avg_ITL_s', 'P99_ITL_s', 'Gen_Throughput_tok_s', 'Total_Throughput_tok_s',
-                'Success_Rate_%'
+                'RPS_req_s', 'Avg_Latency_s', 'Avg_TTFT_s', 'Avg_TPOT_s', 'Avg_ITL_s',
+                'Gen_Throughput_tok_s', 'Total_Throughput_tok_s', 'Success_Rate_%'
             ]
             
             with open(csv_file, 'w', newline='', encoding='utf-8') as f:
@@ -1822,13 +1777,9 @@ except Exception as e:
                         failed_requests,
                         round(row.get('rps', 0), 4),
                         round(row.get('avg_latency', 0), 4),
-                        round(row.get('p99_latency', 0), 4),
                         round(row.get('avg_ttft', 0), 4),
-                        round(row.get('p99_ttft', 0), 4),
                         round(row.get('avg_tpot', 0), 4),
-                        round(row.get('p99_tpot', 0), 4),
-                        round(row.get('avg_itl', row.get('avg_tpot', 0)), 4),  # Inter-token latency, fallback to TPOT
-                        round(row.get('p99_itl', row.get('p99_tpot', 0)), 4),  # P99 Inter-token latency, fallback to P99 TPOT
+                        round(row.get('avg_itl', 0), 4),
                         round(row.get('gen_toks_per_sec', 0), 4),
                         round(row.get('total_toks_per_sec', 0), 4),
                         round(success_rate, 1)
@@ -3183,9 +3134,9 @@ except Exception as e:
                 performance_table = results.get('performance_table', [])
                 if performance_table:
                     # Create table headers
-                    headers = ['Concurrency', 'RPS', 'Avg Lat.(s)', 'P99 Lat.(s)', 
-                              'Gen tok/s', 'Tot tok/s', 'Avg TTFT(s)', 'Avg TPOT(s)', 'Success %']
-                    
+                    headers = ['Concurrency', 'RPS', 'Avg Lat.(s)', 'Gen tok/s', 'Tot tok/s',
+                              'Avg TTFT(s)', 'Avg TPOT(s)', 'Avg ITL(s)', 'Success %']
+
                     # Create table data
                     table_data = [headers]
                     for row in performance_table:
@@ -3193,15 +3144,15 @@ except Exception as e:
                             str(row.get('concurrency', 'N/A')),
                             f"{row.get('rps', 0):.2f}",
                             f"{row.get('avg_latency', 0):.3f}",
-                            f"{row.get('p99_latency', 0):.3f}",
                             f"{row.get('gen_toks_per_sec', 0):.0f}",
                             f"{row.get('total_toks_per_sec', 0):.0f}",
                             f"{row.get('avg_ttft', 0):.3f}",
                             f"{row.get('avg_tpot', 0):.3f}",
+                            f"{row.get('avg_itl', 0):.3f}",
                             f"{row.get('success_rate', 0):.1f}%"
                         ]
                         table_data.append(table_row)
-                    
+
                     perf_table = Table(table_data, colWidths=[0.7*inch]*9)
                     perf_table.setStyle(TableStyle([
                         ('BACKGROUND', (0,0), (-1,0), colors.grey),

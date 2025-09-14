@@ -451,13 +451,11 @@ const StressTestPage = () => {
                 <th>Concurrency</th>
                 <th>RPS</th>
                 <th>Avg Latency (s)</th>
-                <th>P99 Latency (s)</th>
                 <th>Gen Throughput (tok/s)</th>
                 <th>Total Throughput (tok/s)</th>
                 <th>Avg TTFT (s)</th>
-                <th>P99 TTFT (s)</th>
                 <th>Avg TPOT (s)</th>
-                <th>P99 TPOT (s)</th>
+                <th>Avg ITL (s)</th>
                 <th>Success Rate (%)</th>
               </tr>
             </thead>
@@ -467,13 +465,11 @@ const StressTestPage = () => {
                   <td>${row.concurrency || 0}</td>
                   <td>${(row.rps || 0).toFixed(2)}</td>
                   <td>${(row.avg_latency || 0).toFixed(3)}</td>
-                  <td>${(row.p99_latency || 0).toFixed(3)}</td>
                   <td>${(row.gen_toks_per_sec || 0).toFixed(0)}</td>
                   <td>${(row.total_toks_per_sec || 0).toFixed(0)}</td>
                   <td>${(row.avg_ttft || 0).toFixed(3)}</td>
-                  <td>${(row.p99_ttft || 0).toFixed(3)}</td>
                   <td>${(row.avg_tpot || 0).toFixed(3)}</td>
-                  <td>${(row.p99_tpot || 0).toFixed(3)}</td>
+                  <td>${(row.avg_itl || 0).toFixed(3)}</td>
                   <td>${(row.success_rate || 0).toFixed(1)}</td>
                 </tr>
               `).join('')}
@@ -897,14 +893,6 @@ const StressTestPage = () => {
         render: (value) => value?.toFixed(3) || 'N/A'
       },
       {
-        title: 'P99 TTFT(s)',
-        dataIndex: 'p99_ttft',
-        key: 'p99_ttft',
-        width: 100,
-        align: 'center',
-        render: (value) => value?.toFixed(3) || 'N/A'
-      },
-      {
         title: 'Avg TPOT(s)',
         dataIndex: 'avg_tpot',
         key: 'avg_tpot',
@@ -913,9 +901,9 @@ const StressTestPage = () => {
         render: (value) => value?.toFixed(3) || 'N/A'
       },
       {
-        title: 'P99 TPOT(s)',
-        dataIndex: 'p99_tpot',
-        key: 'p99_tpot',
+        title: 'Avg ITL(s)',
+        dataIndex: 'avg_itl',
+        key: 'avg_itl',
         width: 100,
         align: 'center',
         render: (value) => value?.toFixed(3) || 'N/A'
