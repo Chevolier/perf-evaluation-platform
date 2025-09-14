@@ -165,3 +165,54 @@ def delete_stress_test_session(session_id):
     except Exception as e:
         logger.error(f"Error deleting stress test session: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@stress_test_bp.route('/stress-test/save-report', methods=['POST'])
+def save_html_report():
+    """Save HTML report to session folder."""
+    try:
+        data = request.get_json()
+        session_id = data.get('session_id')
+        html_content = data.get('html_content')
+        filename = data.get('filename', 'stress-test-report.html')
+
+        logger.info(f"Saving HTML report for session: {session_id}")
+
+        if not session_id or not html_content:
+            return jsonify({"status": "error", "message": "Missing session_id or html_content"}), 400
+
+        success = stress_test_service.save_html_report(session_id, html_content, filename)
+
+        if success:
+            return jsonify({"status": "success", "message": "HTML report saved successfully"})
+        else:
+            return jsonify({"status": "error", "message": "Failed to save HTML report"}), 500
+
+    except Exception as e:
+        logger.error(f"Error saving HTML report: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@stress_test_bp.route('/stress-test/download-zip/<session_id>', methods=['GET'])
+def download_session_zip(session_id):
+    """Download session folder as ZIP file."""
+    try:
+        logger.info(f"ZIP download request for session: {session_id}")
+
+        zip_content = stress_test_service.create_session_zip(session_id)
+
+        if not zip_content:
+            logger.error(f"Failed to create ZIP for session {session_id}")
+            return jsonify({"status": "error", "message": "Failed to create session ZIP"}), 500
+
+        # Create response with ZIP content
+        response = make_response(zip_content)
+        response.headers['Content-Type'] = 'application/zip'
+        response.headers['Content-Disposition'] = f'attachment; filename=stress-test-session-{session_id}.zip'
+
+        logger.info(f"Session ZIP created and ready for download: {session_id}")
+        return response
+
+    except Exception as e:
+        logger.error(f"Error creating session ZIP: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500

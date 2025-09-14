@@ -423,7 +423,7 @@ const StressTestPage = () => {
     setPollingInterval(interval);
   };
 
-  // 下载报告 - Generate interactive HTML report
+  // 下载报告 - Generate HTML report in session folder and zip download
   const downloadReport = async (sessionId) => {
     const session = testSessions[sessionId];
     if (!session || !session.results) {
@@ -432,6 +432,9 @@ const StressTestPage = () => {
     }
 
     try {
+      // Import JSZip dynamically
+      const JSZip = (await import('jszip')).default;
+
       message.loading('正在生成HTML报告...', 0);
 
       const timestamp = new Date().toLocaleString();
@@ -694,19 +697,47 @@ const StressTestPage = () => {
 </body>
 </html>`;
 
-      // Create blob and download HTML file directly
-      const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
-      const url = window.URL.createObjectURL(blob);
+      // Send HTML content to backend to save in session folder
+      const saveResponse = await fetch('/api/stress-test/save-report', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          session_id: sessionId,
+          html_content: htmlContent,
+          filename: 'stress-test-report.html'
+        }),
+      });
+
+      if (!saveResponse.ok) {
+        throw new Error(`Failed to save HTML report: ${saveResponse.status}`);
+      }
+
+      // Request backend to zip the session folder and return it
+      message.loading('正在压缩会话文件夹...', 0);
+
+      const zipResponse = await fetch(`/api/stress-test/download-zip/${sessionId}`, {
+        method: 'GET'
+      });
+
+      if (!zipResponse.ok) {
+        throw new Error(`Failed to create zip: ${zipResponse.status}`);
+      }
+
+      // Download the zip file
+      const zipBlob = await zipResponse.blob();
+      const url = window.URL.createObjectURL(zipBlob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `stress-test-report-${sessionId}-${new Date().toISOString().slice(0, 10)}.html`;
+      link.download = `stress-test-session-${sessionId}-${new Date().toISOString().slice(0, 10)}.zip`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       window.URL.revokeObjectURL(url);
 
       message.destroy();
-      message.success('HTML测试报告已生成并下载');
+      message.success('会话文件夹已压缩并下载');
 
     } catch (error) {
       message.destroy();
@@ -2162,7 +2193,7 @@ const StressTestPage = () => {
                         icon={<DownloadOutlined />}
                         onClick={() => downloadReport(currentSessionId)}
                       >
-                        下载HTML报告
+                        下载报告
                       </Button>
                     )}
                   </Col>

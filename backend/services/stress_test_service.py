@@ -3352,3 +3352,119 @@ except Exception as e:
         ])
         
         return "\n".join(report_lines).encode('utf-8')
+
+    def save_html_report(self, session_id: str, html_content: str, filename: str = 'stress-test-report.html') -> bool:
+        """Save HTML report to session folder.
+
+        Args:
+            session_id: Session ID
+            html_content: HTML content to save
+            filename: Name of the HTML file
+
+        Returns:
+            True if saved successfully, False otherwise
+        """
+        try:
+            # Find session output directory
+            session = self.test_sessions.get(session_id)
+            output_directory = None
+
+            if session:
+                output_directory = session.get('output_directory')
+                logger.info(f"Found session {session_id} with output directory: {output_directory}")
+
+            # If not in memory, search for session directory
+            if not output_directory:
+                project_root = Path(__file__).parent.parent.parent
+                outputs_dir = project_root / 'outputs'
+
+                if outputs_dir.exists():
+                    for model_dir in outputs_dir.iterdir():
+                        if model_dir.is_dir():
+                            potential_session_dir = model_dir / session_id
+                            if potential_session_dir.exists():
+                                output_directory = str(potential_session_dir)
+                                logger.info(f"Found session directory on disk: {output_directory}")
+                                break
+
+            if not output_directory:
+                logger.error(f"Could not find session directory for {session_id}")
+                return False
+
+            # Save HTML file to session directory
+            session_path = Path(output_directory)
+            html_file_path = session_path / filename
+
+            with open(html_file_path, 'w', encoding='utf-8') as f:
+                f.write(html_content)
+
+            logger.info(f"HTML report saved to: {html_file_path}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to save HTML report for session {session_id}: {e}")
+            return False
+
+    def create_session_zip(self, session_id: str) -> bytes:
+        """Create ZIP file of session folder.
+
+        Args:
+            session_id: Session ID
+
+        Returns:
+            ZIP file content as bytes, None if failed
+        """
+        import zipfile
+        import io
+
+        try:
+            # Find session output directory
+            session = self.test_sessions.get(session_id)
+            output_directory = None
+
+            if session:
+                output_directory = session.get('output_directory')
+                logger.info(f"Found session {session_id} with output directory: {output_directory}")
+
+            # If not in memory, search for session directory
+            if not output_directory:
+                project_root = Path(__file__).parent.parent.parent
+                outputs_dir = project_root / 'outputs'
+
+                if outputs_dir.exists():
+                    for model_dir in outputs_dir.iterdir():
+                        if model_dir.is_dir():
+                            potential_session_dir = model_dir / session_id
+                            if potential_session_dir.exists():
+                                output_directory = str(potential_session_dir)
+                                logger.info(f"Found session directory on disk: {output_directory}")
+                                break
+
+            if not output_directory:
+                logger.error(f"Could not find session directory for {session_id}")
+                return None
+
+            session_path = Path(output_directory)
+            if not session_path.exists():
+                logger.error(f"Session directory does not exist: {session_path}")
+                return None
+
+            # Create ZIP in memory
+            zip_buffer = io.BytesIO()
+
+            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                # Add all files from session directory
+                for file_path in session_path.rglob('*'):
+                    if file_path.is_file():
+                        # Calculate relative path within the session folder
+                        rel_path = file_path.relative_to(session_path)
+                        zip_file.write(file_path, rel_path)
+                        logger.debug(f"Added to ZIP: {rel_path}")
+
+            zip_content = zip_buffer.getvalue()
+            logger.info(f"Created ZIP for session {session_id}, size: {len(zip_content)} bytes")
+            return zip_content
+
+        except Exception as e:
+            logger.error(f"Failed to create ZIP for session {session_id}: {e}")
+            return None
