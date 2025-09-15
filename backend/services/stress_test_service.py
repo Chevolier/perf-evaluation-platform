@@ -303,17 +303,31 @@ class StressTestService:
                     with open(csv_file, 'r', encoding='utf-8') as f:
                         reader = csv.DictReader(f)
                         for row in reader:
+                            # Helper function to parse values that might be 'N/A'
+                            def safe_float(value, fallback=None):
+                                if value == 'N/A' or value == '' or value is None:
+                                    return fallback
+                                try:
+                                    return float(value)
+                                except (ValueError, TypeError):
+                                    return fallback
+
                             performance_table.append({
                                 'concurrency': int(row['Concurrency']),
                                 'requests': int(row['Total_Requests']),
                                 'rps': float(row['RPS_req_s']),
                                 'avg_latency': float(row['Avg_Latency_s']),
+                                'p99_latency': safe_float(row.get('P99_Latency_s'), None),
                                 'gen_toks_per_sec': float(row['Gen_Throughput_tok_s']),
                                 'total_toks_per_sec': float(row['Total_Throughput_tok_s']),
                                 'avg_ttft': float(row['Avg_TTFT_s']),
+                                'p99_ttft': safe_float(row.get('P99_TTFT_s'), None),
                                 'avg_tpot': float(row['Avg_TPOT_s']),
-                                'avg_itl': float(row.get('Avg_ITL_s', row['Avg_TPOT_s'])),  # Inter-token latency, fallback to TPOT if not present
-                                'success_rate': float(row['Success_Rate_%'])
+                                'p99_tpot': safe_float(row.get('P99_TPOT_s'), None),
+                                'avg_itl': float(row.get('Avg_ITL_s', row['Avg_TPOT_s'])),
+                                'p99_itl': safe_float(row.get('P99_ITL_s'), None),
+                                'success_rate': float(row['Success_Rate_%']),
+                                'output_pricing': safe_float(row.get('Output_Pricing_per_1M_tokens'), 0)
                             })
                     
                     # Build comprehensive results from config and CSV data
@@ -1485,7 +1499,8 @@ except Exception as e:
                 data = result['data']
                 concurrency = result['concurrency']
                 requests = result['requests']
-                
+                folder_path = result['folder_path']
+
                 # Extract key metrics (average values only, from benchmark_summary.json)
                 rps = data.get('Request throughput (req/s)', 0)
                 avg_latency = data.get('Average latency (s)', 0)
@@ -1496,6 +1511,34 @@ except Exception as e:
                 # Get ITL data from benchmark_summary.json
                 avg_itl = data.get('Average inter-token latency (s)', avg_tpot)  # Fallback to TPOT if not available
                 success_rate = (data.get('Succeed requests', 0) / max(data.get('Total requests', 1), 1)) * 100
+
+                # Load P99 values from benchmark_percentile.json if available
+                p99_latency = None
+                p99_ttft = None
+                p99_tpot = None
+                p99_itl = None
+
+                try:
+                    # Get the directory containing the benchmark_summary.json file
+                    result_dir = os.path.dirname(folder_path)
+                    percentile_file = os.path.join(result_dir, 'benchmark_percentile.json')
+
+                    if os.path.exists(percentile_file):
+                        import json
+                        with open(percentile_file, 'r', encoding='utf-8') as f:
+                            percentile_data = json.load(f)
+
+                        # Find P99 data (99% percentile)
+                        for entry in percentile_data:
+                            if entry.get('Percentiles') == '99%':
+                                p99_latency = entry.get('Latency (s)')
+                                p99_ttft = entry.get('TTFT (s)')
+                                p99_tpot = entry.get('TPOT (s)')
+                                p99_itl = entry.get('ITL (s)')
+                                logger.info(f"Loaded P99 values for concurrency={concurrency}: latency={p99_latency}, ttft={p99_ttft}, tpot={p99_tpot}, itl={p99_itl}")
+                                break
+                except Exception as e:
+                    logger.warning(f"Could not load P99 values for concurrency={concurrency}: {e}")
 
                 # Update totals for summary
                 output_tokens = data.get('Average output tokens per request', 0) * data.get('Total requests', 0)
@@ -1514,11 +1557,15 @@ except Exception as e:
                     'requests': requests,
                     'rps': rps,
                     'avg_latency': avg_latency,
+                    'p99_latency': p99_latency,
                     'gen_toks_per_sec': gen_toks_per_sec,
                     'total_toks_per_sec': total_toks_per_sec,
                     'avg_ttft': avg_ttft,
+                    'p99_ttft': p99_ttft,
                     'avg_tpot': avg_tpot,
+                    'p99_tpot': p99_tpot,
                     'avg_itl': avg_itl,
+                    'p99_itl': p99_itl,
                     'success_rate': success_rate
                 }
                 table_data.append(table_entry)
@@ -1755,8 +1802,10 @@ except Exception as e:
             # Define CSV headers
             headers = [
                 'Concurrency', 'Total_Requests', 'Succeed_Requests', 'Failed_Requests',
-                'RPS_req_s', 'Avg_Latency_s', 'Avg_TTFT_s', 'Avg_TPOT_s', 'Avg_ITL_s',
-                'Gen_Throughput_tok_s', 'Total_Throughput_tok_s', 'Success_Rate_%'
+                'RPS_req_s', 'Avg_Latency_s', 'P99_Latency_s', 'Avg_TTFT_s', 'P99_TTFT_s',
+                'Avg_TPOT_s', 'P99_TPOT_s', 'Avg_ITL_s', 'P99_ITL_s',
+                'Gen_Throughput_tok_s', 'Total_Throughput_tok_s', 'Success_Rate_%',
+                'Output_Pricing_per_1M_tokens'
             ]
             
             with open(csv_file, 'w', newline='', encoding='utf-8') as f:
@@ -1769,20 +1818,64 @@ except Exception as e:
                     success_rate = row.get('success_rate', 100.0)
                     succeed_requests = int(total_requests * success_rate / 100.0)
                     failed_requests = total_requests - succeed_requests
-                    
+
+                    # Get actual P99 values from the row data (should be loaded from percentile files)
+                    avg_latency = row.get('avg_latency', 0)
+                    avg_ttft = row.get('avg_ttft', 0)
+                    avg_tpot = row.get('avg_tpot', 0)
+                    avg_itl = row.get('avg_itl', 0)
+
+                    # Use actual P99 values if available, otherwise None (will show as N/A)
+                    p99_latency = row.get('p99_latency')
+                    p99_ttft = row.get('p99_ttft')
+                    p99_tpot = row.get('p99_tpot')
+                    p99_itl = row.get('p99_itl')
+
+                    # Calculate output pricing (cost per 1M output tokens)
+                    gen_throughput = row.get('gen_toks_per_sec', 0)
+                    instance_type = 'g5.2xlarge'  # Default instance type, could be made configurable
+                    # AWS instance pricing per hour (USD) - on-demand pricing
+                    instance_pricing = {
+                        'g5.xlarge': 1.006,
+                        'g5.2xlarge': 1.212,
+                        'g5.4xlarge': 1.624,
+                        'g5.8xlarge': 2.472,
+                        'g5.12xlarge': 4.944,
+                        'g5.16xlarge': 6.592,
+                        'g5.24xlarge': 9.888,
+                        'g5.48xlarge': 19.776,
+                        'p4d.24xlarge': 32.7726,
+                        'p4de.24xlarge': 40.9656,
+                        'p5.48xlarge': 98.32,
+                        'default': 2.0
+                    }
+                    hourly_price = instance_pricing.get(instance_type, instance_pricing['default'])
+
+                    # Calculate cost: time to generate 1M tokens (hours) * hourly price
+                    if gen_throughput > 0:
+                        time_for_million_tokens_hours = (1000000 / gen_throughput) / 3600
+                        output_pricing = time_for_million_tokens_hours * hourly_price
+                    else:
+                        output_pricing = 0
+
                     csv_row = [
                         row.get('concurrency', 0),
                         total_requests,
                         succeed_requests,
                         failed_requests,
                         round(row.get('rps', 0), 4),
-                        round(row.get('avg_latency', 0), 4),
-                        round(row.get('avg_ttft', 0), 4),
-                        round(row.get('avg_tpot', 0), 4),
-                        round(row.get('avg_itl', 0), 4),
+                        round(avg_latency, 4),
+                        round(p99_latency, 4) if p99_latency is not None else 'N/A',
+                        round(avg_ttft, 4),
+                        round(p99_ttft, 4) if p99_ttft is not None else 'N/A',
+                        round(avg_tpot, 4),
+                        round(p99_tpot, 4) if p99_tpot is not None else 'N/A',
+                        round(avg_itl, 4),
+                        round(p99_itl, 4) if p99_itl is not None else 'N/A',
                         round(row.get('gen_toks_per_sec', 0), 4),
                         round(row.get('total_toks_per_sec', 0), 4),
-                        round(success_rate, 1)
+                        round(success_rate, 1),
+                        round(output_pricing, 3)
                     ]
                     writer.writerow(csv_row)
             

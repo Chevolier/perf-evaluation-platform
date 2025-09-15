@@ -877,7 +877,7 @@ const StressTestPage = () => {
   // 渲染综合性能摘要表格
   const renderComprehensiveSummary = (results) => {
     if (!results || !results.is_comprehensive) return null;
-    
+
     const summary = results.comprehensive_summary;
     const tableData = results.performance_table || [];
     
