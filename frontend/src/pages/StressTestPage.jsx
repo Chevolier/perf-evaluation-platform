@@ -168,10 +168,10 @@ const StressTestPage = () => {
     const selectedModel = models.find(model => model.key === modelKey);
     const modelType = getModelType(selectedModel?.name || modelKey);
     setIsMultimodal(modelType === 'VLM');
-    
+
     // Force form to re-render to update conditional validation
     setTimeout(() => {
-      form.validateFields(['input_tokens', 'output_tokens', 'image_width', 'image_height', 'image_num']);
+      form.validateFields(['prefix_length', 'input_tokens', 'output_tokens', 'image_width', 'image_height', 'image_num']);
     }, 0);
   };
   
@@ -179,10 +179,10 @@ const StressTestPage = () => {
   const handleManualModelNameChange = (modelName) => {
     const modelType = getModelType(modelName);
     setIsMultimodal(modelType === 'VLM');
-    
+
     // Force form to re-render to update conditional validation
     setTimeout(() => {
-      form.validateFields(['input_tokens', 'output_tokens', 'image_width', 'image_height', 'image_num']);
+      form.validateFields(['prefix_length', 'input_tokens', 'output_tokens', 'image_width', 'image_height', 'image_num']);
     }, 0);
   };
   
@@ -322,6 +322,7 @@ const StressTestPage = () => {
         params: {
           num_requests: numRequestsArray,
           concurrency: concurrencyArray,
+          prefix_length: values.prefix_length || 0,
           input_tokens: values.input_tokens,
           output_tokens: values.output_tokens,
           temperature: 0.1,
@@ -1687,6 +1688,7 @@ const StressTestPage = () => {
               initialValues={{
                 num_requests: "50, 100, 200",
                 concurrency: "1, 5, 10",
+                prefix_length: 0,
                 input_tokens: 32,
                 output_tokens: 32,
                 deployment_method: inputMode === 'dropdown' ? "SageMaker Endpoint" : "EC2",
@@ -1711,7 +1713,7 @@ const StressTestPage = () => {
                       const newMode = e.target.value;
                       setInputMode(newMode);
                       // Clear form fields when switching modes
-                      form.resetFields(['model', 'deployment_method', 'dataset', 'dataset_path', 'api_url', 'model_name', 'instance_type', 'framework', 'tp_size', 'dp_size', 'image_width', 'image_height', 'image_num']);
+                      form.resetFields(['model', 'deployment_method', 'dataset', 'dataset_path', 'api_url', 'model_name', 'instance_type', 'framework', 'tp_size', 'dp_size', 'prefix_length', 'input_tokens', 'output_tokens', 'image_width', 'image_height', 'image_num']);
                       // Set default deployment method based on input mode
                       if (newMode === 'dropdown') {
                         form.setFieldsValue({ deployment_method: 'SageMaker Endpoint' });
@@ -1794,7 +1796,7 @@ const StressTestPage = () => {
                             setDatasetType(value);
                             // Force form to re-render to update conditional validation
                             setTimeout(() => {
-                              form.validateFields(['input_tokens', 'output_tokens', 'image_width', 'image_height', 'image_num']);
+                              form.validateFields(['prefix_length', 'input_tokens', 'output_tokens', 'image_width', 'image_height', 'image_num']);
                             }, 0);
                           }}
                         >
@@ -1973,7 +1975,7 @@ const StressTestPage = () => {
                             setDatasetType(value);
                             // Force form to re-render to update conditional validation
                             setTimeout(() => {
-                              form.validateFields(['input_tokens', 'output_tokens', 'image_width', 'image_height', 'image_num']);
+                              form.validateFields(['prefix_length', 'input_tokens', 'output_tokens', 'image_width', 'image_height', 'image_num']);
                             }, 0);
                           }}
                         >
@@ -2166,6 +2168,22 @@ const StressTestPage = () => {
               <Row gutter={8} justify="space-between" style={{ marginBottom: 16 }}>
                 <Col flex="1">
                   <Form.Item
+                    name="prefix_length"
+                    label="前缀Token"
+                    rules={shouldEnableTokenParams() ? [{ required: true, message: '请输入前缀Token数量' }] : []}
+                    style={{ marginBottom: 0 }}
+                  >
+                    <InputNumber
+                      style={{ width: '100%' }}
+                      placeholder="0"
+                      min={0}
+                      max={4000}
+                      disabled={!shouldEnableTokenParams()}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col flex="1">
+                  <Form.Item
                     name="input_tokens"
                     label="输入Token"
                     rules={shouldEnableTokenParams() ? [{ required: true, message: '请输入Token数量' }] : []}
@@ -2254,7 +2272,7 @@ const StressTestPage = () => {
               {/* Parameter enablement info */}
               <div style={{ marginBottom: '16px' }}>
                 <Text type="secondary" style={{ fontSize: '12px' }}>
-                  Token参数仅在LLM模型+random数据集或VLM模型+random_vl数据集时启用；
+                  Token参数（前缀Token、输入Token、输出Token）仅在LLM模型+random数据集或VLM模型+random_vl数据集时启用；
                   图像参数仅在VLM模型+random_vl数据集时启用
                 </Text>
               </div>
