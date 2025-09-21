@@ -675,6 +675,7 @@ class StressTestService:
             
             # Use evalscope with custom API
             try:
+                print(f"test_params: {test_params}")
                 results = self._run_evalscope_with_custom_api(api_url, model_name, test_params, session_id)
             except AttributeError as attr_error:
                 if "'list' object has no attribute 'get'" in str(attr_error):

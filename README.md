@@ -154,6 +154,15 @@ nohup vllm serve Qwen/Qwen2.5-VL-7B-Instruct \
     --limit-mm-per-prompt '{"images": 1, "videos": 1}' \
     --enable-prompt-tokens-details \
     >logs/serve_qwen2.5-vl-7bi.out 2>&1 &
+
+nohup vllm serve /home/ec2-user/SageMaker/efs/Models/Qwen3-8B \
+     --host 0.0.0.0 --port 8000 \
+     --dtype bfloat16\
+    --gpu-memory-utilization 0.9 \
+    --max-model-len 2048 \
+    --enable-prompt-tokens-details \
+    >logs/serve_qwen3-8b.out 2>&1 &
+    
 ```
 You will obtain:
 Api url: http://0.0.0.0:8000/v1/chat/completions
