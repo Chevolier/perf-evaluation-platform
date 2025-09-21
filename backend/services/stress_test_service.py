@@ -719,9 +719,10 @@ class StressTestService:
         """
         from ..core.models import model_registry
         from ..services.model_service import ModelService
-        
+
         num_requests_list = test_params.get('num_requests', [50])
         concurrency_list = test_params.get('concurrency', [5])
+        prefix_length = test_params.get('prefix_length', 0)
         input_tokens = test_params.get('input_tokens', 200)
         output_tokens = test_params.get('output_tokens', 500)
         temperature = test_params.get('temperature', 0.1)
@@ -739,6 +740,7 @@ class StressTestService:
         logger.info(f"[DEBUG] Raw parameters from frontend:")
         logger.info(f"[DEBUG]   num_requests: {num_requests_list} (type: {type(num_requests_list)})")
         logger.info(f"[DEBUG]   concurrency: {concurrency_list} (type: {type(concurrency_list)})")
+        logger.info(f"[DEBUG]   prefix_length: {prefix_length} (type: {type(prefix_length)})")
         logger.info(f"[DEBUG]   input_tokens: {input_tokens} (type: {type(input_tokens)})")
         logger.info(f"[DEBUG]   output_tokens: {output_tokens} (type: {type(output_tokens)})")
         logger.info(f"[DEBUG]  connect_timeout: {connect_timeout} (type: {type(connect_timeout)})")
@@ -840,7 +842,7 @@ class StressTestService:
             min_prompt_length = input_tokens
             max_prompt_length = input_tokens
             
-            logger.info(f"[DEBUG] Token parameters: input_tokens={input_tokens}, output_tokens={output_tokens}")
+            logger.info(f"[DEBUG] Token parameters: prefix_length={prefix_length}, input_tokens={input_tokens}, output_tokens={output_tokens}")
             logger.info(f"[DEBUG] Evalscope config: min_prompt_length={min_prompt_length}, max_prompt_length={max_prompt_length}, min_tokens={min_tokens}, max_tokens={max_tokens}")
             
             # Create simple output directory
@@ -884,7 +886,7 @@ try:
         dataset={dataset_param},
         min_tokens={min_tokens},
         max_tokens={max_tokens},
-        prefix_length=0,
+        prefix_length={prefix_length},
         min_prompt_length={min_prompt_length},
         max_prompt_length={max_prompt_length},
         tokenizer_path='{tokenizer_path}',
@@ -1709,6 +1711,7 @@ except Exception as e:
                     "output_tokens": test_params.get('output_tokens', 500),
                     "temperature": test_params.get('temperature', 0.1),
                     "stream": test_params.get('stream', True),
+                    "prefix_length": test_params.get('prefix_length', 0),
                     "image_width": test_params.get('image_width', 512),
                     "image_height": test_params.get('image_height', 512),
                     "image_num": test_params.get('image_num', 1),
@@ -1968,7 +1971,7 @@ except Exception as e:
                     "temperature": test_params.get('temperature', 0.1),
                     "stream": test_params.get('stream', True),
                     "seed": 42,
-                    "prefix_length": 0,
+                    "prefix_length": test_params.get('prefix_length', 0),
                     "apply_chat_template": True,
                     "image_width": test_params.get('image_width', 512),
                     "image_height": test_params.get('image_height', 512),
@@ -2019,6 +2022,7 @@ except Exception as e:
         """
         num_requests_list = test_params.get('num_requests', [50])
         concurrency_list = test_params.get('concurrency', [5])
+        prefix_length = test_params.get('prefix_length', 0)
         input_tokens = test_params.get('input_tokens', 200)
         output_tokens = test_params.get('output_tokens', 500)
         temperature = test_params.get('temperature', 0.1)
@@ -2037,6 +2041,7 @@ except Exception as e:
         logger.info(f"[DEBUG] Custom API - Raw parameters from frontend:")
         logger.info(f"[DEBUG]   num_requests: {num_requests_list} (type: {type(num_requests_list)})")
         logger.info(f"[DEBUG]   concurrency: {concurrency_list} (type: {type(concurrency_list)})")
+        logger.info(f"[DEBUG]   prefix_length: {prefix_length} (type: {type(prefix_length)})")
         
         # Convert to lists if single values were provided for backward compatibility
         if not isinstance(num_requests_list, list):
@@ -2122,7 +2127,7 @@ except Exception as e:
             min_prompt_length = input_tokens
             max_prompt_length = input_tokens
             
-            logger.info(f"[DEBUG] Custom API Token parameters: input_tokens={input_tokens}, output_tokens={output_tokens}")
+            logger.info(f"[DEBUG] Custom API Token parameters: prefix_length={prefix_length}, input_tokens={input_tokens}, output_tokens={output_tokens}")
             logger.info(f"[DEBUG] Custom API Evalscope config: min_prompt_length={min_prompt_length}, max_prompt_length={max_prompt_length}, min_tokens={min_tokens}, max_tokens={max_tokens}")
             logger.info(f"[DEBUG] Custom API Token parameters: connect_timeout={connect_timeout}, read_timeout={read_timeout}")
 
@@ -2169,7 +2174,7 @@ try:
         dataset={dataset_param},
         min_tokens={min_tokens},
         max_tokens={max_tokens},
-        prefix_length=0,
+        prefix_length={prefix_length},
         min_prompt_length={min_prompt_length},
         max_prompt_length={max_prompt_length},
         tokenizer_path='{tokenizer_path}',
