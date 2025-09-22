@@ -16,8 +16,8 @@ results_bp = Blueprint('results', __name__)
 @results_bp.route('/api/results/structure', methods=['GET'])
 def get_results_structure():
     """Get the hierarchical structure of all available benchmark results.
-    
-    Structure: model/deployment_method_instance_framework_tp_size_dataset/input_tokens_output_tokens
+
+    Structure: model/deployment_method_instance_framework_tp_size_dataset/prefix_input_tokens_output_tokens
     """
     try:
         project_root = Path(__file__).parent.parent.parent.parent
@@ -75,10 +75,13 @@ def get_results_structure():
                     tp_size = deployment_config.get('tp_size', 1)
                     dataset = stress_config.get('dataset', 'unknown')
                     
-                    # Create input/output tokens description
+                    # Create prefix/input/output tokens description
                     input_tokens = stress_config.get('input_tokens', {})
                     output_tokens = stress_config.get('output_tokens', {})
-                    tokens_desc = f"input:{input_tokens.get('min', 0)}-{input_tokens.get('max', 0)}_output:{output_tokens.get('min', 0)}-{output_tokens.get('max', 0)}"
+                    prefix_length = stress_config.get('prefix_length', 0)
+
+                    # Include prefix in the tokens description
+                    tokens_desc = f"prefix:{prefix_length}_input:{input_tokens.get('min', 0)}-{input_tokens.get('max', 0)}_output:{output_tokens.get('min', 0)}-{output_tokens.get('max', 0)}"
                     
                     # Build flatter hierarchy: model -> deployment_method_instance_framework_tp_size_dataset -> tokens
                     instance_framework_dataset = f"{deployment_method}_{instance_type}_{framework}_tp{tp_size}_{dataset}"
@@ -101,6 +104,7 @@ def get_results_structure():
                         "tp_size": tp_size,
                         "dataset": dataset,
                         "tokens_desc": tokens_desc,
+                        "prefix_length": prefix_length,
                         "timestamp": config.get('timestamp', ''),
                         "config": config,
                         "path": str(session_dir),
@@ -168,7 +172,7 @@ def get_results_structure():
             "structure": structure,
             "total_models": len(hierarchy),
             "total_sessions": total_sessions,
-            "hierarchy_levels": ["model", "deployment_method_instance_framework_tp_size_dataset", "input_output_tokens"]
+            "hierarchy_levels": ["model", "deployment_method_instance_framework_tp_size_dataset", "prefix_input_output_tokens"]
         })
         
     except Exception as e:

@@ -864,7 +864,7 @@ const VisualizationPage = () => {
             selectable: false
           };
         } else if (node.sessions) {
-          // This is a leaf node (input_output_tokens level) with sessions
+          // This is a leaf node (prefix_input_output_tokens level) with sessions
           const allSessionKeys = node.sessions.map(s => s.key);
           const selectedCount = allSessionKeys.filter(key => selectedResults.includes(key)).length;
           const allSelected = selectedCount === node.sessions.length && node.sessions.length > 0;
@@ -1264,7 +1264,7 @@ const VisualizationPage = () => {
                             <Tag size="small">Dataset: {result.dataset}</Tag>
                           </Space>
                           <Space wrap size="small">
-                            <Tag size="small">Tokens: {result.tokens_desc}</Tag>
+                            <Tag size="small">Tokens: {result.tokens_desc || 'N/A'}</Tag>
                             <Tag size="small">Concurrency: {(() => {
                               console.log('Summary Concurrency value:', result.concurrency, 'Type:', typeof result.concurrency);
                               const val = String(result.concurrency);
