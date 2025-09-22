@@ -541,18 +541,41 @@ const VisualizationPage = () => {
 
         tablesHtml += `
           <h3>📊 ${result.model} - ${result.session_id}</h3>
+          <div class="config-details" style="margin: 15px 0;">
+            <strong>Configuration:</strong>
+            <table style="width: 100%; margin-top: 8px; border-collapse: collapse; font-size: 13px;">
+              <thead>
+                <tr style="background-color: #f0f0f0;">
+                  <th style="border: 1px solid #ddd; padding: 6px; text-align: left;">Deployment</th>
+                  <th style="border: 1px solid #ddd; padding: 6px; text-align: left;">Instance</th>
+                  <th style="border: 1px solid #ddd; padding: 6px; text-align: left;">Framework</th>
+                  <th style="border: 1px solid #ddd; padding: 6px; text-align: left;">Dataset</th>
+                  <th style="border: 1px solid #ddd; padding: 6px; text-align: left;">Tokens</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td style="border: 1px solid #ddd; padding: 6px;">${result.deployment_method || 'emd'}</td>
+                  <td style="border: 1px solid #ddd; padding: 6px;">${result.instance_type}</td>
+                  <td style="border: 1px solid #ddd; padding: 6px;">${result.framework}</td>
+                  <td style="border: 1px solid #ddd; padding: 6px;">${result.dataset}</td>
+                  <td style="border: 1px solid #ddd; padding: 6px; font-family: monospace; font-size: 12px;">${result.tokens_desc}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
           <table class="performance-table">
             <thead>
               <tr>
                 <th>Concurrency</th>
-                <th>RPS</th>
-                <th>Gen Throughput</th>
-                <th>Total Throughput</th>
-                <th>Avg Latency</th>
-                <th>Avg TTFT</th>
-                <th>Avg TPOT</th>
-                <th>Avg ITL</th>
-                <th>Cost/1M$ Tokens</th>
+                <th>RPS (req/s)</th>
+                <th>Gen Throughput (tok/s)</th>
+                <th>Total Throughput (tok/s)</th>
+                <th>Avg Latency (s)</th>
+                <th>Avg TTFT (s)</th>
+                <th>Avg TPOT (s)</th>
+                <th>Avg ITL (s)</th>
+                <th>Cost/1M Tokens ($)</th>
               </tr>
             </thead>
             <tbody>
