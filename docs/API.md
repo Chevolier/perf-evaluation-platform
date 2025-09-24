@@ -107,6 +107,80 @@ Content-Type: application/json
 }
 ```
 
+### HyperPod Automation (InfraForge)
+
+#### Launch HyperPod Cluster
+```http
+POST /api/hyperpod/deploy
+Content-Type: application/json
+
+{
+  "preset": "small",
+  "dry_run": true,
+  "overrides": {
+    "region": "us-west-2",
+    "cluster_tag": "demo-cluster-001"
+  }
+}
+```
+
+- `preset`: `small`, `medium`, or `large` (defaults to `small`)
+- `dry_run`: Optional flag; defaults to the environment configuration (`true` for development)
+- `overrides`: Optional map translated into environment variables for the InfraForge scripts (`region`, `cluster_tag`, `gpu_instance_type`, etc.)
+
+Response (`202 Accepted`):
+```json
+{
+  "status": "submitted",
+  "job": {
+    "job_id": "c8d0e816-6c36-4bba-a1cb-77e0f9d1f19a",
+    "status": "queued",
+    "action": "deploy",
+    "preset": "small",
+    "dry_run": true
+  }
+}
+```
+
+#### Destroy HyperPod Cluster
+```http
+POST /api/hyperpod/destroy
+Content-Type: application/json
+
+{
+  "preset": "small",
+  "overrides": {
+    "region": "us-west-2"
+  }
+}
+```
+
+#### List Jobs
+```http
+GET /api/hyperpod/jobs
+```
+
+#### Get Job Status
+```http
+GET /api/hyperpod/jobs/{job_id}
+```
+
+Response payload includes `status`, `result`, timestamps, and CLI metadata.
+
+#### Fetch Job Logs
+```http
+GET /api/hyperpod/jobs/{job_id}/logs?tail=200
+```
+
+Returns the latest log lines written by the InfraForge scripts. Adjust `tail` to stream more or fewer lines (omit the parameter to return the entire file).
+
+#### Preset Catalogue
+```http
+GET /api/hyperpod/presets
+```
+
+Lists HyperPod presets exposed by the backend configuration.
+
 ## Response Format
 
 ### Success Response

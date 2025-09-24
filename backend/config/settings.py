@@ -30,8 +30,12 @@ DEFAULT_CONFIG = {
         "backup_count": 5
     },
     "aws": {
-        "region": "us-west-2",
-        "account_id": None  # Will be detected automatically
+        "region": "us-east-1",
+        "account_id": None,  # Will be detected automatically
+        "profile": None,
+        "access_key_id": None,
+        "secret_access_key": None,
+        "session_token": None
     },
     "models": {
         "emd": {
@@ -51,6 +55,36 @@ DEFAULT_CONFIG = {
     "storage": {
         "base_path": str(OUTPUTS_DIR),
         "cleanup_days": 30
+    },
+    "hyperpod": {
+        "state_machine_arn": None,
+        "prepare_config_lambda_arn": None,
+        "post_deploy_validation_lambda_arn": None,
+        "persist_outputs_lambda_arn": None,
+        "cleanup_lambda_arn": None,
+        "record_failure_lambda_arn": None,
+        "default_timeout_seconds": 3600,
+        "default_region": "us-west-2",
+        "config_s3_bucket": None,
+        "outputs_parameter_prefix": "/perf-eval/hyperpod",
+        "infraforge_root": "../InfraForge",
+        "deploy_script": "scripts/deploy_hyperpod.sh",
+        "destroy_script": "scripts/deploy_hyperpod.sh",
+        "presets": {
+            "small": "configs/hyperpod/config_hyperpod_small.yaml",
+            "medium": "configs/hyperpod/config_hyperpod_medium.yaml",
+            "large": "configs/hyperpod/config_hyperpod_large.yaml"
+        },
+        "dry_run": False,
+        "log_directory": "logs/hyperpod",
+        "supported_overrides": [
+            "region",
+            "cluster_tag",
+            "gpu_instance_type",
+            "gpu_instance_count",
+            "availability_zone",
+            "stack_name"
+        ]
     },
     "benchmarking": {
         "default_timeout": 1800,  # 30 minutes

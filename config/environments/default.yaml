@@ -13,8 +13,12 @@ logging:
   backup_count: 5
 
 aws:
-  region: "us-west-2"
+  region: "us-east-1"
   account_id: null  # Auto-detected
+  profile: null
+  access_key_id: null
+  secret_access_key: null
+  session_token: null
 
 models:
   emd:
@@ -32,6 +36,18 @@ database:
 storage:
   base_path: "outputs"
   cleanup_days: 30
+
+hyperpod:
+  infraforge_root: "../InfraForge"
+  deploy_script: "scripts/deploy_hyperpod.sh"
+  destroy_script: "scripts/deploy_hyperpod.sh"
+  presets:
+    small: "configs/hyperpod/config_hyperpod_small.yaml"
+    medium: "configs/hyperpod/config_hyperpod_medium.yaml"
+    large: "configs/hyperpod/config_hyperpod_large.yaml"
+  dry_run: true
+  log_directory: "logs/hyperpod"
+  default_region: "us-west-2"
 
 benchmarking:
   default_timeout: 1800  # 30 minutes

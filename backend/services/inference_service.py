@@ -1,13 +1,21 @@
 """Inference service for handling model predictions."""
 
 import json
+import os
 import queue
 import threading
-from typing import Dict, Any, List, Generator
+from typing import Dict, Any, List, Generator, Optional
 from datetime import datetime
 
 from ..core.models import model_registry
-from ..utils import get_logger
+from ..utils import get_logger, get_account_id
+from ..config import get_config
+
+try:
+    import boto3
+    from botocore.exceptions import ClientError, NoCredentialsError
+except ImportError as exc:  # pragma: no cover - defensive guard
+    raise ImportError("botocore is required for Bedrock interactions. Please install boto3/botocore.") from exc
 
 
 logger = get_logger(__name__)
@@ -19,6 +27,7 @@ class InferenceService:
     def __init__(self):
         """Initialize inference service."""
         self.registry = model_registry
+        self._aws_account_id: Optional[str] = None
     
     def multi_inference(self, data: Dict[str, Any]) -> Generator[str, None, None]:
         """Run inference on multiple models simultaneously.
@@ -63,6 +72,7 @@ class InferenceService:
             else:
                 # Unknown model
                 result_queue.put({
+                    'type': 'error',
                     'model': model,
                     'status': 'error',
                     'message': f'Unknown model: {model}'
@@ -79,15 +89,23 @@ class InferenceService:
         while completed < total_models:
             try:
                 result = result_queue.get(timeout=1)
-                completed += 1
-                
-                # Stream result back to client (SSE format)
-                response_data = f"data: {json.dumps(result, ensure_ascii=False)}\n\n"
-                yield response_data
-                
             except queue.Empty:
                 # Send heartbeat to keep connection alive (SSE format)
                 yield f"data: {json.dumps({'type': 'heartbeat', 'completed': completed, 'total': total_models})}\n\n"
+                continue
+
+            event_type = result.get('type') if isinstance(result, dict) else None
+
+            if event_type == 'chunk':
+                # Forward streaming token update without marking model complete
+                yield f"data: {json.dumps(result, ensure_ascii=False)}\n\n"
+                continue
+
+            completed += 1
+            if isinstance(result, dict) and not event_type:
+                result = {**result, 'type': 'result'}
+
+            yield f"data: {json.dumps(result, ensure_ascii=False)}\n\n"
         
         # Wait for all threads to complete
         for thread in threads:
@@ -95,70 +113,257 @@ class InferenceService:
         
         # Send completion signal
         yield f"data: {json.dumps({'type': 'complete'})}\n\n"
-    
+
+    def _get_aws_account_id(self) -> Optional[str]:
+        """Fetch and cache the AWS account ID for Bedrock inference profiles."""
+        if self._aws_account_id:
+            return self._aws_account_id
+
+        config = None
+        try:
+            config = get_config()
+        except Exception as exc:  # pragma: no cover - defensive guard
+            logger.debug("Failed to access config manager when fetching account ID: %s", exc)
+
+        account_id: Optional[str] = None
+        if config:
+            account_id = config.get('aws.account_id')
+
+        if not account_id:
+            session = None
+            try:
+                session = self._get_boto_session()
+            except Exception as exc:  # pragma: no cover - defensive guard
+                logger.debug("Unable to create boto session for account lookup: %s", exc)
+
+            if session:
+                try:
+                    sts_client = session.client('sts')
+                    response = sts_client.get_caller_identity()
+                    account_id = response.get('Account')
+                except Exception as exc:  # pragma: no cover - fallback
+                    logger.debug("Failed to fetch AWS account via session: %s", exc)
+
+            if not account_id:
+                account_id = get_account_id()
+
+            if account_id and config:
+                try:
+                    config.set('aws.account_id', account_id)
+                except Exception as exc:  # pragma: no cover - best effort cache
+                    logger.debug("Unable to persist AWS account ID in config: %s", exc)
+
+        self._aws_account_id = account_id
+        return account_id
+
+    def _get_boto_session(self, region: Optional[str] = None):
+        """Create or reuse a boto3 session with configured credentials."""
+        try:
+            import boto3
+        except ImportError as exc:  # pragma: no cover - defensive guard
+            raise ImportError(
+                "boto3 is required for Bedrock operations. Please install: pip install boto3"
+            ) from exc
+
+        config = None
+        try:
+            config = get_config()
+        except Exception as conf_error:  # pragma: no cover
+            logger.debug("Failed to access configuration while building boto session: %s", conf_error)
+
+        profile_name = os.environ.get('AWS_PROFILE')
+        access_key = None
+        secret_key = None
+        session_token = None
+        default_region = None
+
+        if config:
+            profile_name = config.get('aws.profile') or profile_name
+            access_key = config.get('aws.access_key_id')
+            secret_key = config.get('aws.secret_access_key')
+            session_token = config.get('aws.session_token')
+            default_region = config.get('aws.region')
+
+        target_region = region or default_region or 'us-east-1'
+
+        session_kwargs: Dict[str, Any] = {'region_name': target_region}
+
+        if access_key and secret_key:
+            session_kwargs.update({
+                'aws_access_key_id': access_key,
+                'aws_secret_access_key': secret_key
+            })
+            if session_token:
+                session_kwargs['aws_session_token'] = session_token
+        elif profile_name:
+            session_kwargs['profile_name'] = profile_name
+
+        session = boto3.session.Session(**session_kwargs)
+
+        # Ensure credentials are actually resolved; otherwise downstream calls raise cryptic errors.
+        if session.get_credentials() is None:
+            raise NoCredentialsError()
+
+        return session
+
+    @staticmethod
+    def _merge_usage_dicts(base: Optional[Dict[str, Any]], latest: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """Merge token usage dictionaries, preferring the most recent non-null values."""
+        merged: Dict[str, Any] = (base or {}).copy()
+
+        if not latest:
+            return merged
+
+        for key in ('input_tokens', 'output_tokens', 'total_tokens'):
+            value = latest.get(key)
+            if value is not None:
+                merged[key] = value
+
+        return merged
+
+    def _extract_usage_from_bedrock_event(self, event_json: Dict[str, Any]) -> Dict[str, Any]:
+        """Extract token usage information from a Bedrock streaming event if available."""
+        usage_candidates = []
+
+        if isinstance(event_json.get('usage'), dict):
+            usage_candidates.append(event_json['usage'])
+
+        delta = event_json.get('delta')
+        if isinstance(delta, dict) and isinstance(delta.get('usage'), dict):
+            usage_candidates.append(delta['usage'])
+
+        for candidate in usage_candidates:
+            input_tokens = (candidate.get('input_tokens') or
+                            candidate.get('prompt_tokens') or
+                            candidate.get('inputTokens'))
+            output_tokens = (candidate.get('output_tokens') or
+                             candidate.get('completion_tokens') or
+                             candidate.get('outputTokens'))
+            total_tokens = (candidate.get('total_tokens') or
+                            candidate.get('totalTokens'))
+
+            if total_tokens is None and (input_tokens is not None or output_tokens is not None):
+                total_tokens = (input_tokens or 0) + (output_tokens or 0)
+
+            if any(value is not None for value in (input_tokens, output_tokens, total_tokens)):
+                return {
+                    'input_tokens': input_tokens,
+                    'output_tokens': output_tokens,
+                    'total_tokens': total_tokens
+                }
+
+        return {}
+
+    def _extract_text_from_bedrock_event(self, event_json: Dict[str, Any]) -> List[str]:
+        """Extract textual deltas from a Bedrock streaming event."""
+        if not isinstance(event_json, dict):
+            return []
+
+        segments: List[str] = []
+        event_type = event_json.get('type')
+
+        delta = event_json.get('delta')
+        if event_type == 'content_block_delta' and isinstance(delta, dict):
+            if delta.get('type') == 'text_delta' and isinstance(delta.get('text'), str):
+                segments.append(delta['text'])
+        elif event_type in ('output_text_delta', 'composed_text_delta'):
+            if isinstance(delta, dict) and isinstance(delta.get('text'), str):
+                segments.append(delta['text'])
+            elif isinstance(event_json.get('text'), str):
+                segments.append(event_json['text'])
+        elif isinstance(event_json.get('text'), str) and event_type not in (
+            'message_start', 'message_delta', 'message_stop', 'content_block_start', 'content_block_stop'
+        ):
+            segments.append(event_json['text'])
+
+        content = event_json.get('content')
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict):
+                    if block.get('type') == 'text' and isinstance(block.get('text'), str):
+                        segments.append(block['text'])
+                    elif isinstance(block.get('text'), str) and event_type == 'output_text':
+                        segments.append(block['text'])
+
+        # Remove duplicates while preserving order
+        unique_segments: List[str] = []
+        seen = set()
+        for segment in segments:
+            if segment and segment not in seen:
+                unique_segments.append(segment)
+                seen.add(segment)
+
+        return unique_segments
+
     def _process_bedrock_model(self, model: str, data: Dict[str, Any], result_queue: queue.Queue) -> None:
-        """Process inference for a Bedrock model.
-        
-        Args:
-            model: Model identifier
-            data: Request data
-            result_queue: Queue to put results
-        """
+        """Process inference for a Bedrock model."""
         try:
             start_time = datetime.now()
-            
-            # Import boto3 for Bedrock
+
+            # Resolve configuration
+            config = None
             try:
-                import boto3
-                from botocore.exceptions import ClientError, NoCredentialsError
-            except ImportError:
-                raise ImportError("boto3 is required for Bedrock models. Please install: pip install boto3")
-            
+                config = get_config()
+            except Exception as conf_error:  # pragma: no cover - defensive guard
+                logger.debug("Failed to access configuration while preparing Bedrock request: %s", conf_error)
+
+            # FORCE us-east-1 for Bedrock - where US inference profiles are available
+            bedrock_region = 'us-east-1'
+
+            try:
+                session = self._get_boto_session(bedrock_region)
+                bedrock_client = session.client('bedrock-runtime', region_name=bedrock_region)
+                try:
+                    identity = session.client('sts').get_caller_identity()
+                    logger.info("Using AWS identity %s for model %s", identity.get('Arn'), model)
+                except Exception as sts_error:  # pragma: no cover - diagnostics only
+                    logger.debug("Unable to fetch STS caller identity: %s", sts_error)
+            except NoCredentialsError:
+                raise ValueError(
+                    "AWS credentials not configured. Please export AWS_PROFILE or set AWS_ACCESS_KEY_ID / "
+                    "AWS_SECRET_ACCESS_KEY (optionally AWS_SESSION_TOKEN) before starting the backend."
+                )
+            except Exception as client_error:
+                raise ValueError(f"Failed to initialize Bedrock client: {client_error}")
+
             # Get model configuration
             model_info = self.registry.get_model_info(model)
             if not model_info:
                 raise ValueError(f"Model {model} not found in registry")
-            
+
             model_id = model_info.get('model_id')
             if not model_id:
                 raise ValueError(f"No model_id found for model {model}")
-            
-            # Create Bedrock Runtime client
-            try:
-                bedrock_client = boto3.client('bedrock-runtime', region_name='us-west-2')
-            except NoCredentialsError:
-                raise ValueError("AWS credentials not configured. Please configure AWS credentials.")
-            
+
             # Prepare request body based on model type
-            text_prompt = data.get('text', '')
+            text_prompt = data.get('text', '') or data.get('message', '')
             frames = data.get('frames', [])
             max_tokens = data.get('max_tokens', 1000)
             temperature = data.get('temperature', 0.7)
-            
-            # Build message content
+
             message_content = []
-            
-            # Add text content
+
             if text_prompt:
-                message_content.append({
-                    "type": "text",
-                    "text": text_prompt
-                })
-            
-            # Add image content for multimodal models
+                message_content.append({"type": "text", "text": text_prompt})
+
             if frames and model_info.get('supports_multimodal', False):
                 for frame_base64 in frames:
                     message_content.append({
                         "type": "image",
                         "source": {
                             "type": "base64",
-                            "media_type": "image/jpeg",  # Assume JPEG for now
+                            "media_type": "image/jpeg",
                             "data": frame_base64
                         }
                     })
-            
-            # Prepare request body for Anthropic models
+
             if 'claude' in model.lower() or 'anthropic' in model_id.lower():
+                # Use simple string format for text-only, array format for multimodal
+                if len(message_content) == 1 and message_content[0].get('type') == 'text':
+                    content = message_content[0]['text']  # Simple string for text-only
+                else:
+                    content = message_content  # Array format for multimodal
+                
                 request_body = {
                     "anthropic_version": "bedrock-2023-05-31",
                     "max_tokens": max_tokens,
@@ -166,12 +371,11 @@ class InferenceService:
                     "messages": [
                         {
                             "role": "user",
-                            "content": message_content
+                            "content": content
                         }
                     ]
                 }
             elif 'nova' in model.lower() or 'amazon' in model_id.lower():
-                # Amazon Nova format
                 request_body = {
                     "messages": [
                         {
@@ -185,39 +389,167 @@ class InferenceService:
                     }
                 }
             else:
-                # Generic format
                 request_body = {
                     "messages": [
                         {
-                            "role": "user", 
+                            "role": "user",
                             "content": message_content
                         }
                     ],
                     "max_tokens": max_tokens,
                     "temperature": temperature
                 }
-            
-            logger.info(f"Calling Bedrock model {model_id} with request: {request_body}")
-            
-            # Call Bedrock API
+
+            request_json = json.dumps(request_body)
+
+            invoke_kwargs: Dict[str, Any] = {
+                'body': request_json,
+                'contentType': 'application/json',
+                'accept': 'application/json'
+            }
+
+            logger.info(
+                "Calling Bedrock model %s (%s) in region %s with request: %s",
+                model_id,
+                model,
+                bedrock_region,
+                request_body
+            )
+
+
+            streaming_supported = model_info.get('supports_streaming', True)
+            stream_response = None
+
+            if streaming_supported:
+                try:
+                    # Use the exact working pattern for streaming too
+                    stream_response = bedrock_client.invoke_model_with_response_stream(
+                        modelId=model_id,
+                        body=request_json,
+                        contentType='application/json',
+                        accept='application/json'
+                    )
+                    stream_body = stream_response.get('body') if isinstance(stream_response, dict) else None
+
+                    aggregated_chunks: List[str] = []
+                    usage_info: Dict[str, Any] = {}
+                    raw_events: List[Any] = []
+
+                    if stream_body:
+                        for event in stream_body:
+                            payload_bytes = None
+                            if isinstance(event, dict):
+                                if 'chunk' in event and isinstance(event['chunk'], dict):
+                                    payload_bytes = event['chunk'].get('bytes')
+                                elif 'payloadPart' in event and isinstance(event['payloadPart'], dict):
+                                    payload_bytes = event['payloadPart'].get('bytes')
+
+                            if not payload_bytes:
+                                continue
+
+                            decoded_payload = payload_bytes.decode('utf-8')
+                            if not decoded_payload.strip():
+                                continue
+
+                            lines = decoded_payload.splitlines()
+                            if not lines:
+                                lines = [decoded_payload]
+
+                            for piece in lines:
+                                piece = piece.strip()
+                                if not piece:
+                                    continue
+
+                                try:
+                                    event_json = json.loads(piece)
+                                    raw_events.append(event_json)
+                                except json.JSONDecodeError:
+                                    raw_events.append(piece)
+                                    aggregated_chunks.append(piece)
+                                    result_queue.put({
+                                        'type': 'chunk',
+                                        'model': model,
+                                        'status': 'streaming',
+                                        'delta': piece,
+                                        'provider': 'bedrock'
+                                    })
+                                    continue
+
+                                text_segments = self._extract_text_from_bedrock_event(event_json)
+                                for segment in text_segments:
+                                    aggregated_chunks.append(segment)
+                                    result_queue.put({
+                                        'type': 'chunk',
+                                        'model': model,
+                                        'status': 'streaming',
+                                        'delta': segment,
+                                        'provider': 'bedrock'
+                                    })
+
+                                usage_info = self._merge_usage_dicts(
+                                    usage_info,
+                                    self._extract_usage_from_bedrock_event(event_json)
+                                )
+
+                    final_content = ''.join(aggregated_chunks)
+                    if not final_content and raw_events:
+                        last_event = raw_events[-1]
+                        if isinstance(last_event, dict):
+                            final_content = json.dumps(last_event, ensure_ascii=False)
+                        else:
+                            final_content = str(last_event)
+
+                    result_queue.put({
+                        'type': 'result',
+                        'model': model,
+                        'status': 'success',
+                        'result': {
+                            'content': final_content,
+                            'usage': usage_info,
+                            'raw_response': raw_events
+                        },
+                        'duration_ms': (datetime.now() - start_time).total_seconds() * 1000
+                    })
+                    return
+                except Exception as stream_error:
+                    logger.warning(
+                        "Bedrock streaming invocation failed for %s (%s); falling back to standard invocation: %s",
+                        model,
+                        model_id,
+                        stream_error,
+                        exc_info=True
+                    )
+                finally:
+                    if isinstance(stream_response, dict):
+                        body = stream_response.get('body')
+                        if hasattr(body, 'close'):
+                            try:
+                                body.close()
+                            except Exception:
+                                pass
+
+            # Fallback to non-streaming invocation
+            # Use the exact working pattern
             response = bedrock_client.invoke_model(
                 modelId=model_id,
-                body=json.dumps(request_body),
-                contentType='application/json'
+                body=request_json,
+                contentType='application/json',
+                accept='application/json'
             )
-            
+
             # Parse response
             response_body = json.loads(response['body'].read())
             logger.info(f"Bedrock response for {model}: {response_body}")
-            
-            # Extract content and usage from response
+
             content = ""
             usage = {}
-            
+
             if 'claude' in model.lower() or 'anthropic' in model_id.lower():
-                # Claude response format
                 if 'content' in response_body and response_body['content']:
-                    content = response_body['content'][0].get('text', '')
+                    content_blocks = response_body['content']
+                    if isinstance(content_blocks, list):
+                        text_parts = [block.get('text', '') for block in content_blocks if block.get('type') == 'text']
+                        content = ''.join(text_parts) if text_parts else content
                 if 'usage' in response_body:
                     usage = {
                         'input_tokens': response_body['usage'].get('input_tokens', 0),
@@ -225,39 +557,62 @@ class InferenceService:
                         'total_tokens': response_body['usage'].get('input_tokens', 0) + response_body['usage'].get('output_tokens', 0)
                     }
             elif 'nova' in model.lower():
-                # Nova response format
                 if 'output' in response_body and 'message' in response_body['output']:
-                    message_content = response_body['output']['message'].get('content', [])
-                    if message_content and message_content[0].get('text'):
-                        content = message_content[0]['text']
+                    content_entries = response_body['output']['message'].get('content', [])
+                    if isinstance(content_entries, list):
+                        text_values = [item.get('text') for item in content_entries if item.get('text')]
+                        if text_values:
+                            content = ''.join(text_values)
                 if 'usage' in response_body:
                     usage = {
                         'input_tokens': response_body['usage'].get('inputTokens', 0),
-                        'output_tokens': response_body['usage'].get('outputTokens', 0), 
+                        'output_tokens': response_body['usage'].get('outputTokens', 0),
                         'total_tokens': response_body['usage'].get('totalTokens', 0)
                     }
-            
+            else:
+                content = response_body.get('output_text') or response_body.get('completion') or str(response_body)
+                if 'usage' in response_body:
+                    usage = {
+                        'input_tokens': response_body['usage'].get('prompt_tokens', 0),
+                        'output_tokens': response_body['usage'].get('completion_tokens', 0),
+                        'total_tokens': response_body['usage'].get('total_tokens', 0)
+                    }
+
+            if not content:
+                content = str(response_body)
+
             result = {
+                'type': 'result',
                 'model': model,
                 'status': 'success',
                 'result': {
                     'content': content,
                     'usage': usage,
-                    'raw_response': response_body  # Include raw response for debugging
+                    'raw_response': response_body
                 },
                 'duration_ms': (datetime.now() - start_time).total_seconds() * 1000
             }
-            
+
             result_queue.put(result)
-            
+
+        except ClientError as client_error:
+            logger.error(f"Bedrock client error for model {model}: {client_error}")
+            error_message = client_error.response['Error'].get('Message', str(client_error))
+            result_queue.put({
+                'type': 'error',
+                'model': model,
+                'status': 'error',
+                'message': error_message
+            })
         except Exception as e:
             logger.error(f"Error processing Bedrock model {model}: {e}")
             result_queue.put({
+                'type': 'error',
                 'model': model,
                 'status': 'error',
                 'message': str(e)
             })
-    
+
     def _process_emd_model(self, model: str, data: Dict[str, Any], result_queue: queue.Queue) -> None:
         """Process inference for an EMD model.
         
@@ -472,6 +827,7 @@ class InferenceService:
                 content = str(response_body)
             
             result = {
+                'type': 'result',
                 'model': model,
                 'status': 'success',
                 'result': {
@@ -488,6 +844,7 @@ class InferenceService:
         except Exception as e:
             logger.error(f"Error processing EMD model {model}: {e}")
             result_queue.put({
+                'type': 'error',
                 'model': model,
                 'status': 'error',
                 'message': str(e)
@@ -495,7 +852,7 @@ class InferenceService:
     
     def _process_manual_api(self, manual_config: Dict[str, Any], data: Dict[str, Any], result_queue: queue.Queue) -> None:
         """Process inference for a manually configured API endpoint.
-        
+
         Args:
             manual_config: Manual configuration containing api_url and model_name
             data: Request data
@@ -503,33 +860,31 @@ class InferenceService:
         """
         try:
             import requests
-            
+
             start_time = datetime.now()
-            
+
             api_url = manual_config.get('api_url')
             model_name = manual_config.get('model_name')
-            
+            label = f"{model_name} (Manual API)" if model_name else 'Manual API'
+
             if not api_url or not model_name:
                 raise ValueError("Both api_url and model_name are required in manual_config")
-            
+
             # Prepare request data
             text_prompt = data.get('text', '')
             frames = data.get('frames', [])
             max_tokens = data.get('max_tokens', 1000)
             temperature = data.get('temperature', 0.7)
-            
-            # Build messages array
+
             messages = []
             content_parts = []
-            
-            # Add text content
+
             if text_prompt:
                 content_parts.append({
                     "type": "text",
                     "text": text_prompt
                 })
-            
-            # Add image content if frames are provided
+
             if frames:
                 for frame_base64 in frames:
                     content_parts.append({
@@ -538,86 +893,230 @@ class InferenceService:
                             "url": f"data:image/jpeg;base64,{frame_base64}"
                         }
                     })
-            
+
             messages.append({
                 "role": "user",
                 "content": content_parts
             })
-            
-            # Prepare request payload
-            request_payload = {
+
+            base_payload = {
                 "model": model_name,
                 "messages": messages,
                 "max_tokens": max_tokens,
                 "temperature": temperature
             }
-            
+
             logger.info(f"Calling manual API {api_url} with model {model_name}")
-            logger.debug(f"Request payload: {request_payload}")
-            
-            # Make API call
-            response = requests.post(
-                api_url,
-                json=request_payload,
-                headers={
-                    "Content-Type": "application/json"
-                },
-                timeout=120  # 2 minute timeout
-            )
-            
-            if not response.ok:
-                raise ValueError(f"API call failed with status {response.status_code}: {response.text}")
-            
-            response_data = response.json()
-            logger.info(f"Manual API response for {model_name}: {response_data}")
-            
-            # Extract content and usage from response
-            content = ""
+            logger.debug(f"Request payload: {base_payload}")
+
+            response = None
+            attempted_stream = False
+            request_payload = dict(base_payload)
+
+            for stream_flag in (True, False):
+                payload = dict(base_payload)
+                if stream_flag:
+                    payload['stream'] = True
+
+                try:
+                    response = requests.post(
+                        api_url,
+                        json=payload,
+                        headers={"Content-Type": "application/json"},
+                        timeout=120,
+                        stream=True
+                    )
+                except Exception as request_error:
+                    if response is not None:
+                        response.close()
+                        response = None
+                    if stream_flag:
+                        logger.warning("Manual API streaming request failed, retrying without stream flag: %s", request_error)
+                        continue
+                    raise
+
+                if response.ok:
+                    attempted_stream = stream_flag
+                    request_payload = payload
+                    break
+
+                error_text = response.text
+                status_code = response.status_code
+                response.close()
+                response = None
+
+                if stream_flag:
+                    logger.warning("Manual API streaming request returned %s, retrying without stream flag: %s", status_code, error_text)
+                    continue
+
+                raise ValueError(f"API call failed with status {status_code}: {error_text}")
+
+            if response is None:
+                raise ValueError("Manual API request failed")
+
+            aggregated_chunks = []
+            raw_stream_events = []
             usage = {}
-            
-            # Handle OpenAI-compatible response format
-            if 'choices' in response_data and response_data['choices']:
+            streamed = False
+            raw_body_lines = []
+
+            for line in response.iter_lines(decode_unicode=True):
+                if line is None:
+                    continue
+                stripped = line.strip()
+                if not stripped:
+                    continue
+
+                raw_body_lines.append(stripped)
+
+                if stripped.startswith('data:'):
+                    payload_str = stripped[5:].strip()
+                    if not payload_str:
+                        continue
+                    if payload_str == '[DONE]':
+                        streamed = True
+                        break
+
+                    streamed = True
+                    try:
+                        event_json = json.loads(payload_str)
+                        raw_stream_events.append(event_json)
+                    except json.JSONDecodeError:
+                        aggregated_chunks.append(payload_str)
+                        result_queue.put({
+                            'type': 'chunk',
+                            'model': label,
+                            'delta': payload_str,
+                            'status': 'streaming',
+                            'api_url': api_url
+                        })
+                        continue
+
+                    choices = event_json.get('choices', [])
+                    for choice in choices:
+                        delta = choice.get('delta', {}) if isinstance(choice, dict) else {}
+                        delta_text = delta.get('content') if isinstance(delta, dict) else None
+                        if delta_text:
+                            aggregated_chunks.append(delta_text)
+                            result_queue.put({
+                                'type': 'chunk',
+                                'model': label,
+                                'delta': delta_text,
+                                'status': 'streaming',
+                                'api_url': api_url
+                            })
+
+                    if 'output_text' in event_json:
+                        output_text = event_json.get('output_text')
+                        if isinstance(output_text, str) and output_text:
+                            aggregated_chunks.append(output_text)
+                            result_queue.put({
+                                'type': 'chunk',
+                                'model': label,
+                                'delta': output_text,
+                                'status': 'streaming',
+                                'api_url': api_url
+                            })
+
+                    if 'usage' in event_json and isinstance(event_json['usage'], dict):
+                        usage_obj = event_json['usage']
+                        prompt_tokens = usage_obj.get('prompt_tokens', usage_obj.get('input_tokens', 0))
+                        completion_tokens = usage_obj.get('completion_tokens', usage_obj.get('output_tokens', 0))
+                        total_tokens = usage_obj.get('total_tokens', prompt_tokens + completion_tokens)
+                        usage = {
+                            'input_tokens': prompt_tokens,
+                            'output_tokens': completion_tokens,
+                            'total_tokens': total_tokens
+                        }
+
+                elif attempted_stream:
+                    # Some APIs stream plain text without SSE framing
+                    streamed = True
+                    aggregated_chunks.append(stripped)
+                    result_queue.put({
+                        'type': 'chunk',
+                        'model': label,
+                        'delta': stripped,
+                        'status': 'streaming',
+                        'api_url': api_url
+                    })
+
+            raw_body_text = '\n'.join(raw_body_lines).strip()
+
+            if streamed:
+                combined_content = ''.join(aggregated_chunks).strip()
+                raw_response = raw_stream_events if raw_stream_events else raw_body_text
+
+                result_queue.put({
+                    'type': 'result',
+                    'model': label,
+                    'status': 'success',
+                    'result': {
+                        'content': combined_content or raw_body_text,
+                        'usage': usage,
+                        'raw_response': raw_response
+                    },
+                    'duration_ms': (datetime.now() - start_time).total_seconds() * 1000,
+                    'api_url': api_url
+                })
+
+                response.close()
+                return
+
+            if not raw_body_text:
+                raw_body_text = response.text.strip() if response.content else ''
+
+            response.close()
+
+            try:
+                response_data = json.loads(raw_body_text) if raw_body_text else {}
+            except json.JSONDecodeError:
+                response_data = raw_body_text
+
+            logger.info(f"Manual API response for {model_name}: {response_data}")
+
+            # Extract content and usage from response
+            content = ''
+            usage = {} if not isinstance(response_data, dict) else usage
+
+            if isinstance(response_data, dict) and response_data.get('choices'):
                 choice = response_data['choices'][0]
-                if 'message' in choice:
+                if isinstance(choice, dict) and 'message' in choice:
                     message = choice['message']
-                    # Check for reasoning_content first (manual API Qwen models)
-                    if 'reasoning_content' in message and message['reasoning_content']:
-                        reasoning = message['reasoning_content'].strip()
+                    if isinstance(message, dict) and message.get('reasoning_content'):
+                        reasoning = message.get('reasoning_content', '').strip()
                         main_content = message.get('content', '').strip() if message.get('content') else ''
-                        
-                        # Combine reasoning and main content
+
                         if reasoning and main_content:
                             content = f"**Reasoning:**\n{reasoning}\n\n**Response:**\n{main_content}"
                         elif reasoning:
-                            # If only reasoning is available, present it as the response
-                            # This happens when the model hits token limits during generation
                             content = f"**Reasoning:**\n{reasoning}\n\n**Note:** The model's response was cut off due to token limits. The reasoning shows the model's thought process before generating the final answer."
                         elif main_content:
                             content = main_content
                         else:
                             content = "No content available"
-                    elif 'content' in message and message['content']:
+                    elif isinstance(message, dict) and message.get('content'):
                         content = message['content']
                     else:
                         content = str(message)
-                elif 'text' in choice:
+                elif isinstance(choice, dict) and choice.get('text'):
                     content = choice['text']
                 else:
                     content = str(choice)
             else:
-                # Fallback: try to extract any text content
                 content = str(response_data)
-            
-            # Extract usage information if available
-            if 'usage' in response_data:
+
+            if isinstance(response_data, dict) and response_data.get('usage'):
+                usage_obj = response_data['usage']
                 usage = {
-                    'input_tokens': response_data['usage'].get('prompt_tokens', 0),
-                    'output_tokens': response_data['usage'].get('completion_tokens', 0),
-                    'total_tokens': response_data['usage'].get('total_tokens', 0)
+                    'input_tokens': usage_obj.get('prompt_tokens', usage_obj.get('input_tokens', 0)),
+                    'output_tokens': usage_obj.get('completion_tokens', usage_obj.get('output_tokens', 0)),
+                    'total_tokens': usage_obj.get('total_tokens', usage_obj.get('prompt_tokens', usage_obj.get('input_tokens', 0)) + usage_obj.get('completion_tokens', usage_obj.get('output_tokens', 0)))
                 }
-            
-            result = {
-                'model': f"{model_name} (Manual API)",
+
+            result_queue.put({
+                'type': 'result',
+                'model': label,
                 'status': 'success',
                 'result': {
                     'content': content,
@@ -626,14 +1125,13 @@ class InferenceService:
                 },
                 'duration_ms': (datetime.now() - start_time).total_seconds() * 1000,
                 'api_url': api_url
-            }
-            
-            result_queue.put(result)
-            
+            })
+
         except Exception as e:
             logger.error(f"Error processing manual API {manual_config}: {e}")
             result_queue.put({
-                'model': f"{manual_config.get('model_name', 'Unknown')} (Manual API)",
+                'type': 'error',
+                'model': label,
                 'status': 'error',
                 'message': str(e),
                 'api_url': manual_config.get('api_url', 'Unknown')

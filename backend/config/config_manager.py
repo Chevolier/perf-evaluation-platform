@@ -88,6 +88,10 @@ class ConfigManager:
             # AWS configuration
             'AWS_REGION': 'aws.region',
             'AWS_ACCOUNT_ID': 'aws.account_id',
+            'AWS_PROFILE': 'aws.profile',
+            'AWS_ACCESS_KEY_ID': 'aws.access_key_id',
+            'AWS_SECRET_ACCESS_KEY': 'aws.secret_access_key',
+            'AWS_SESSION_TOKEN': 'aws.session_token',
             
             # EMD configuration
             'EMD_BASE_URL': 'models.emd.base_url',

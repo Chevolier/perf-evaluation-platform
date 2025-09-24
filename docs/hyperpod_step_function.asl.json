@@ -1,0 +1,188 @@
+{
+  "Comment": "State machine orchestrating InfraForge HyperPod deployments for the Perf Evaluation Platform.",
+  "StartAt": "PrepareDeploymentConfig",
+  "States": {
+    "PrepareDeploymentConfig": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "OutputPath": "$.Payload",
+      "Parameters": {
+        "FunctionName": "${PrepareConfigLambdaArn}",
+        "Payload.$": "$"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "RecordFailure"
+        }
+      ],
+      "Next": "RunInfraForgeTask"
+    },
+    "RunInfraForgeTask": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::ecs:runTask.sync",
+      "Parameters": {
+        "LaunchType": "FARGATE",
+        "Cluster": "${EcsClusterArn}",
+        "TaskDefinition": "${InfraForgeTaskDefinitionArn}",
+        "PropagateTags": "TASK_DEFINITION",
+        "Overrides": {
+          "ContainerOverrides": [
+            {
+              "Name": "infraforge",
+              "Environment": [
+                {
+                  "Name": "CONFIG_S3_URI",
+                  "Value.$": "$.configS3Uri"
+                },
+                {
+                  "Name": "STACK_NAME",
+                  "Value.$": "$.stackName"
+                },
+                {
+                  "Name": "EXECUTION_ID",
+                  "Value.$": "$.executionId"
+                }
+              ]
+            }
+          ]
+        },
+        "NetworkConfiguration": {
+          "AwsvpcConfiguration": {
+            "AssignPublicIp": "DISABLED",
+            "SecurityGroups": ["${SecurityGroupId}"],
+            "Subnets": ["${SubnetId1}", "${SubnetId2}"]
+          }
+        }
+      },
+      "ResultPath": "$.infraforge",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.Timeout",
+            "States.TaskFailed",
+            "States.Permissions",
+            "ECS.APIError",
+            "ECS.AmazonECSException"
+          ],
+          "IntervalSeconds": 10,
+          "MaxAttempts": 2,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "CleanupOnFailure"
+        }
+      ],
+      "Next": "PostDeploymentValidation"
+    },
+    "PostDeploymentValidation": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "OutputPath": "$.Payload",
+      "Parameters": {
+        "FunctionName": "${PostDeployValidationLambdaArn}",
+        "Payload": {
+          "infraforgeResult.$": "$.infraforge",
+          "executionContext.$": "$"
+        }
+      },
+      "Retry": [
+        {
+          "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException"],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "CleanupOnFailure"
+        }
+      ],
+      "Next": "PersistDeploymentOutputs"
+    },
+    "PersistDeploymentOutputs": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "OutputPath": "$.Payload",
+      "Parameters": {
+        "FunctionName": "${PersistOutputsLambdaArn}",
+        "Payload": {
+          "executionContext.$": "$"
+        }
+      },
+      "Retry": [
+        {
+          "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "CleanupOnFailure"
+        }
+      ],
+      "Next": "Success"
+    },
+    "CleanupOnFailure": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "OutputPath": "$.Payload",
+      "Parameters": {
+        "FunctionName": "${CleanupLambdaArn}",
+        "Payload": {
+          "executionContext.$": "$"
+        }
+      },
+      "Retry": [
+        {
+          "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.cleanupError",
+          "Next": "RecordFailure"
+        }
+      ],
+      "Next": "RecordFailure"
+    },
+    "RecordFailure": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${RecordFailureLambdaArn}",
+        "Payload": {
+          "executionContext.$": "$"
+        }
+      },
+      "End": true
+    },
+    "Success": {
+      "Type": "Succeed"
+    }
+  }
+}

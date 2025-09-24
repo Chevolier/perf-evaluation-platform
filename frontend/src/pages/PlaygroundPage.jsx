@@ -393,7 +393,18 @@ const PlaygroundPage = ({
     }
 
     setIsInferring(true);
-    setInferenceResults({});
+    
+    // Initialize results immediately with streaming status to avoid long loading screen
+    const initialResults = {};
+    const modelsToProcess = inputMode === 'dropdown' ? selectedModels : [manualConfig.model_name];
+    modelsToProcess.forEach(model => {
+      initialResults[model] = {
+        status: 'streaming',
+        partialContent: '',
+        model: model
+      };
+    });
+    setInferenceResults(initialResults);
 
 
     const requestData = {
@@ -418,10 +429,11 @@ const PlaygroundPage = ({
       console.log('🚀 Starting inference request:', requestData);
       
       // 使用流式接口
-      const response = await fetch('/api/multi-inference', {
+      const response = await fetch('http://localhost:5000/api/multi-inference', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'Accept': 'text/event-stream'
         },
         body: JSON.stringify(requestData)
       });
@@ -436,43 +448,117 @@ const PlaygroundPage = ({
       const decoder = new TextDecoder();
       let buffer = '';
 
+      console.log('🎯 Starting to read streaming response...');
+
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done) {
+          console.log('✅ Stream reading completed');
+          break;
+        }
 
         const chunk = decoder.decode(value, { stream: true });
-        console.log('📦 Received chunk:', JSON.stringify(chunk));
+        console.log('📦 Raw chunk received:', chunk.length, 'bytes');
         
         buffer += chunk;
         const lines = buffer.split('\n');
         
         // Keep the last potentially incomplete line in buffer
         buffer = lines.pop() || '';
+        
+        console.log('📝 Processing', lines.length, 'lines from buffer');
 
         for (const line of lines) {
-          console.log('📄 Processing line:', JSON.stringify(line));
+          if (!line.trim()) continue; // Skip empty lines
+          
+          console.log('📄 Processing line:', line.substring(0, 100) + (line.length > 100 ? '...' : ''));
           
           if (line.startsWith('data: ')) {
             try {
               const jsonStr = line.slice(6).trim();
-              console.log('🔍 Parsing JSON:', jsonStr);
               
-              if (jsonStr) {
+              if (jsonStr && jsonStr !== '') {
                 const data = JSON.parse(jsonStr);
-                console.log('✅ Parsed data:', data);
+                console.log('✅ Parsed streaming data:', data.type, data.model, data.delta ? `"${data.delta}"` : '');
                 
                 if (data.type === 'complete') {
                   console.log('🏁 Stream complete');
                   setIsInferring(false);
                   break;
-                } else if (data.model) {
-                  console.log('📊 Updating results for model:', data.model);
-                  setInferenceResults(prev => ({
-                    ...prev,
-                    [data.model]: data
-                  }));
                 } else if (data.type === 'heartbeat') {
                   console.log('💓 Heartbeat received');
+                } else if (data.model) {
+                  if (data.type === 'chunk') {
+                    console.log('✍️ Streaming chunk for model:', data.model, data.delta);
+                    // Force immediate state update for real-time streaming
+                    setInferenceResults(prev => {
+                      const previousEntry = prev[data.model] || {};
+                      const previousContent = previousEntry.partialContent || '';
+                      const deltaText = data.delta || '';
+                      const newContent = `${previousContent}${deltaText}`;
+
+                      console.log(`🔄 Updating ${data.model}: "${deltaText}" -> Total: "${newContent.substring(0, 50)}..."`);
+
+                      const updatedEntry = {
+                        ...previousEntry,
+                        status: data.status || 'streaming',
+                        partialContent: newContent,
+                        lastChunk: data,
+                        model: data.model,
+                        api_url: data.api_url || previousEntry.api_url,
+                        lastUpdated: Date.now() // Force re-render
+                      };
+
+                      return {
+                        ...prev,
+                        [data.model]: updatedEntry
+                      };
+                    });
+                  } else if (data.type === 'result') {
+                    console.log('📚 Final result for model:', data.model);
+                    setInferenceResults(prev => {
+                      const previousEntry = prev[data.model] || {};
+                      const partialContent = previousEntry.partialContent || '';
+                      let resultPayload = data.result ? { ...data.result } : undefined;
+
+                      if (resultPayload) {
+                        if (!resultPayload.content && partialContent) {
+                          resultPayload.content = partialContent;
+                        }
+                      } else {
+                        resultPayload = { content: partialContent || '' };
+                      }
+
+                      return {
+                        ...prev,
+                        [data.model]: {
+                          ...previousEntry,
+                          ...data,
+                          status: data.status || 'success',
+                          result: resultPayload,
+                          partialContent: undefined,
+                          streamCompleted: true
+                        }
+                      };
+                    });
+                  } else if (data.type === 'error') {
+                    console.log('❗ Error result for model:', data.model, data.message);
+                    setInferenceResults(prev => ({
+                      ...prev,
+                      [data.model]: {
+                        ...(prev[data.model] || {}),
+                        ...data,
+                        status: 'error',
+                        partialContent: undefined
+                      }
+                    }));
+                  } else {
+                    console.log('📊 Updating results for model:', data.model);
+                    setInferenceResults(prev => ({
+                      ...prev,
+                      [data.model]: data
+                    }));
+                  }
                 }
               }
             } catch (e) {

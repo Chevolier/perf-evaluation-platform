@@ -25,11 +25,12 @@ def multi_inference():
         logger.info("Starting streaming response for multi-inference")
         return Response(
             inference_service.multi_inference(data),
-            mimetype='text/plain',
+            mimetype='text/event-stream',
             headers={
                 'Cache-Control': 'no-cache',
                 'Connection': 'keep-alive',
-                'Access-Control-Allow-Origin': '*'
+                'Access-Control-Allow-Origin': '*',
+                'X-Accel-Buffering': 'no'
             }
         )
         

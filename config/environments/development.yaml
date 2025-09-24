@@ -14,3 +14,7 @@ models:
   
 cors:
   origins: ["http://localhost:3000", "http://localhost:3001"]
+
+hyperpod:
+  dry_run: true
+  log_directory: "logs/hyperpod-dev"

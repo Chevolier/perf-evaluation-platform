@@ -10,6 +10,7 @@ A comprehensive platform for model (LLMs, VLMs, etc.) deployment and performance
 - **Result Visualization**: Charts and analytics for performance metrics
 - **Multimodal Support**: Text, image, and video processing capabilities
 - **Enterprise Architecture**: Modular backend with service layer architecture
+- **InfraForge Automation**: Launch and tear down SageMaker HyperPod clusters via InfraForge tooling with dry-run safety modes
 
 ## 🏗️ Architecture
 
@@ -132,6 +133,16 @@ cd frontend && npm start
 - **Frontend**: http://localhost:3000
 - **Backend API**: http://localhost:5000
 - **Health Check**: http://localhost:5000/health
+
+### HyperPod InfraForge Integration
+
+1. **Review configuration** – Update `config/environments/<env>.yaml` to point `hyperpod.infraforge_root` at your cloned InfraForge repository. By default the backend assumes `../InfraForge` relative to this project.
+2. **Fetch tooling** – Run `scripts/fetch_infraforge.sh` (optionally pass a target directory) to clone/update InfraForge at the pinned ref so the backend can execute the CLI.
+3. **Dry-run behaviour** – Development keeps `hyperpod.dry_run=true` so InfraForge commands log without touching AWS. Set `dry_run: false` in production to execute real deployments.
+4. **Launch via API/UI** – Use `POST /api/hyperpod/deploy` or the HyperPod card in Model Hub (preset + overrides). Monitor progress with `GET /api/hyperpod/jobs` and retrieve logs from `GET /api/hyperpod/jobs/{job_id}/logs`.
+5. **Teardown** – Invoke `POST /api/hyperpod/destroy` with the target preset (and region override if needed) to call InfraForge destroy scripts.
+
+All HyperPod job logs are written to `logs/hyperpod*` and surfaced through the API for frontend consumption.
 
 ## Model Deployment
 Currently, this platform supports 1-click model deployment using emd. But the vllm version may not be the latest. To evaluate the model's best performance, it is sugggested to deploy a model on a local EC2 instance using the latest vllm or sglang, then manually input api_url and model_name on the 在线体验 or 性能评测 pages. 

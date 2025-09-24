@@ -59,26 +59,82 @@ EMD_MODELS = {
 
 # Bedrock Models Configuration
 BEDROCK_MODELS = {
-    "claude4": {
-        "name": "Claude 4",
-        "description": "Anthropic Claude 4",
-        "model_id": "anthropic.claude-3-5-sonnet-20241022-v2:0",
+    "claude4-sonnet": {
+        "name": "Claude Sonnet 4",
+        "description": "Latest Claude Sonnet 4 model (US inference profile)",
+        "model_id": "us.anthropic.claude-sonnet-4-20250514-v1:0",
         "supports_multimodal": True,
         "supports_streaming": True,
         "max_tokens": 8192
     },
-    "claude35": {
+    "claude4-opus": {
+        "name": "Claude Opus 4.1",
+        "description": "Latest Claude Opus 4.1 model (US inference profile)",
+        "model_id": "us.anthropic.claude-opus-4-1-20250805-v1:0",
+        "supports_multimodal": True,
+        "supports_streaming": True,
+        "max_tokens": 8192
+    },
+    "claude37-sonnet": {
+        "name": "Claude 3.7 Sonnet",
+        "description": "Claude 3.7 Sonnet model (US inference profile)",
+        "model_id": "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+        "supports_multimodal": True,
+        "supports_streaming": True,
+        "max_tokens": 8192
+    },
+    "claude35-sonnet-v2": {
+        "name": "Claude 3.5 Sonnet v2",
+        "description": "Claude 3.5 Sonnet v2 (October 2024) - US inference profile",
+        "model_id": "us.anthropic.claude-3-5-sonnet-20241022-v2:0",
+        "supports_multimodal": True,
+        "supports_streaming": True,
+        "max_tokens": 8192
+    },
+    "claude35-sonnet": {
         "name": "Claude 3.5 Sonnet",
-        "description": "Anthropic Claude 3.5 Sonnet",
-        "model_id": "anthropic.claude-3-5-sonnet-20241022-v2:0",
+        "description": "Claude 3.5 Sonnet original (June 2024) - US inference profile",
+        "model_id": "us.anthropic.claude-3-5-sonnet-20240620-v1:0",
         "supports_multimodal": True,
         "supports_streaming": True,
         "max_tokens": 8192
     },
-    "nova": {
-        "name": "Nova Pro",
-        "description": "Amazon Nova Pro",
-        "model_id": "amazon.nova-pro-v1:0",
+    "claude35-haiku": {
+        "name": "Claude 3.5 Haiku",
+        "description": "Claude 3.5 Haiku (October 2024) - US inference profile",
+        "model_id": "us.anthropic.claude-3-5-haiku-20241022-v1:0",
+        "supports_multimodal": True,
+        "supports_streaming": True,
+        "max_tokens": 8192
+    },
+    "claude3-haiku": {
+        "name": "Claude 3 Haiku",
+        "description": "Claude 3 Haiku (March 2024) - US inference profile",
+        "model_id": "us.anthropic.claude-3-haiku-20240307-v1:0",
+        "supports_multimodal": True,
+        "supports_streaming": True,
+        "max_tokens": 4096
+    },
+    "claude3-opus": {
+        "name": "Claude 3 Opus",
+        "description": "Claude 3 Opus (February 2024) - US inference profile",
+        "model_id": "us.anthropic.claude-3-opus-20240229-v1:0",
+        "supports_multimodal": True,
+        "supports_streaming": True,
+        "max_tokens": 4096
+    },
+    "nova-pro": {
+        "name": "Nova Pro", 
+        "description": "Amazon Nova Pro - US inference profile",
+        "model_id": "us.amazon.nova-pro-v1:0",
+        "supports_multimodal": True,
+        "supports_streaming": True,
+        "max_tokens": 5000
+    },
+    "nova-premier": {
+        "name": "Nova Premier", 
+        "description": "Amazon Nova Premier - US inference profile",
+        "model_id": "us.amazon.nova-premier-v1:0",
         "supports_multimodal": True,
         "supports_streaming": True,
         "max_tokens": 5000

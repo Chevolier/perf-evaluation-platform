@@ -5,6 +5,7 @@ from .model_routes import model_bp
 from .inference_routes import inference_bp
 from .stress_test_routes import stress_test_bp
 from .results_routes import results_bp
+from .hyperpod_routes import hyperpod_bp
 
 def register_blueprints(app: Flask) -> None:
     """Register all API blueprints with the Flask app.
@@ -17,12 +18,15 @@ def register_blueprints(app: Flask) -> None:
     
     # Register inference routes
     app.register_blueprint(inference_bp, url_prefix='/api')
-    
+
     # Register stress test routes
     app.register_blueprint(stress_test_bp, url_prefix='/api')
-    
+
     # Register results routes
     app.register_blueprint(results_bp)
+
+    # Register HyperPod orchestration routes
+    app.register_blueprint(hyperpod_bp, url_prefix='/api')
     
     # Health check endpoint
     @app.route('/health')

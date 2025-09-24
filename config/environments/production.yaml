@@ -12,3 +12,7 @@ logging:
 models:
   emd:
     base_url: "http://localhost:8000"
+
+hyperpod:
+  dry_run: false
+  log_directory: "logs/hyperpod"

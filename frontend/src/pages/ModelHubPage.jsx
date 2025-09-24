@@ -25,6 +25,7 @@ import {
   RocketOutlined,
   ReloadOutlined
 } from '@ant-design/icons';
+import HyperPodPanel from '../components/HyperPodPanel';
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -659,6 +660,8 @@ const ModelHubPage = () => {
           </Button>
         </div>
       </div>
+
+      <HyperPodPanel />
 
       {/* Show UI structure immediately, even during initial loading */}
       {Object.entries(modelCategories).map(([categoryKey, category]) => (

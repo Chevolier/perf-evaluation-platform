@@ -20,6 +20,7 @@ const PlaygroundResultsDisplay = ({ results, loading }) => {
         return <ExclamationCircleOutlined style={{ color: '#faad14' }} />;
       case 'loading':
       case 'processing':
+      case 'streaming':
         return <ClockCircleOutlined style={{ color: '#1890ff' }} />;
       default:
         return <ClockCircleOutlined style={{ color: '#d9d9d9' }} />;
@@ -36,6 +37,7 @@ const PlaygroundResultsDisplay = ({ results, loading }) => {
         return <Tag color="warning">等待部署</Tag>;
       case 'loading':
       case 'processing':
+      case 'streaming':
         return <Tag color="processing">处理中</Tag>;
       default:
         return <Tag color="default">等待</Tag>;
@@ -222,9 +224,9 @@ const PlaygroundResultsDisplay = ({ results, loading }) => {
       <div style={{ textAlign: 'center', padding: '40px' }}>
         <Spin size="large" />
         <Title level={4} style={{ marginTop: '16px', color: '#1890ff' }}>
-          正在处理推理请求...
+          正在连接模型...
         </Title>
-        <Text type="secondary">请耐心等待模型响应</Text>
+        <Text type="secondary">建立连接中，即将开始流式输出</Text>
       </div>
     );
   }
@@ -238,7 +240,8 @@ const PlaygroundResultsDisplay = ({ results, loading }) => {
           style={{ 
             marginBottom: 16,
             border: result.status === 'success' ? '1px solid #52c41a' : 
-                   result.status === 'error' ? '1px solid #ff4d4f' : '1px solid #d9d9d9'
+                   result.status === 'error' ? '1px solid #ff4d4f' :
+                   result.status === 'streaming' ? '1px solid #1890ff' : '1px solid #d9d9d9'
           }}
           title={
             <Space>
@@ -258,7 +261,59 @@ const PlaygroundResultsDisplay = ({ results, loading }) => {
             </Space>
           }
         >
-          {result.status === 'success' && result.result ? (
+          {result.status === 'streaming' ? (
+            <div>
+              <div
+                style={{
+                  marginBottom: 12,
+                  maxHeight: '400px',
+                  overflowY: 'auto',
+                  backgroundColor: '#f0f9ff',
+                  padding: '12px',
+                  borderRadius: '6px',
+                  border: '1px solid #bae7ff'
+                }}
+              >
+                {result.partialContent && result.partialContent.length > 0 ? (
+                  <div>
+                    {renderFormattedContent(result.partialContent)}
+                    {/* Visual streaming indicator */}
+                    <span style={{
+                      display: 'inline-block',
+                      width: '8px',
+                      height: '16px',
+                      backgroundColor: '#1890ff',
+                      animation: 'blink 1s infinite',
+                      marginLeft: '2px',
+                      verticalAlign: 'middle'
+                    }}>
+                    </span>
+                    <style dangerouslySetInnerHTML={{
+                      __html: `
+                        @keyframes blink {
+                          0%, 50% { opacity: 1; }
+                          51%, 100% { opacity: 0; }
+                        }
+                      `
+                    }} />
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Spin size="small" />
+                    <Text type="secondary" style={{ fontSize: '12px' }}>
+                      等待首个响应...
+                    </Text>
+                  </div>
+                )}
+              </div>
+              <Space size="small" align="center">
+                <Spin size="small" />
+                <Text type="secondary" style={{ fontSize: '12px' }}>
+                  模型正在生成...
+                </Text>
+              </Space>
+            </div>
+          ) : result.status === 'success' && result.result ? (
             <div>
               <div
                 style={{
