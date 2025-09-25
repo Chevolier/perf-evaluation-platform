@@ -16,6 +16,7 @@ except ImportError:
 from ..core.models import model_registry, EMDModel
 from ..config import get_config
 from ..utils import get_logger
+from ..utils.emd import extract_endpoint_from_model_entry
 
 
 logger = get_logger(__name__)
@@ -265,7 +266,8 @@ class ModelService:
                         deployed[model_key] = {
                             "tag": model_tag,
                             "model_id": model_id,
-                            "status": stack_status
+                            "status": stack_status,
+                            "endpoint": extract_endpoint_from_model_entry(model)
                         }
                     elif "FAILED" in stack_status:
                         failed[model_key] = {

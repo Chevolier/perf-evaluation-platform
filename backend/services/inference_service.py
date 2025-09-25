@@ -9,6 +9,7 @@ from datetime import datetime
 
 from ..core.models import model_registry
 from ..utils import get_logger, get_account_id
+from ..utils.emd import resolve_deployment_api_url
 from ..config import get_config
 
 try:
@@ -628,7 +629,7 @@ class InferenceService:
             
             # Check if model is deployed
             deployment_status = model_service.get_emd_deployment_status(model)
-            
+
             if deployment_status.get('status') != 'deployed':
                 result_queue.put({
                     'model': model,
@@ -646,6 +647,53 @@ class InferenceService:
             
             # Get model path for EMD lookup
             model_path = model_info.get('model_path', model)
+
+            endpoint_url = deployment_status.get('endpoint')
+            endpoint_from_lookup = False
+            if not endpoint_url and deployment_status.get('tag'):
+                try:
+                    resolved_endpoint, used_fallback = resolve_deployment_api_url(
+                        model_path,
+                        deployment_status.get('tag')
+                    )
+                    if not used_fallback:
+                        endpoint_url = resolved_endpoint
+                        endpoint_from_lookup = True
+                except RuntimeError as lookup_error:
+                    logger.debug(
+                        "Unable to resolve EMD streaming endpoint for %s: %s",
+                        model,
+                        lookup_error
+                    )
+
+            if endpoint_url:
+                # Include deployment tag in model name for EMD endpoints
+                deployment_tag = deployment_status.get('tag')
+                full_model_name = f"{model_path}/{deployment_tag}" if deployment_tag else model_path
+                
+                manual_config = {
+                    'api_url': endpoint_url,
+                    'model_name': full_model_name,
+                    'label': model,
+                    'allow_fallback': True
+                }
+                try:
+                    logger.info(
+                        "Streaming EMD model %s via OpenAI-compatible endpoint %s%s",
+                        model,
+                        endpoint_url,
+                        " (resolved)" if endpoint_from_lookup else ""
+                    )
+                    self._process_manual_api(manual_config, data, result_queue)
+                    return
+                except Exception as stream_error:
+                    logger.warning(
+                        "EMD streaming request failed for %s (endpoint %s). Falling back to invoke_endpoint. Error: %s",
+                        model,
+                        endpoint_url,
+                        stream_error,
+                        exc_info=True
+                    )
             
             # Prepare request data for EMD
             text_prompt = data.get('text', '')
@@ -865,7 +913,10 @@ class InferenceService:
 
             api_url = manual_config.get('api_url')
             model_name = manual_config.get('model_name')
-            label = f"{model_name} (Manual API)" if model_name else 'Manual API'
+            label_override = manual_config.get('label')
+            allow_fallback = bool(manual_config.get('allow_fallback'))
+
+            label = label_override or (f"{model_name} (Manual API)" if model_name else 'Manual API')
 
             if not api_url or not model_name:
                 raise ValueError("Both api_url and model_name are required in manual_config")
@@ -1129,6 +1180,8 @@ class InferenceService:
 
         except Exception as e:
             logger.error(f"Error processing manual API {manual_config}: {e}")
+            if allow_fallback:
+                raise
             result_queue.put({
                 'type': 'error',
                 'model': label,
