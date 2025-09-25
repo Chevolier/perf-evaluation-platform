@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 
 from ..config import get_config
 from ..utils import InfraForgeClient, InfraForgeResult, get_logger
+from ..utils.emd import extract_endpoint_from_model_entry
 
 logger = get_logger(__name__)
 
@@ -242,6 +243,10 @@ class HyperPodService:
                 "HyperPod %s job %s completed", job["action"], job_id,
                 extra={"job_id": job_id, "duration": job_result["duration_seconds"]}
             )
+            try:
+                self._ingest_job_outputs(job, job_result)
+            except Exception as exc:  # pragma: no cover
+                logger.warning("Unable to ingest outputs for job %s: %s", job_id, exc)
         else:
             logger.warning(
                 "HyperPod %s job %s failed", job["action"], job_id,
@@ -322,6 +327,105 @@ class HyperPodService:
             snapshot["error"] = job["error"]
 
         return snapshot
+
+    def _ingest_job_outputs(self, job: Dict[str, Any], result_payload: Dict[str, Any]) -> None:
+        """Capture deployment outputs (e.g., inference endpoints) after a successful run."""
+
+        if job.get("dry_run"):
+            logger.debug("Skipping output ingestion for dry-run HyperPod job %s", job.get("id"))
+            return
+
+        prefix = self._config_manager.get("hyperpod.outputs_parameter_prefix")
+        if not prefix:
+            return
+
+        try:
+            import boto3
+            from botocore.exceptions import BotoCoreError, ClientError
+        except ImportError:  # pragma: no cover
+            logger.debug("boto3 not available; cannot ingest HyperPod outputs")
+            return
+
+        job_id = job.get("id")
+        if not job_id:
+            return
+
+        region = job.get("region") or self._default_region
+        path = f"{prefix.rstrip('/')}/{job_id}"
+
+        try:
+            ssm_client = boto3.client("ssm", region_name=region)
+        except Exception as exc:  # pragma: no cover
+            logger.warning("Unable to initialise SSM client for HyperPod outputs: %s", exc)
+            return
+
+        parameters: Dict[str, Any] = {}
+        next_token: Optional[str] = None
+
+        try:
+            while True:
+                response = ssm_client.get_parameters_by_path(
+                    Path=path,
+                    Recursive=True,
+                    WithDecryption=True,
+                    NextToken=next_token
+                )
+
+                for parameter in response.get("Parameters", []):
+                    name = parameter.get("Name", "")
+                    key = name.split("/")[-1] if name else None
+                    if key:
+                        parameters[key] = parameter.get("Value")
+
+                next_token = response.get("NextToken")
+                if not next_token:
+                    break
+        except (BotoCoreError, ClientError) as exc:
+            logger.warning("Failed to read HyperPod outputs from %s: %s", path, exc)
+            return
+
+        if not parameters:
+            logger.info("No HyperPod outputs found under %s", path)
+            return
+
+        endpoint = extract_endpoint_from_model_entry(parameters)
+
+        if not endpoint:
+            dns_name = parameters.get("NlbDnsName") or parameters.get("nlbDnsName")
+            if dns_name:
+                endpoint = extract_endpoint_from_model_entry({"DNSName": dns_name})
+
+        if not endpoint:
+            logger.info("HyperPod job %s completed but no inference endpoint was discovered", job_id)
+            return
+
+        metadata = {
+            "raw_parameters": parameters,
+            "model_path": parameters.get("ModelId") or parameters.get("modelId"),
+            "display_name": parameters.get("ModelName") or parameters.get("modelName"),
+            "deployment_type": "SageMaker HyperPod",
+        }
+
+        try:
+            from .model_service import ModelService
+
+            model_service = ModelService()
+            registration = model_service.register_external_endpoint(
+                deployment_method="SageMaker HyperPod",
+                endpoint_url=endpoint,
+                deployment_id=job_id,
+                model_name=parameters.get("ModelName") or parameters.get("modelName"),
+                metadata=metadata,
+            )
+
+            logger.info(
+                "Registered HyperPod endpoint %s for job %s (model_key=%s)",
+                endpoint,
+                job_id,
+                registration["model_key"],
+            )
+        except Exception as exc:  # pragma: no cover
+            logger.warning("Unable to register HyperPod endpoint for job %s: %s", job_id, exc)
 
     def _build_result_payload(self, result: InfraForgeResult) -> Dict[str, Any]:
         payload = {

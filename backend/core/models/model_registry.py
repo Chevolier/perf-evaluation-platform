@@ -149,6 +149,7 @@ class ModelRegistry:
         """Initialize the model registry."""
         self._emd_models = EMD_MODELS.copy()
         self._bedrock_models = BEDROCK_MODELS.copy()
+        self._external_models: Dict[str, Dict[str, Any]] = {}
     
     def get_all_models(self) -> Dict[str, Dict[str, Any]]:
         """Get all available models organized by type.
@@ -158,7 +159,8 @@ class ModelRegistry:
         """
         return {
             "bedrock": self._bedrock_models,
-            "emd": self._emd_models
+            "emd": self._emd_models,
+            "external": self._external_models
         }
     
     def get_emd_models(self) -> Dict[str, Dict[str, Any]]:
@@ -176,6 +178,10 @@ class ModelRegistry:
             Dictionary of Bedrock models
         """
         return self._bedrock_models.copy()
+
+    def get_external_models(self) -> Dict[str, Dict[str, Any]]:
+        """Get all externally registered deployments."""
+        return self._external_models.copy()
     
     def get_model_info(self, model_key: str, model_type: str = None) -> Dict[str, Any]:
         """Get information about a specific model.
@@ -194,7 +200,11 @@ class ModelRegistry:
         if model_type == "bedrock" or model_type is None:
             if model_key in self._bedrock_models:
                 return self._bedrock_models[model_key].copy()
-        
+
+        if model_type == "external" or model_type is None:
+            if model_key in self._external_models:
+                return self._external_models[model_key].copy()
+
         return {}
     
     def is_emd_model(self, model_key: str) -> bool:
@@ -213,11 +223,19 @@ class ModelRegistry:
         
         Args:
             model_key: Model key to check
-            
+        
         Returns:
             True if model is a Bedrock model
         """
         return model_key in self._bedrock_models
+
+    def is_external_model(self, model_key: str) -> bool:
+        """Check if a model is an externally registered deployment."""
+        return model_key in self._external_models
+
+    def set_external_models(self, models: Dict[str, Dict[str, Any]]) -> None:
+        """Replace the external deployment registry."""
+        self._external_models = models.copy()
     
     def get_model_path(self, model_key: str) -> str:
         """Get the model path for EMD models or model ID for Bedrock models.
@@ -230,8 +248,11 @@ class ModelRegistry:
         """
         if model_key in self._emd_models:
             return self._emd_models[model_key].get("model_path", "")
-        elif model_key in self._bedrock_models:
+        if model_key in self._bedrock_models:
             return self._bedrock_models[model_key].get("model_id", "")
+        if model_key in self._external_models:
+            model_info = self._external_models[model_key]
+            return model_info.get("model_path") or model_info.get("model_name") or ""
         return ""
     
     def supports_multimodal(self, model_key: str) -> bool:

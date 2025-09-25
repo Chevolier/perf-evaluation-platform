@@ -70,6 +70,11 @@ class InferenceService:
                     target=self._process_emd_model,
                     args=(model, data, result_queue)
                 )
+            elif self.registry.is_external_model(model):
+                thread = threading.Thread(
+                    target=self._process_external_model,
+                    args=(model, data, result_queue)
+                )
             else:
                 # Unknown model
                 result_queue.put({
@@ -616,7 +621,7 @@ class InferenceService:
 
     def _process_emd_model(self, model: str, data: Dict[str, Any], result_queue: queue.Queue) -> None:
         """Process inference for an EMD model.
-        
+
         Args:
             model: Model identifier
             data: Request data
@@ -897,7 +902,39 @@ class InferenceService:
                 'status': 'error',
                 'message': str(e)
             })
-    
+
+    def _process_external_model(self, model: str, data: Dict[str, Any], result_queue: queue.Queue) -> None:
+        """Process inference for an externally registered deployment."""
+
+        try:
+            model_info = self.registry.get_model_info(model, "external")
+            if not model_info:
+                raise ValueError(f"External deployment {model} not found")
+
+            endpoint_url = model_info.get('endpoint')
+            if not endpoint_url:
+                raise ValueError(f"External deployment {model} missing endpoint URL")
+
+            model_name = model_info.get('model_name') or model_info.get('name') or model
+
+            manual_config = {
+                'api_url': endpoint_url,
+                'model_name': model_name,
+                'label': model_info.get('name') or model,
+                'allow_fallback': False
+            }
+
+            self._process_manual_api(manual_config, data, result_queue)
+
+        except Exception as exc:
+            logger.error("Error processing external deployment %s: %s", model, exc)
+            result_queue.put({
+                'type': 'error',
+                'model': model,
+                'status': 'error',
+                'message': str(exc)
+            })
+
     def _process_manual_api(self, manual_config: Dict[str, Any], data: Dict[str, Any], result_queue: queue.Queue) -> None:
         """Process inference for a manually configured API endpoint.
 

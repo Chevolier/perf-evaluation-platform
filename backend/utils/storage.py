@@ -269,6 +269,21 @@ class DatabaseManager:
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS deployment_endpoints (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    model_key TEXT UNIQUE NOT NULL,
+                    deployment_id TEXT,
+                    deployment_method TEXT NOT NULL,
+                    model_name TEXT,
+                    endpoint_url TEXT NOT NULL,
+                    metadata TEXT,
+                    status TEXT DEFAULT 'active',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
             
             # Benchmark sessions table
             cursor.execute("""
@@ -328,8 +343,97 @@ class DatabaseManager:
                     kwargs.get('instance_type'),
                     kwargs.get('engine_type')
                 ))
-            
+
             conn.commit()
+
+    def upsert_deployment_endpoint(
+        self,
+        model_key: str,
+        deployment_method: str,
+        endpoint_url: str,
+        *,
+        deployment_id: str = None,
+        model_name: str = None,
+        metadata: Dict[str, Any] | None = None,
+        status: str = 'active'
+    ) -> None:
+        """Insert or update a deployment endpoint record."""
+        metadata_json = json.dumps(metadata or {}, ensure_ascii=False)
+
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+
+            cursor.execute(
+                """
+                INSERT INTO deployment_endpoints (model_key, deployment_id, deployment_method, model_name, endpoint_url, metadata, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(model_key) DO UPDATE SET
+                    deployment_id=excluded.deployment_id,
+                    deployment_method=excluded.deployment_method,
+                    model_name=excluded.model_name,
+                    endpoint_url=excluded.endpoint_url,
+                    metadata=excluded.metadata,
+                    status=excluded.status,
+                    updated_at=CURRENT_TIMESTAMP
+                """,
+                (
+                    model_key,
+                    deployment_id,
+                    deployment_method,
+                    model_name,
+                    endpoint_url,
+                    metadata_json,
+                    status,
+                ),
+            )
+
+            conn.commit()
+
+    def list_deployment_endpoints(
+        self,
+        *,
+        deployment_method: str | None = None,
+        status: str | None = 'active'
+    ) -> List[Dict[str, Any]]:
+        """Return deployment endpoint records filtered by method/status."""
+
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+
+            query = "SELECT * FROM deployment_endpoints"
+            params = []
+            clauses = []
+
+            if deployment_method:
+                clauses.append("deployment_method = ?")
+                params.append(deployment_method)
+            if status:
+                clauses.append("status = ?")
+                params.append(status)
+
+            if clauses:
+                query += " WHERE " + " AND ".join(clauses)
+
+            query += " ORDER BY updated_at DESC"
+
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+
+        records: List[Dict[str, Any]] = []
+        for row in rows:
+            data = dict(row)
+            metadata_raw = data.get('metadata')
+            if metadata_raw:
+                try:
+                    data['metadata'] = json.loads(metadata_raw)
+                except json.JSONDecodeError:
+                    data['metadata'] = {'raw': metadata_raw}
+            else:
+                data['metadata'] = {}
+            records.append(data)
+
+        return records
     
     def get_deployment_status(self, model_key: str) -> Optional[Dict[str, Any]]:
         """Get model deployment status.

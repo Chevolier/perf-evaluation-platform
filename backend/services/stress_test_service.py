@@ -800,7 +800,19 @@ class StressTestService:
                 model_name = model_path
             # Use appropriate tokenizer path based on model
             tokenizer_path = self._get_tokenizer_path(model_name)
-            
+
+        elif model_registry.is_external_model(model_key):
+            external_info = model_service.get_external_model_info(model_key)
+            if not external_info:
+                raise Exception(f"未找到外部部署 {model_key} 的配置信息")
+
+            api_url = external_info.get('endpoint')
+            if not api_url:
+                raise Exception(f"外部部署 {model_key} 缺少可用的API地址")
+
+            model_name = external_info.get('model_name') or external_info.get('name') or model_key
+            tokenizer_path = self._get_tokenizer_path(model_name)
+
         elif model_registry.is_bedrock_model(model_key):
             # Bedrock models don't support direct stress testing via evalscope
             # This matches the limitation in the original backend

@@ -1,8 +1,9 @@
 """Model management service for deployment and status tracking."""
 
+import re
 import time
 import random
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from datetime import datetime
 
 try:
@@ -15,7 +16,8 @@ except ImportError:
 
 from ..core.models import model_registry, EMDModel
 from ..config import get_config
-from ..utils import get_logger
+from ..utils import get_logger, DatabaseManager
+from ..utils.emd import extract_endpoint_from_model_entry
 from ..utils.emd import extract_endpoint_from_model_entry
 
 
@@ -28,8 +30,10 @@ class ModelService:
     def __init__(self):
         """Initialize model service."""
         self.registry = model_registry
+        self._db = DatabaseManager()
         self._deployment_status = {}
         self._current_emd_tag = None
+        self._external_models: Dict[str, Dict[str, Any]] = {}
         
         # Circuit breaker for AWS throttling
         self._circuit_breaker = {
@@ -47,6 +51,11 @@ class ModelService:
             'timestamp': None,
             'extended_ttl': 300  # 5 minutes extended cache for throttling
         }
+
+        try:
+            self._refresh_external_models()
+        except Exception as exc:  # pragma: no cover - best effort preload
+            logger.debug("Skipping external deployment preload: %s", exc)
     
     def _should_circuit_break(self) -> bool:
         """Check if circuit breaker should prevent EMD calls."""
@@ -103,6 +112,77 @@ class ModelService:
         """Cache EMD data."""
         self._emd_status_cache['data'] = data
         self._emd_status_cache['timestamp'] = time.time()
+
+    def _generate_external_model_key(
+        self,
+        deployment_method: str,
+        deployment_id: Optional[str] = None,
+        model_name: Optional[str] = None,
+    ) -> str:
+        """Generate a stable key for an external deployment."""
+
+        base_parts = [deployment_method or "external"]
+        if deployment_id:
+            base_parts.append(deployment_id)
+        elif model_name:
+            base_parts.append(model_name)
+        else:
+            base_parts.append(datetime.now().strftime("%m%d%H%M%S"))
+
+        slug = "::".join(base_parts)
+        slug = re.sub(r"[^A-Za-z0-9:_-]", "-", slug)
+        return f"ext::{slug.lower()}"
+
+    def _refresh_external_models(self):
+        """Load external deployment endpoints from persistent storage."""
+        try:
+            records = self._db.list_deployment_endpoints(status='active')
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.warning("Unable to list deployment endpoints: %s", exc)
+            records = []
+
+        external_map: Dict[str, Dict[str, Any]] = {}
+
+        for record in records:
+            model_key = record.get('model_key') or self._generate_external_model_key(
+                record.get('deployment_method', 'external'),
+                record.get('deployment_id'),
+                record.get('model_name'),
+            )
+
+            metadata = record.get('metadata') or {}
+            deployment_method = record.get('deployment_method', 'External Deployment')
+            endpoint_url = record.get('endpoint_url')
+
+            if not endpoint_url:
+                logger.debug("Skipping external deployment %s without endpoint", model_key)
+                continue
+
+            display_name = (
+                metadata.get('display_name')
+                or record.get('model_name')
+                or record.get('deployment_id')
+                or model_key
+            )
+
+            description = metadata.get('description') or f"{deployment_method} endpoint"
+
+            external_map[model_key] = {
+                'name': display_name,
+                'description': description,
+                'deployment_method': deployment_method,
+                'deployment_id': record.get('deployment_id'),
+                'model_name': record.get('model_name'),
+                'model_path': metadata.get('model_path'),
+                'endpoint': endpoint_url,
+                'supports_multimodal': metadata.get('supports_multimodal', False),
+                'supports_streaming': True,
+                'always_available': True,
+                'metadata': metadata,
+            }
+
+        self.registry.set_external_models(external_map)
+        self._external_models = external_map
     
     def get_all_models(self) -> Dict[str, Dict[str, Any]]:
         """Get all available models.
@@ -114,26 +194,90 @@ class ModelService:
     
     def get_model_list(self) -> Dict[str, Any]:
         """Get formatted model list for API responses.
-        
+
         Returns:
             Formatted model list with status information
         """
+        # Refresh external deployments so registry reflects current DB state
+        self._refresh_external_models()
+
         all_models = self.get_all_models()
         
+        bedrock_models_with_status = {}
+        for key, model_info in all_models["bedrock"].items():
+            info_copy = model_info.copy()
+            info_copy.setdefault("always_available", True)
+            bedrock_models_with_status[key] = info_copy
+
         # Add deployment status for EMD models
         emd_models_with_status = {}
         for key, model_info in all_models["emd"].items():
             emd_model_info = model_info.copy()
+            emd_model_info.setdefault("always_available", False)
             emd_model_info["deployment_status"] = self.get_emd_deployment_status(key)
             emd_models_with_status[key] = emd_model_info
+
+        external_models_with_status = {}
+        for key, model_info in all_models.get("external", {}).items():
+            external_info = model_info.copy()
+            external_info.setdefault("deployment_status", {
+                "status": "deployed",
+                "message": "Endpoint available",
+                "endpoint": model_info.get("endpoint")
+            })
+            external_models_with_status[key] = external_info
         
         return {
             "status": "success",
             "models": {
-                "bedrock": all_models["bedrock"],
-                "emd": emd_models_with_status
+                "bedrock": bedrock_models_with_status,
+                "emd": emd_models_with_status,
+                "external": external_models_with_status
             }
         }
+
+    def register_external_endpoint(
+        self,
+        deployment_method: str,
+        endpoint_url: str,
+        *,
+        deployment_id: Optional[str] = None,
+        model_name: Optional[str] = None,
+        model_key: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        status: str = 'active'
+    ) -> Dict[str, Any]:
+        """Register or update an external deployment endpoint."""
+
+        if not endpoint_url:
+            raise ValueError("endpoint_url is required")
+
+        normalized_method = deployment_method or "External Deployment"
+        normalized_method = normalized_method.strip() or "External Deployment"
+
+        if not model_key:
+            model_key = self._generate_external_model_key(normalized_method, deployment_id, model_name)
+
+        self._db.upsert_deployment_endpoint(
+            model_key=model_key,
+            deployment_method=normalized_method,
+            endpoint_url=endpoint_url.strip(),
+            deployment_id=deployment_id,
+            model_name=model_name,
+            metadata=metadata,
+            status=status,
+        )
+
+        self._refresh_external_models()
+
+        return {
+            "model_key": model_key,
+            "model": self.registry.get_model_info(model_key, "external")
+        }
+
+    def get_external_model_info(self, model_key: str) -> Dict[str, Any]:
+        """Return information about an external deployment."""
+        return self.registry.get_model_info(model_key, "external")
     
     def get_emd_deployment_status(self, model_key: str) -> Dict[str, Any]:
         """Get deployment status for an EMD model.
@@ -621,6 +765,13 @@ class ModelService:
                     model_status[model_key] = {
                         "status": "available",
                         "message": "Bedrock model is always available"
+                    }
+                elif self.registry.is_external_model(model_key):
+                    external_info = self.registry.get_model_info(model_key, "external")
+                    model_status[model_key] = {
+                        "status": "available",
+                        "message": external_info.get('description', 'Endpoint available'),
+                        "endpoint": external_info.get('endpoint')
                     }
                 else:
                     model_status[model_key] = {

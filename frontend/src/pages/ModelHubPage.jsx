@@ -81,17 +81,66 @@ const ModelHubPage = () => {
       title: 'Bedrock 模型',
       icon: <CloudOutlined />,
       color: '#1890ff',
-      models: []
+      alwaysAvailable: true
     },
     emd: {
       title: '部署模型',
       icon: <ThunderboltOutlined />,
       color: '#52c41a',
-      models: []
+      alwaysAvailable: false
+    },
+    external: {
+      title: '外部部署',
+      icon: <RobotOutlined />,
+      color: '#fa8c16',
+      alwaysAvailable: true
     }
   }), []);
 
-  const [modelCategories, setModelCategories] = useState(categoryTemplates);
+  const [modelCategories, setModelCategories] = useState({});
+
+  const buildCategories = useCallback((modelsData = {}) => {
+    const categories = {};
+    const deployableKeys = [];
+
+    Object.entries(modelsData).forEach(([categoryKey, categoryModels]) => {
+      const preset = categoryTemplates[categoryKey] || {
+        title: categoryKey,
+        icon: <RobotOutlined />,
+        color: '#722ed1',
+        alwaysAvailable: true
+      };
+
+      const models = Object.entries(categoryModels || {}).map(([key, info]) => {
+        const alwaysAvailable = Object.prototype.hasOwnProperty.call(info, 'always_available')
+          ? Boolean(info.always_available)
+          : (preset.alwaysAvailable ?? true);
+
+        if (!alwaysAvailable) {
+          deployableKeys.push(key);
+        }
+
+        return {
+          key,
+          name: info.name || key,
+          description: info.description || '',
+          alwaysAvailable,
+          deployment_method: info.deployment_method,
+          status: info.deployment_status || {},
+          raw: info
+        };
+      });
+
+      categories[categoryKey] = {
+        title: preset.title,
+        icon: preset.icon,
+        color: preset.color,
+        models
+      };
+    });
+
+    return { categories, deployableKeys };
+  }, [categoryTemplates]);
   
 
   // 批量部署模型 (memoized for performance)
@@ -242,52 +291,19 @@ const ModelHubPage = () => {
       console.log('🔍 DEBUG: Fetching model list first...');
       const modelListResponse = await fetchWithTimeout('/api/model-list', {}, 15000);
       
-      let modelListData = null;
       let deployableModelKeys = [];
-      
+
       // Process model list response
       if (modelListResponse.ok) {
         const data = await modelListResponse.json();
-        
+
         if (data.status === 'success' && data.models) {
-          modelListData = data.models;
-          
-          // Process models with memoized transformation
-          const bedrockModels = data.models.bedrock ? 
-            Object.entries(data.models.bedrock).map(([key, info]) => ({
-              key,
-              name: info.name,
-              description: info.description,
-              alwaysAvailable: true
-            })) : [];
-            
-          const emdModels = data.models.emd ? 
-            Object.entries(data.models.emd).map(([key, info]) => ({
-              key,
-              name: info.name,
-              description: info.description,
-              alwaysAvailable: false
-            })) : [];
-            
-          // Extract deployable model keys for status check
-          deployableModelKeys = emdModels.map(m => m.key);
-          console.log('🔍 DEBUG: deployableModelKeys extracted:', deployableModelKeys);
-            
-          // Batch UI updates to reduce re-renders
+          const { categories, deployableKeys } = buildCategories(data.models);
+          deployableModelKeys = deployableKeys;
+
           React.startTransition(() => {
-            setModelCategories({
-              bedrock: {
-                ...categoryTemplates.bedrock,
-                models: bedrockModels
-              },
-              emd: {
-                ...categoryTemplates.emd,
-                models: emdModels
-              }
-            });
-            
-            // Keep loading state until status is fetched
-            // setInitialLoading(false); // Don't stop loading yet
+            setModelCategories(categories);
+            setModelStatus({});
           });
         }
       }

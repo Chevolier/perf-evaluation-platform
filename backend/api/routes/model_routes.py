@@ -76,6 +76,49 @@ def deploy_models():
         print(f"❌ DEBUG: Error deploying models: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
+
+@model_bp.route('/register-deployment-endpoint', methods=['POST'])
+def register_deployment_endpoint():
+    """Register an external deployment endpoint (HyperPod, EKS, EC2, etc.)."""
+    try:
+        data = request.get_json() or {}
+
+        deployment_method = data.get('deployment_method')
+        endpoint_url = data.get('endpoint_url')
+        deployment_id = data.get('deployment_id')
+        model_name = data.get('model_name')
+        model_key = data.get('model_key')
+        metadata = data.get('metadata') if isinstance(data.get('metadata'), dict) else None
+        status = data.get('status', 'active')
+
+        if not deployment_method or not endpoint_url:
+            return jsonify({
+                "status": "error",
+                "message": "deployment_method and endpoint_url are required"
+            }), 400
+
+        result = model_service.register_external_endpoint(
+            deployment_method=deployment_method,
+            endpoint_url=endpoint_url,
+            deployment_id=deployment_id,
+            model_name=model_name,
+            model_key=model_key,
+            metadata=metadata,
+            status=status
+        )
+
+        return jsonify({
+            "status": "success",
+            "model_key": result["model_key"],
+            "model": result["model"]
+        })
+
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+    except Exception as exc:  # pragma: no cover
+        logger.exception("Error registering deployment endpoint: %s", exc)
+        return jsonify({"status": "error", "message": str(exc)}), 500
+
 @model_bp.route('/check-model-status', methods=['POST'])
 def check_model_status():
     """Check status of multiple models."""
