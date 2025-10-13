@@ -1714,7 +1714,7 @@ except Exception as e:
                     "tp_size": test_params.get('tp_size', self._infer_tp_size(test_params.get('instance_type', 'ml.g5.2xlarge'))),
                     "dp_size": test_params.get('dp_size', 1),
                     "platform": test_params.get('deployment_method', 'EMD'),
-                    "region": "us-west-2"
+                    "region": "us-east-1"
                 },
                 "stress_test_config": {
                     "concurrency": test_params.get('concurrency', [5]),
@@ -1962,7 +1962,7 @@ except Exception as e:
                     "tp_size": test_params.get('tp_size', 1),
                     "dp_size": test_params.get('dp_size', 1),
                     "platform": test_params.get('deployment_method', 'EMD'),
-                    "region": "us-west-2",
+                    "region": "us-east-1",
                     "api_endpoint": test_params.get('api_url', 'Unknown'),
                     "api_type": "openai"
                 },

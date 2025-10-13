@@ -22,7 +22,7 @@ class BedrockModel:
         self.supports_streaming = model_config.get("supports_streaming", True)
         self.max_tokens = model_config.get("max_tokens", 4096)
     
-    def build_inference_profile_arn(self, account_id: str, region: str = 'us-west-2') -> str:
+    def build_inference_profile_arn(self, account_id: str, region: str = 'us-east-1') -> str:
         """Build inference profile ARN for cross-region inference.
         
         Args:

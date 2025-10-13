@@ -762,7 +762,7 @@ class InferenceService:
                 logger.info(f"Using EMD endpoint: {endpoint_name}")
                 
                 # Use boto3 SageMaker Runtime client directly
-                runtime_client = boto3.client('sagemaker-runtime', region_name='us-west-2')
+                runtime_client = boto3.client('sagemaker-runtime', region_name='us-east-1')
                 
                 # Call EMD endpoint via SageMaker Runtime
                 response = runtime_client.invoke_endpoint(
@@ -807,7 +807,7 @@ class InferenceService:
                     print(f"🔍 DEBUG: Attempting to invoke endpoint: {actual_endpoint_name}")
                     
                     # Use boto3 SageMaker Runtime client with actual endpoint name
-                    runtime_client = boto3.client('sagemaker-runtime', region_name='us-west-2')
+                    runtime_client = boto3.client('sagemaker-runtime', region_name='us-east-1')
                     
                     response = runtime_client.invoke_endpoint(
                         EndpointName=actual_endpoint_name,

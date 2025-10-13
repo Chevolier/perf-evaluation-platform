@@ -68,4 +68,28 @@ def create_app(environment=None):
     # Register API blueprints
     register_blueprints(app)
     
+    # Start launch reconciler if enabled
+    try:
+        from .services.launch_reconciler import LaunchReconciler
+        from .services.launch_service import LaunchService
+        
+        reconciler_enabled = config.get('launch.reconciler.enabled', True)
+        if reconciler_enabled:
+            launch_service = LaunchService()
+            reconciler = LaunchReconciler(
+                launch_service=launch_service,
+                interval_seconds=config.get('launch.reconciler.interval_seconds', 30)
+            )
+            reconciler.start_background_thread()
+            
+            # Store reconciler reference for cleanup
+            app.config['launch_reconciler'] = reconciler
+            
+            app_logger.info("✅ Launch reconciler started")
+        else:
+            app_logger.info("⏸️ Launch reconciler disabled")
+            
+    except Exception as e:
+        app_logger.warning(f"Failed to start launch reconciler: {e}")
+    
     return app

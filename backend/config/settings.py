@@ -44,7 +44,7 @@ DEFAULT_CONFIG = {
             "timeout": 300
         },
         "bedrock": {
-            "region": "us-west-2",
+            "region": "us-east-1",
             "timeout": 300
         }
     },
@@ -64,7 +64,7 @@ DEFAULT_CONFIG = {
         "cleanup_lambda_arn": None,
         "record_failure_lambda_arn": None,
         "default_timeout_seconds": 3600,
-        "default_region": "us-west-2",
+        "default_region": "us-east-1",
         "config_s3_bucket": None,
         "outputs_parameter_prefix": "/perf-eval/hyperpod",
         "infraforge_root": "../InfraForge",
@@ -95,6 +95,27 @@ DEFAULT_CONFIG = {
         "origins": ["http://localhost:3000", "http://localhost:3001"],
         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         "allow_headers": ["Content-Type", "Authorization"]
+    },
+    "launch": {
+        "reconciler": {
+            "enabled": True,
+            "interval_seconds": 30
+        },
+        "default_images": {
+            "vllm": {
+                "latest": "vllm/vllm-openai:latest"
+            },
+            "sglang": {
+                "latest": "lmsysorg/sglang:latest"
+            }
+        },
+        "ec2": {
+            "default_ami_id": "ami-003b184e823d3e894",  # Deep Learning AMI
+            "health_check_timeout": 300
+        },
+        "eks": {
+            "default_namespace": "default"
+        }
     }
 }
 

@@ -1,6 +1,6 @@
 """Model registry containing all supported model definitions."""
 
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 
 # EMD (Elastic Model Deployment) Models Configuration
@@ -10,35 +10,65 @@ EMD_MODELS = {
         "description": "Qwen2.5模型",
         "model_path": "Qwen2.5-7B-Instruct",  # Use EMD supported model ID
         "supports_multimodal": False,
-        "supports_streaming": True
+        "supports_streaming": True,
+        "supported_methods": ["SAGEMAKER_ENDPOINT", "HYPERPOD", "EKS", "EC2"],
+        "supported_engines": ["vllm", "sglang"],
+        "constraints": {
+            "min_gpus": 1,
+            "recommended_instance_types": ["ml.g5.2xlarge", "ml.g5.4xlarge"]
+        }
     },
     "qwen3-0.6b": {
         "name": "Qwen3-0.6B",
         "description": "最新Qwen3模型，0.6B参数，高效轻量",
         "model_path": "Qwen3-0.6B",  # Already correct
         "supports_multimodal": False,
-        "supports_streaming": True
+        "supports_streaming": True,
+        "supported_methods": ["SAGEMAKER_ENDPOINT", "HYPERPOD", "EKS", "EC2"],
+        "supported_engines": ["vllm", "sglang"],
+        "constraints": {
+            "min_gpus": 1,
+            "recommended_instance_types": ["ml.g5.xlarge", "ml.g5.2xlarge"]
+        }
     },
     "qwen3-8b": {
         "name": "Qwen3-8B",
         "description": "最新Qwen3模型，8B参数，强大性能",
         "model_path": "Qwen3-8B",  # Already correct
         "supports_multimodal": False,
-        "supports_streaming": True
+        "supports_streaming": True,
+        "supported_methods": ["SAGEMAKER_ENDPOINT", "HYPERPOD", "EKS", "EC2"],
+        "supported_engines": ["vllm", "sglang"],
+        "constraints": {
+            "min_gpus": 1,
+            "recommended_instance_types": ["ml.g5.2xlarge", "ml.g5.4xlarge"]
+        }
     },
     "qwen2-vl-7b": {
         "name": "Qwen2-VL-7B-Instruct",
         "description": "通义千问视觉语言模型，7B参数",
         "model_path": "Qwen2-VL-7B-Instruct",  # Use EMD supported model ID
         "supports_multimodal": True,
-        "supports_streaming": True
+        "supports_streaming": True,
+        "supported_methods": ["SAGEMAKER_ENDPOINT", "HYPERPOD", "EKS", "EC2"],
+        "supported_engines": ["vllm", "sglang"],
+        "constraints": {
+            "min_gpus": 1,
+            "recommended_instance_types": ["ml.g5.2xlarge", "ml.g5.4xlarge"]
+        }
     },
     "qwen2.5-vl-32b": {
         "name": "Qwen2.5-VL-32B-Instruct",
         "description": "通义千问视觉语言模型，32B参数",
         "model_path": "Qwen2.5-VL-32B-Instruct",  # Use EMD supported model ID
         "supports_multimodal": True,
-        "supports_streaming": True
+        "supports_streaming": True,
+        "supported_methods": ["SAGEMAKER_ENDPOINT", "HYPERPOD", "EKS", "EC2"],
+        "supported_engines": ["vllm", "sglang"],
+        "constraints": {
+            "min_gpus": 2,
+            "recommended_instance_types": ["ml.g5.4xlarge", "ml.g5.8xlarge", "ml.p4d.24xlarge"]
+        }
     },
     # "gemma-3-4b": {
     #     "name": "Gemma-3-4B-IT",
@@ -278,6 +308,42 @@ class ModelRegistry:
         """
         model_info = self.get_model_info(model_key)
         return model_info.get("supports_streaming", False)
+    
+    def get_supported_methods(self, model_key: str) -> List[str]:
+        """Get supported launch methods for a model.
+        
+        Args:
+            model_key: Model key to check
+            
+        Returns:
+            List of supported launch methods
+        """
+        model_info = self.get_model_info(model_key)
+        return model_info.get("supported_methods", [])
+    
+    def get_supported_engines(self, model_key: str) -> List[str]:
+        """Get supported inference engines for a model.
+        
+        Args:
+            model_key: Model key to check
+            
+        Returns:
+            List of supported inference engines
+        """
+        model_info = self.get_model_info(model_key)
+        return model_info.get("supported_engines", [])
+    
+    def get_constraints(self, model_key: str) -> Dict[str, Any]:
+        """Get launch constraints for a model.
+        
+        Args:
+            model_key: Model key to check
+            
+        Returns:
+            Dictionary of launch constraints
+        """
+        model_info = self.get_model_info(model_key)
+        return model_info.get("constraints", {})
 
 
 # Global model registry instance

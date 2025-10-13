@@ -37,7 +37,7 @@ def init_emd():
     """Initialize EMD environment."""
     try:
         data = request.get_json() or {}
-        region = data.get('region', 'us-west-2')
+        region = data.get('region', 'us-east-1')
         result = model_service.initialize_emd(region)
         return jsonify(result)
     except Exception as e:

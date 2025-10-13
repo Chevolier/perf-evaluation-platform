@@ -6,6 +6,35 @@ import random
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
+import os
+import sys
+from pathlib import Path
+
+
+def _ensure_local_emd_sdk() -> None:
+    """Best-effort attempt to prepend a locally cloned EMD SDK to sys.path."""
+    candidate_env = os.environ.get("EMD_SDK_PATH")
+    candidates = []
+
+    if candidate_env:
+        candidates.append(Path(candidate_env).expanduser())
+
+    repo_root = Path(__file__).resolve().parents[2]
+    candidates.extend([
+        repo_root / "easy-model-deployer" / "src",
+        repo_root.parent / "easy-model-deployer" / "src"
+    ])
+
+    for candidate in candidates:
+        if candidate and candidate.exists() and candidate.is_dir():
+            candidate_str = str(candidate)
+            if candidate_str not in sys.path:
+                sys.path.insert(0, candidate_str)
+            break
+
+
+_ensure_local_emd_sdk()
+
 try:
     from emd.sdk.status import get_model_status
     from emd.sdk.deploy import deploy as emd_deploy
@@ -215,6 +244,19 @@ class ModelService:
             emd_model_info = model_info.copy()
             emd_model_info.setdefault("always_available", False)
             emd_model_info["deployment_status"] = self.get_emd_deployment_status(key)
+            
+            # Add launch job status if available
+            launch_jobs = self._db.get_launch_jobs_by_model(key)
+            if launch_jobs:
+                latest_job = launch_jobs[0]  # Most recent
+                emd_model_info["launch_status"] = {
+                    "job_id": latest_job["job_id"],
+                    "method": latest_job["method"],
+                    "status": latest_job["status"],
+                    "endpoint": latest_job.get("endpoint_url"),
+                    "created_at": latest_job.get("created_at")
+                }
+            
             emd_models_with_status[key] = emd_model_info
 
         external_models_with_status = {}
@@ -519,7 +561,7 @@ class ModelService:
             logger.error(f"Failed to get current EMD models: {e}")
             return []
     
-    def initialize_emd(self, region: str = "us-west-2") -> Dict[str, Any]:
+    def initialize_emd(self, region: str = "us-east-1") -> Dict[str, Any]:
         """Initialize EMD environment.
         
         Args:

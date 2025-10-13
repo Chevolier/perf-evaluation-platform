@@ -43,7 +43,7 @@ class HyperPodService:
         self._deploy_script_name: Optional[str] = None
         self._destroy_script_name: Optional[str] = None
 
-        self._default_region: str = "us-west-2"
+        self._default_region: str = "us-east-1"
         self._dry_run: bool = True
         self._log_dir: Path = self._project_root / "logs" / "hyperpod"
         self._presets: Dict[str, Any] = {}
