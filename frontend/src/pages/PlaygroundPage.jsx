@@ -89,13 +89,15 @@ const PlaygroundPage = ({
       const saved = localStorage.getItem('playground_manualConfig');
       return saved ? JSON.parse(saved) : {
         api_url: '',
-        model_name: ''
+        model_name: '',
+        endpoint_name: ''
       };
     } catch (error) {
       console.error('Failed to load manual config from localStorage:', error);
       return {
         api_url: '',
-        model_name: ''
+        model_name: '',
+        endpoint_name: ''
       };
     }
   });
@@ -373,7 +375,7 @@ const PlaygroundPage = ({
         message.warning('请先选择至少一个模型');
         return;
       }
-    } else {
+    } else if (inputMode === 'manual') {
       if (!manualConfig.api_url.trim() || !manualConfig.model_name.trim()) {
         message.warning('请填写API URL和模型名称');
         return;
@@ -383,6 +385,11 @@ const PlaygroundPage = ({
         new URL(manualConfig.api_url);
       } catch (e) {
         message.warning('请输入有效的API URL');
+        return;
+      }
+    } else if (inputMode === 'sagemaker') {
+      if (!manualConfig.endpoint_name.trim()) {
+        message.warning('请填写SageMaker端点名称');
         return;
       }
     }
@@ -407,10 +414,15 @@ const PlaygroundPage = ({
     // Handle different input modes
     if (inputMode === 'dropdown') {
       requestData.models = selectedModels;
-    } else {
+    } else if (inputMode === 'manual') {
       requestData.manual_config = {
         api_url: manualConfig.api_url,
         model_name: manualConfig.model_name
+      };
+    } else if (inputMode === 'sagemaker') {
+      requestData.sagemaker_config = {
+        endpoint_name: manualConfig.endpoint_name,
+        model_name: manualConfig.model_name || manualConfig.endpoint_name
       };
     }
 
@@ -513,13 +525,15 @@ const PlaygroundPage = ({
                 {/* 模型输入方式选择 */}
                 <div>
                   <Text strong style={{ marginBottom: 8, display: 'block' }}>模型输入方式：</Text>
-                  <Radio.Group 
-                    value={inputMode} 
+                  <Radio.Group
+                    value={inputMode}
                     onChange={(e) => {
                       setInputMode(e.target.value);
                       // Clear configurations when switching modes
                       if (e.target.value === 'manual') {
-                        setManualConfig({ api_url: '', model_name: '' });
+                        setManualConfig({ api_url: '', model_name: '', endpoint_name: '' });
+                      } else if (e.target.value === 'sagemaker') {
+                        setManualConfig({ api_url: '', model_name: '', endpoint_name: '' });
                       }
                     }}
                   >
@@ -532,7 +546,13 @@ const PlaygroundPage = ({
                     <Radio value="manual">
                       <Space>
                         <LinkOutlined />
-                        手动输入
+                        手动输入API
+                      </Space>
+                    </Radio>
+                    <Radio value="sagemaker">
+                      <Space>
+                        <RobotOutlined />
+                        SageMaker端点
                       </Space>
                     </Radio>
                   </Radio.Group>
@@ -545,8 +565,8 @@ const PlaygroundPage = ({
                       <div style={{ textAlign: 'center', padding: '20px' }}>
                         <Text type="secondary">尚未选择任何模型</Text>
                         <div style={{ marginTop: 12 }}>
-                          <Button 
-                            type="primary" 
+                          <Button
+                            type="primary"
                             icon={<RobotOutlined />}
                             onClick={() => setModelSelectorVisible(true)}
                           >
@@ -566,8 +586,8 @@ const PlaygroundPage = ({
                             </Tag>
                           ))}
                         </div>
-                        <Button 
-                          size="small" 
+                        <Button
+                          size="small"
                           onClick={() => setModelSelectorVisible(true)}
                         >
                           重新选择
@@ -575,7 +595,7 @@ const PlaygroundPage = ({
                       </div>
                     )}
                   </>
-                ) : (
+                ) : inputMode === 'manual' ? (
                   <Space direction="vertical" style={{ width: '100%' }}>
                     <div>
                       <Text strong>API URL：</Text>
@@ -605,6 +625,39 @@ const PlaygroundPage = ({
                       />
                       <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
                         请输入准确的模型名称，如: gpt-3.5-turbo, claude-3-sonnet-20240229
+                      </Text>
+                    </div>
+                  </Space>
+                ) : (
+                  <Space direction="vertical" style={{ width: '100%' }}>
+                    <div>
+                      <Text strong>SageMaker端点名称：</Text>
+                      <Input
+                        name="endpoint_name"
+                        autoComplete="endpoint-name"
+                        value={manualConfig.endpoint_name}
+                        onChange={(e) => setManualConfig({ ...manualConfig, endpoint_name: e.target.value })}
+                        placeholder="Qwen3-Coder-30B-A3B-Instruct-2025-10-13-05-30-15-995"
+                        style={{ marginTop: 4, width: '100%' }}
+                        prefix={<RobotOutlined />}
+                      />
+                      <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
+                        请输入SageMaker端点名称，支持vLLM、TGI等推理框架部署的端点
+                      </Text>
+                    </div>
+                    <div>
+                      <Text strong>模型显示名称：</Text>
+                      <Input
+                        name="model_name"
+                        autoComplete="model-display-name"
+                        value={manualConfig.model_name}
+                        onChange={(e) => setManualConfig({ ...manualConfig, model_name: e.target.value })}
+                        placeholder="Qwen3-Coder-30B (可选，用于结果显示)"
+                        style={{ marginTop: 4, width: '100%' }}
+                        prefix={<RocketOutlined />}
+                      />
+                      <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
+                        可选：自定义模型在结果中的显示名称，不填写则使用端点名称
                       </Text>
                     </div>
                   </Space>
@@ -881,7 +934,11 @@ const PlaygroundPage = ({
               icon={<PlayCircleOutlined />}
               onClick={handleStartInference}
               loading={isInferring}
-              disabled={inputMode === 'dropdown' ? selectedModels.length === 0 : (!manualConfig.api_url.trim() || !manualConfig.model_name.trim())}
+              disabled={
+                inputMode === 'dropdown' ? selectedModels.length === 0 :
+                inputMode === 'manual' ? (!manualConfig.api_url.trim() || !manualConfig.model_name.trim()) :
+                inputMode === 'sagemaker' ? !manualConfig.endpoint_name.trim() : false
+              }
               style={{ width: '100%' }}
             >
               {isInferring ? '推理中...' : '开始推理'}
