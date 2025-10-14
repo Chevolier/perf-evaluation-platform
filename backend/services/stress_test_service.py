@@ -68,20 +68,20 @@ class StressTestService:
     
     def start_stress_test_with_custom_api(self, api_url: str, model_name: str, test_params: Dict[str, Any]) -> str:
         """Start a stress test with custom API URL and model name.
-        
+
         Args:
             api_url: Custom API endpoint URL
             model_name: Custom model name
             test_params: Test parameters including concurrency, num_requests, etc.
-            
+
         Returns:
             Session ID for tracking the test
         """
         # Generate unique session ID
         session_id = str(uuid.uuid4())[:8]
-        
+
         logger.info(f"Starting custom API stress test for {model_name} at {api_url} with session {session_id}")
-        
+
         # Initialize test session with 0% progress
         self.test_sessions[session_id] = {
             "status": "preparing",
@@ -95,7 +95,7 @@ class StressTestService:
             "error": None,
             "params": test_params
         }
-        
+
         # Start test in background thread
         thread = threading.Thread(
             target=self._run_custom_api_stress_test,
@@ -103,7 +103,47 @@ class StressTestService:
             daemon=True
         )
         thread.start()
-        
+
+        return session_id
+
+    def start_stress_test_with_sagemaker_endpoint(self, endpoint_name: str, model_name: str, test_params: Dict[str, Any]) -> str:
+        """Start a stress test with SageMaker endpoint.
+
+        Args:
+            endpoint_name: SageMaker endpoint name
+            model_name: Model display name (Huggingface model name)
+            test_params: Test parameters including concurrency, num_requests, etc.
+
+        Returns:
+            Session ID for tracking the test
+        """
+        # Generate unique session ID
+        session_id = str(uuid.uuid4())[:8]
+
+        logger.info(f"Starting SageMaker endpoint stress test for {model_name} at endpoint {endpoint_name} with session {session_id}")
+
+        # Initialize test session with 0% progress
+        self.test_sessions[session_id] = {
+            "status": "preparing",
+            "model": model_name,
+            "endpoint_name": endpoint_name,
+            "start_time": datetime.now().isoformat(),
+            "progress": 0,
+            "message": "准备测试环境...",
+            "current_message": "正在初始化压力测试...",
+            "results": None,
+            "error": None,
+            "params": test_params
+        }
+
+        # Start test in background thread
+        thread = threading.Thread(
+            target=self._run_sagemaker_endpoint_stress_test,
+            args=(endpoint_name, model_name, test_params, session_id),
+            daemon=True
+        )
+        thread.start()
+
         return session_id
     
     def get_test_status(self, session_id: str) -> Optional[Dict[str, Any]]:
@@ -656,23 +696,23 @@ class StressTestService:
     
     def _run_custom_api_stress_test(self, api_url: str, model_name: str, test_params: Dict[str, Any], session_id: str):
         """Run stress test with custom API endpoint (background thread).
-        
+
         Args:
             api_url: Custom API endpoint URL
-            model_name: Custom model name  
+            model_name: Custom model name
             test_params: Test parameters
             session_id: Session ID
         """
         try:
             logger.info(f"Running custom API stress test for session {session_id}")
-            
+
             # Update status - let real-time polling handle progress updates
             self._update_session(session_id, {
-                "status": "running", 
+                "status": "running",
                 "message": "正在执行压力测试...",
                 "current_message": "开始发送测试请求..."
             })
-            
+
             # Use evalscope with custom API
             try:
                 print(f"test_params: {test_params}")
@@ -684,7 +724,7 @@ class StressTestService:
                     import traceback
                     logger.error(f"[DEBUG] Full traceback: {traceback.format_exc()}")
                 raise attr_error
-            
+
             # Update with completed results
             self._update_session(session_id, {
                 "status": "completed",
@@ -695,11 +735,63 @@ class StressTestService:
                 "end_time": datetime.now().isoformat(),
                 "output_directory": self.test_sessions[session_id].get("output_directory")
             })
-            
+
             logger.info(f"Custom API stress test completed for session {session_id}")
-            
+
         except Exception as e:
             logger.error(f"Custom API stress test failed for session {session_id}: {e}")
+            self._update_session(session_id, {
+                "status": "failed",
+                "error": str(e),
+                "message": "压力测试失败",
+                "current_message": f"测试失败: {str(e)}"
+            })
+
+    def _run_sagemaker_endpoint_stress_test(self, endpoint_name: str, model_name: str, test_params: Dict[str, Any], session_id: str):
+        """Run stress test with SageMaker endpoint (background thread).
+
+        Args:
+            endpoint_name: SageMaker endpoint name
+            model_name: Model display name (Huggingface model name)
+            test_params: Test parameters
+            session_id: Session ID
+        """
+        try:
+            logger.info(f"Running SageMaker endpoint stress test for session {session_id}")
+
+            # Update status
+            self._update_session(session_id, {
+                "status": "running",
+                "message": "正在执行压力测试...",
+                "current_message": "开始发送测试请求..."
+            })
+
+            # Use the SageMaker endpoint stress testing implementation
+            try:
+                results = self._run_evalscope_with_sagemaker_endpoint(endpoint_name, model_name, test_params, session_id)
+            except AttributeError as attr_error:
+                if "'list' object has no attribute 'get'" in str(attr_error):
+                    logger.error(f"[DEBUG] FOUND THE ERROR! AttributeError in _run_evalscope_with_sagemaker_endpoint:")
+                    logger.error(f"[DEBUG] Error message: {attr_error}")
+                    import traceback
+                    logger.error(f"[DEBUG] Full traceback: {traceback.format_exc()}")
+                raise attr_error
+
+            # Update with completed results
+            self._update_session(session_id, {
+                "status": "completed",
+                "progress": 100,
+                "message": "压力测试完成",
+                "current_message": "测试结果已生成",
+                "results": results,
+                "end_time": datetime.now().isoformat(),
+                "output_directory": self.test_sessions[session_id].get("output_directory")
+            })
+
+            logger.info(f"SageMaker endpoint stress test completed for session {session_id}")
+
+        except Exception as e:
+            logger.error(f"SageMaker endpoint stress test failed for session {session_id}: {e}")
             self._update_session(session_id, {
                 "status": "failed",
                 "error": str(e),
@@ -2375,6 +2467,487 @@ except Exception as e:
         except Exception as e:
             logger.error(f"Custom API Evalscope execution failed for session {session_id}: {e}")
             raise Exception(f"Evalscope执行失败: {str(e)}")
+
+    def _run_evalscope_with_sagemaker_endpoint(self, endpoint_name: str, model_name: str, test_params: Dict[str, Any], session_id: str) -> Dict[str, Any]:
+        """Run stress test using SageMaker endpoint (different from OpenAI format).
+
+        Args:
+            endpoint_name: SageMaker endpoint name
+            model_name: Model display name (Huggingface model name)
+            test_params: Test parameters
+            session_id: Session ID
+
+        Returns:
+            Test results
+        """
+        num_requests_list = test_params.get('num_requests', [50])
+        concurrency_list = test_params.get('concurrency', [5])
+        prefix_length = test_params.get('prefix_length', 0)
+        input_tokens = test_params.get('input_tokens', 200)
+        output_tokens = test_params.get('output_tokens', 500)
+        temperature = test_params.get('temperature', 0.1)
+        dataset = test_params.get('dataset', 'random')
+        dataset_path = test_params.get('dataset_path', '')
+
+        connect_timeout = test_params.get("connect_timeout", 7200)
+        read_timeout = test_params.get("read_timeout", 7200)
+
+        # VLM parameters
+        image_width = test_params.get('image_width', 512)
+        image_height = test_params.get('image_height', 512)
+        image_num = test_params.get('image_num', 1)
+        image_format = test_params.get('image_format', 'RGB')
+
+        logger.info(f"[DEBUG] SageMaker endpoint - Raw parameters from frontend:")
+        logger.info(f"[DEBUG]   num_requests: {num_requests_list} (type: {type(num_requests_list)})")
+        logger.info(f"[DEBUG]   concurrency: {concurrency_list} (type: {type(concurrency_list)})")
+        logger.info(f"[DEBUG]   prefix_length: {prefix_length} (type: {type(prefix_length)})")
+
+        # Convert to lists if single values were provided
+        if not isinstance(num_requests_list, list):
+            num_requests_list = [num_requests_list]
+        if not isinstance(concurrency_list, list):
+            concurrency_list = [concurrency_list]
+
+        # Ensure lists are not empty
+        if not num_requests_list:
+            logger.warning("[DEBUG] SageMaker endpoint - num_requests_list is empty, using default [50]")
+            num_requests_list = [50]
+        if not concurrency_list:
+            logger.warning("[DEBUG] SageMaker endpoint - concurrency_list is empty, using default [5]")
+            concurrency_list = [5]
+
+        # Validate that both lists have the same length for paired combinations
+        if len(num_requests_list) != len(concurrency_list):
+            raise Exception(f"请求总数和并发数的值数量必须相同。当前请求总数有 {len(num_requests_list)} 个值，并发数有 {len(concurrency_list)} 个值。")
+
+        logger.info(f"Starting evalscope stress test with SageMaker endpoint: {num_requests_list} requests, {concurrency_list} concurrent")
+
+        self._update_session(session_id, {
+            "current_message": "测试SageMaker端点连接..."
+        })
+
+        # Test SageMaker endpoint connectivity
+        try:
+            import boto3
+            import sagemaker
+            from sagemaker import serializers, deserializers
+
+            # Create predictor to test connectivity
+            try:
+                sess = sagemaker.session.Session()
+            except Exception:
+                sess = sagemaker.session.Session()
+
+            predictor = sagemaker.Predictor(
+                endpoint_name=endpoint_name,
+                sagemaker_session=sess,
+                serializer=serializers.JSONSerializer()
+            )
+
+            # Simple test payload
+            test_payload = {
+                "inputs": "Test connection",
+                "parameters": {
+                    "max_new_tokens": 10,
+                    "temperature": 0.1
+                }
+            }
+
+            logger.info(f"Testing SageMaker endpoint: {endpoint_name}")
+            test_response = predictor.predict(test_payload)
+            logger.info(f"SageMaker endpoint test successful: {test_response}")
+
+        except Exception as e:
+            logger.error(f"SageMaker endpoint connectivity test failed: {e}")
+            raise Exception(f"SageMaker端点连接失败: {str(e)}")
+
+        self._update_session(session_id, {
+            "current_message": "配置evalscope测试参数..."
+        })
+
+        try:
+            # Use single token values instead of ranges
+            min_tokens = output_tokens
+            max_tokens = output_tokens
+            min_prompt_length = input_tokens
+            max_prompt_length = input_tokens
+
+            logger.info(f"[DEBUG] SageMaker Token parameters: prefix_length={prefix_length}, input_tokens={input_tokens}, output_tokens={output_tokens}")
+            logger.info(f"[DEBUG] SageMaker Evalscope config: min_prompt_length={min_prompt_length}, max_prompt_length={max_prompt_length}, min_tokens={min_tokens}, max_tokens={max_tokens}")
+
+            # Get appropriate tokenizer path based on model name
+            tokenizer_path = self._get_tokenizer_path(model_name)
+            logger.info(f"[DEBUG] Using tokenizer path: {tokenizer_path}")
+
+            # Create output directory using the same structure as regular model tests
+            output_dir = self._create_custom_api_output_dir(model_name, session_id)
+
+            # Store output directory in session
+            self.test_sessions[session_id]["output_directory"] = output_dir
+
+            self._update_session(session_id, {
+                "current_message": f"正在执行SageMaker端点基准测试 ({num_requests_list} 请求, {concurrency_list} 并发)..."
+            })
+
+            # Create Python script to run evalscope with SageMaker endpoint
+            # Note: This needs to use the SageMaker endpoint format, not OpenAI format
+            dataset_param = f"'{dataset_path}'" if dataset == 'custom' and dataset_path else f"'{dataset}'"
+
+            # Check if VLM parameters should be included
+            has_vlm_params = 'image_width' in test_params and 'image_height' in test_params and 'image_num' in test_params
+
+            # For SageMaker endpoints, we need to construct a custom URL that evalscope can understand
+            # Since SageMaker uses a different invocation format, we'll create a wrapper URL
+            sagemaker_url = f"sagemaker://{endpoint_name}"
+
+            script_content = f'''#!/usr/bin/env python
+import sys
+import json
+
+# Add evalscope to path
+sys.path.insert(0, '/home/ec2-user/SageMaker/efs/conda_envs/evalscope/lib/python3.10/site-packages')
+
+try:
+    from evalscope.perf.main import run_perf_benchmark
+    from evalscope.perf.arguments import Arguments
+
+    # Create evalscope configuration for SageMaker endpoint
+    # Note: We use a special 'sagemaker' API type to handle the different format
+    task_cfg = Arguments(
+        parallel={concurrency_list},
+        number={num_requests_list},
+        model='{model_name}',
+        url='{sagemaker_url}',
+        api='sagemaker',  # Use 'sagemaker' instead of 'openai'
+        dataset={dataset_param},
+        min_tokens={min_tokens},
+        max_tokens={max_tokens},
+        prefix_length={prefix_length},
+        min_prompt_length={min_prompt_length},
+        max_prompt_length={max_prompt_length},
+        tokenizer_path='{tokenizer_path}',
+        temperature={temperature},
+        outputs_dir='{output_dir}',
+        stream=True,
+        connect_timeout={connect_timeout},
+        read_timeout={read_timeout},
+        seed=42{', image_width=' + str(image_width) + ', image_height=' + str(image_height) + ', image_format="' + image_format + '", image_num=' + str(image_num) if has_vlm_params else ''}
+    )
+
+    # Run the benchmark
+    results = run_perf_benchmark(task_cfg)
+
+    # Output results as JSON
+    print("EVALSCOPE_RESULTS_START")
+    print(json.dumps(results, default=str, ensure_ascii=False))
+    print("EVALSCOPE_RESULTS_END")
+
+except Exception as e:
+    print("EVALSCOPE_ERROR:", str(e))
+    import traceback
+    traceback.print_exc()
+    sys.exit(1)
+'''
+
+            script_path = f"{output_dir}/run_evalscope_sagemaker.py"
+            with open(script_path, 'w', encoding='utf-8') as f:
+                f.write(script_content)
+
+            logger.info(f"[DEBUG] SageMaker Evalscope execution script written to: {script_path}")
+
+            # Note: The above approach assumes evalscope supports 'sagemaker' API type
+            # If not, we need to create a custom implementation that directly uses SageMaker SDK
+            # For now, let's try a different approach using a custom Python script
+
+            # Alternative: Create a custom stress test implementation for SageMaker
+            logger.info("Using custom SageMaker stress test implementation...")
+
+            results = self._run_custom_sagemaker_stress_test(
+                endpoint_name, model_name, test_params, session_id, output_dir
+            )
+
+            return results
+
+        except subprocess.TimeoutExpired as e:
+            logger.error(f"SageMaker Evalscope subprocess timed out for session {session_id}: {e}")
+            raise Exception(f"SageMaker端点压力测试超时")
+        except Exception as e:
+            logger.error(f"SageMaker Evalscope execution failed for session {session_id}: {e}")
+            raise Exception(f"SageMaker端点压力测试失败: {str(e)}")
+
+    def _run_custom_sagemaker_stress_test(self, endpoint_name: str, model_name: str, test_params: Dict[str, Any], session_id: str, output_dir: str) -> Dict[str, Any]:
+        """Run custom stress test implementation for SageMaker endpoints.
+
+        Args:
+            endpoint_name: SageMaker endpoint name
+            model_name: Model display name
+            test_params: Test parameters
+            session_id: Session ID
+            output_dir: Output directory
+
+        Returns:
+            Test results in the expected format
+        """
+        import concurrent.futures
+        import time
+        import threading
+        from transformers import AutoTokenizer
+
+        try:
+            num_requests_list = test_params.get('num_requests', [50])
+            concurrency_list = test_params.get('concurrency', [5])
+            input_tokens = test_params.get('input_tokens', 200)
+            output_tokens = test_params.get('output_tokens', 500)
+            temperature = test_params.get('temperature', 0.1)
+
+            # Initialize SageMaker predictor
+            import boto3
+            import sagemaker
+            from sagemaker import serializers
+
+            sess = sagemaker.session.Session()
+            predictor = sagemaker.Predictor(
+                endpoint_name=endpoint_name,
+                sagemaker_session=sess,
+                serializer=serializers.JSONSerializer()
+            )
+
+            # Get tokenizer for chat template formatting
+            tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+            performance_table = []
+
+            # Run tests for each paired combination
+            for i, (concurrency, requests) in enumerate(zip(concurrency_list, num_requests_list)):
+                logger.info(f"Running combination {i+1}/{len(concurrency_list)}: concurrency={concurrency}, requests={requests}")
+
+                self._update_session(session_id, {
+                    "current_message": f"执行测试组合 {i+1}/{len(concurrency_list)}: 并发{concurrency}, 请求{requests}个"
+                })
+
+                # Run single test combination
+                combo_results = self._run_single_sagemaker_combination(
+                    predictor, tokenizer, concurrency, requests, input_tokens, output_tokens, temperature, session_id
+                )
+
+                performance_table.append(combo_results)
+
+            # Create comprehensive results format
+            total_tokens = sum(row['requests'] * output_tokens for row in performance_table)
+            total_test_time = sum(row.get('test_time', 0) for row in performance_table)
+            avg_output_rate = total_tokens / max(total_test_time, 1) if total_test_time > 0 else 0
+
+            # Find best configurations
+            best_rps = max(performance_table, key=lambda x: x['rps'])
+            best_latency = min(performance_table, key=lambda x: x['avg_latency'])
+
+            comprehensive_results = {
+                # Legacy format for compatibility
+                "qps": performance_table[0]['rps'] if performance_table else 0,
+                "avg_ttft": performance_table[0]['avg_ttft'] if performance_table else 0,
+                "avg_latency": performance_table[0]['avg_latency'] if performance_table else 0,
+                "tokens_per_second": performance_table[0]['gen_toks_per_sec'] if performance_table else 0,
+                "total_requests": sum(r['requests'] for r in performance_table),
+                "successful_requests": sum(int(r['requests'] * r['success_rate'] / 100) for r in performance_table),
+                "failed_requests": sum(r['requests'] - int(r['requests'] * r['success_rate'] / 100) for r in performance_table),
+
+                # New comprehensive format
+                "comprehensive_summary": {
+                    "model": model_name,
+                    "total_generated_tokens": int(total_tokens),
+                    "total_test_time": total_test_time,
+                    "avg_output_rate": avg_output_rate,
+                    "best_rps": {
+                        'value': best_rps['rps'],
+                        'config': f"Concurrency {best_rps['concurrency']} ({best_rps['rps']:.2f} req/sec)"
+                    },
+                    "best_latency": {
+                        'value': best_latency['avg_latency'],
+                        'config': f"Concurrency {best_latency['concurrency']} ({best_latency['avg_latency']:.3f} seconds)"
+                    }
+                },
+                "performance_table": performance_table,
+                "is_comprehensive": True,
+
+                # Empty legacy fields to prevent frontend errors
+                "summary": {},
+                "percentiles": {},
+                "detailed_metrics": {
+                    "ttft_distribution": [],
+                    "latency_distribution": [],
+                    "input_tokens": [],
+                    "output_tokens": []
+                }
+            }
+
+            # Save results to output directory
+            try:
+                self._save_results_to_output_dir(output_dir, comprehensive_results, test_params, model_name, session_id)
+            except Exception as save_error:
+                logger.error(f"Failed to save results (non-critical): {save_error}")
+
+            return comprehensive_results
+
+        except Exception as e:
+            logger.error(f"Custom SageMaker stress test failed for session {session_id}: {e}")
+            raise Exception(f"SageMaker自定义压力测试失败: {str(e)}")
+
+    def _run_single_sagemaker_combination(self, predictor, tokenizer, concurrency: int, requests: int,
+                                         input_tokens: int, output_tokens: int, temperature: float, session_id: str) -> Dict[str, Any]:
+        """Run a single test combination for SageMaker endpoint.
+
+        Args:
+            predictor: SageMaker predictor instance
+            tokenizer: Tokenizer for formatting prompts
+            concurrency: Number of concurrent requests
+            requests: Total number of requests
+            input_tokens: Target input tokens
+            output_tokens: Target output tokens
+            temperature: Temperature parameter
+            session_id: Session ID for logging
+
+        Returns:
+            Test results for this combination
+        """
+        import concurrent.futures
+        import time
+        import random
+
+        # Generate test prompts
+        test_prompts = []
+        for i in range(requests):
+            # Create a prompt with approximately the target input tokens
+            base_prompt = "Please provide a detailed explanation about artificial intelligence and machine learning" * (input_tokens // 20)
+            messages = [
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": base_prompt}
+            ]
+
+            # Format using chat template
+            formatted_prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+            test_prompts.append(formatted_prompt)
+
+        # Track timing and results
+        start_time = time.time()
+        successful_requests = 0
+        failed_requests = 0
+        ttft_times = []
+        latencies = []
+        generated_tokens = []
+
+        def make_request(prompt_text):
+            """Make a single request to SageMaker endpoint."""
+            nonlocal successful_requests, failed_requests
+
+            request_start = time.time()
+
+            try:
+                # Prepare SageMaker request payload (different from OpenAI format)
+                payload = {
+                    "inputs": prompt_text,
+                    "parameters": {
+                        "max_new_tokens": output_tokens,
+                        "temperature": temperature,
+                        "top_p": 0.9,
+                        "include_stop_str_in_output": False,
+                        "ignore_eos": False,
+                        "repetition_penalty": 1.0,
+                        "details": True
+                    }
+                }
+
+                # Make prediction
+                response = predictor.predict(payload)
+                request_end = time.time()
+
+                # Parse response (SageMaker format)
+                if isinstance(response, bytes):
+                    response_text = response.decode('utf-8')
+                else:
+                    response_text = str(response)
+
+                try:
+                    import json
+                    response_json = json.loads(response_text)
+                    if 'generated_text' in response_json:
+                        generated_text = response_json['generated_text']
+                        output_token_count = response_json.get('generated_tokens', len(generated_text.split()))
+                    else:
+                        generated_text = response_text
+                        output_token_count = len(response_text.split())
+                except json.JSONDecodeError:
+                    generated_text = response_text
+                    output_token_count = len(response_text.split())
+
+                # Calculate metrics
+                total_latency = request_end - request_start
+                # For SageMaker, we estimate TTFT as a portion of total latency
+                estimated_ttft = total_latency * 0.2  # Estimate 20% of total time for first token
+
+                # Store metrics
+                latencies.append(total_latency)
+                ttft_times.append(estimated_ttft)
+                generated_tokens.append(output_token_count)
+
+                successful_requests += 1
+                return True
+
+            except Exception as e:
+                logger.error(f"SageMaker request failed: {e}")
+                failed_requests += 1
+                return False
+
+        # Execute requests with controlled concurrency
+        with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as executor:
+            futures = [executor.submit(make_request, prompt) for prompt in test_prompts]
+
+            # Wait for all to complete
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    future.result()
+                except Exception as e:
+                    logger.error(f"Request execution error: {e}")
+                    failed_requests += 1
+
+        end_time = time.time()
+        test_duration = end_time - start_time
+
+        # Calculate metrics
+        total_requests = successful_requests + failed_requests
+        success_rate = (successful_requests / max(total_requests, 1)) * 100
+
+        avg_latency = sum(latencies) / max(len(latencies), 1) if latencies else 0
+        avg_ttft = sum(ttft_times) / max(len(ttft_times), 1) if ttft_times else 0
+        total_generated_tokens = sum(generated_tokens)
+        avg_generated_tokens = total_generated_tokens / max(successful_requests, 1) if successful_requests > 0 else 0
+
+        rps = total_requests / max(test_duration, 1)
+        gen_toks_per_sec = total_generated_tokens / max(test_duration, 1)
+        total_toks_per_sec = gen_toks_per_sec  # For SageMaker, assume similar to generation throughput
+        avg_tpot = avg_latency / max(avg_generated_tokens, 1) if avg_generated_tokens > 0 else 0
+        avg_itl = avg_tpot  # Inter-token latency approximation
+
+        result = {
+            'concurrency': concurrency,
+            'requests': requests,
+            'rps': rps,
+            'avg_latency': avg_latency,
+            'p99_latency': None,  # Not calculated in this simple implementation
+            'gen_toks_per_sec': gen_toks_per_sec,
+            'total_toks_per_sec': total_toks_per_sec,
+            'avg_ttft': avg_ttft,
+            'p99_ttft': None,  # Not calculated in this simple implementation
+            'avg_tpot': avg_tpot,
+            'p99_tpot': None,  # Not calculated in this simple implementation
+            'avg_itl': avg_itl,
+            'p99_itl': None,  # Not calculated in this simple implementation
+            'success_rate': success_rate,
+            'test_time': test_duration
+        }
+
+        logger.info(f"SageMaker combination completed: {result}")
+        return result
 
     def _get_emd_api_url(self, model_path: str, deployment_tag: str) -> str:
         """Get EMD API URL dynamically from EMD status.

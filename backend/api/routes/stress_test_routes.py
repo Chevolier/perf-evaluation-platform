@@ -27,9 +27,10 @@ def start_stress_test():
         model_key = data.get('model')
         api_url = data.get('api_url')
         model_name = data.get('model_name')
+        sagemaker_config = data.get('sagemaker_config')
         test_params = data.get('params', {})
-        
-        # Handle both dropdown selection and manual input
+
+        # Handle dropdown selection, manual input, and SageMaker endpoint
         if model_key:
             # Traditional dropdown selection
             session_id = stress_test_service.start_stress_test(model_key, test_params)
@@ -38,11 +39,33 @@ def start_stress_test():
             session_id = stress_test_service.start_stress_test_with_custom_api(
                 api_url, model_name, test_params
             )
+        elif sagemaker_config:
+            # SageMaker endpoint configuration
+            endpoint_name = sagemaker_config.get('endpoint_name')
+            sagemaker_model_name = sagemaker_config.get('model_name')
+
+            if not endpoint_name:
+                logger.error("SageMaker endpoint_name is required")
+                return jsonify({
+                    "status": "error",
+                    "message": "SageMaker endpoint_name is required"
+                }), 400
+
+            if not sagemaker_model_name:
+                logger.error("SageMaker model_name is required")
+                return jsonify({
+                    "status": "error",
+                    "message": "SageMaker model_name is required"
+                }), 400
+
+            session_id = stress_test_service.start_stress_test_with_sagemaker_endpoint(
+                endpoint_name, sagemaker_model_name, test_params
+            )
         else:
-            logger.error("No model specified in stress test request - need either 'model' or both 'api_url' and 'model_name'")
+            logger.error("No model specified in stress test request - need either 'model', 'api_url'+'model_name', or 'sagemaker_config'")
             return jsonify({
-                "status": "error", 
-                "message": "Either 'model' or both 'api_url' and 'model_name' are required"
+                "status": "error",
+                "message": "Either 'model', 'api_url'+'model_name', or 'sagemaker_config' are required"
             }), 400
         
         logger.info(f"Stress test started with session ID: {session_id}")
