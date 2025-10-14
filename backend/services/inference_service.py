@@ -345,34 +345,35 @@ class InferenceService:
             logger.info(f"Calling EMD model {model} with payload: {emd_payload}")
             
             # Try to get EMD endpoint URL and make inference call
+            actual_endpoint_name = None
             try:
                 import boto3
                 from botocore.exceptions import ClientError, NoCredentialsError
-                
+
                 # Get the deployment tag for this model
                 deployment_tag = deployment_status.get('tag')
                 if not deployment_tag:
                     raise ValueError(f"No deployment tag found for model {model}")
-                
-                # Get endpoint name from EMD deployment info 
+
+                # Get endpoint name from EMD deployment info
                 # Based on the emd status output, the actual endpoint name uses model_path:
                 # EMD-Model-{model_path_converted}-{tag}-endpoint
                 # Convert model_path to lowercase and replace special chars with hyphens
                 model_name_for_endpoint = model_path.lower().replace('_', '-').replace('.', '-')
-                endpoint_name = f"EMD-Model-{model_name_for_endpoint}-{deployment_tag}-endpoint"
-                
-                logger.info(f"Using EMD endpoint: {endpoint_name}")
-                
+                actual_endpoint_name = f"EMD-Model-{model_name_for_endpoint}-{deployment_tag}-endpoint"
+
+                logger.info(f"Using EMD endpoint: {actual_endpoint_name}")
+
                 # Use boto3 SageMaker Runtime client directly
                 runtime_client = boto3.client('sagemaker-runtime', region_name='us-west-2')
-                
+
                 # Call EMD endpoint via SageMaker Runtime
                 response = runtime_client.invoke_endpoint(
-                    EndpointName=endpoint_name,
+                    EndpointName=actual_endpoint_name,
                     ContentType='application/json',
                     Body=json.dumps(emd_payload)
                 )
-                
+
                 # Parse response
                 response_body = json.loads(response['Body'].read().decode('utf-8'))
                 logger.info(f"EMD response for {model}: {response_body}")
@@ -697,48 +698,48 @@ class InferenceService:
 
             # For text-only models, we can apply chat template formatting on our side
             # This matches the format from your working example
-            if 'qwen' in endpoint_name.lower() or 'coder' in endpoint_name.lower():
-                # Build messages for chat template
-                messages = [
-                    {"role": "system", "content": "You are a helpful assistant."},
-                    {"role": "user", "content": text_prompt}
-                ]
+            # if 'qwen' in endpoint_name.lower() or 'coder' in endpoint_name.lower():
+            #     # Build messages for chat template
+            #     messages = [
+            #         {"role": "system", "content": "You are a helpful assistant."},
+            #         {"role": "user", "content": text_prompt}
+            #     ]
 
-                # Apply a simple chat template formatting (Qwen style)
-                formatted_prompt = ""
-                for msg in messages:
-                    if msg["role"] == "system":
-                        formatted_prompt += f"<|im_start|>system\n{msg['content']}<|im_end|>\n"
-                    elif msg["role"] == "user":
-                        formatted_prompt += f"<|im_start|>user\n{msg['content']}<|im_end|>\n"
-                formatted_prompt += "<|im_start|>assistant\n"
+            #     # Apply a simple chat template formatting (Qwen style)
+            #     formatted_prompt = ""
+            #     for msg in messages:
+            #         if msg["role"] == "system":
+            #             formatted_prompt += f"<|im_start|>system\n{msg['content']}<|im_end|>\n"
+            #         elif msg["role"] == "user":
+            #             formatted_prompt += f"<|im_start|>user\n{msg['content']}<|im_end|>\n"
+            #     formatted_prompt += "<|im_start|>assistant\n"
 
-                request_payload = {
-                    "inputs": formatted_prompt,
-                    "parameters": {
-                        "max_new_tokens": max_tokens,
-                        "temperature": temperature,
-                        "top_p": 0.9,
-                        "include_stop_str_in_output": False,
-                        "ignore_eos": False,
-                        "repetition_penalty": 1.0,
-                        "details": True
-                    }
+            #     request_payload = {
+            #         "inputs": formatted_prompt,
+            #         "parameters": {
+            #             "max_new_tokens": max_tokens,
+            #             "temperature": temperature,
+            #             "top_p": 0.9,
+            #             "include_stop_str_in_output": False,
+            #             "ignore_eos": False,
+            #             "repetition_penalty": 1.0,
+            #             "details": True
+            #         }
+            #     }
+            # else:
+            # Generic format for other models
+            request_payload = {
+                "inputs": text_prompt,
+                "parameters": {
+                    "max_new_tokens": max_tokens,
+                    "temperature": temperature,
+                    "top_p": 0.9,
+                    "include_stop_str_in_output": False,
+                    "ignore_eos": False,
+                    "repetition_penalty": 1.0,
+                    "details": True
                 }
-            else:
-                # Generic format for other models
-                request_payload = {
-                    "inputs": text_prompt,
-                    "parameters": {
-                        "max_new_tokens": max_tokens,
-                        "temperature": temperature,
-                        "top_p": 0.9,
-                        "include_stop_str_in_output": False,
-                        "ignore_eos": False,
-                        "repetition_penalty": 1.0,
-                        "details": True
-                    }
-                }
+            }
 
             # Add image frames if provided - for multimodal models
             if frames:
@@ -764,6 +765,12 @@ class InferenceService:
                     content = response_json['generated_text']
                 else:
                     content = response_text
+                
+                if 'generated_tokens' in response_json:
+                    output_tokens = response_json['generated_tokens']
+                else:
+                    output_tokens = 0
+
             except json.JSONDecodeError:
                 content = response_text
 
@@ -776,7 +783,8 @@ class InferenceService:
                 'result': {
                     'content': content,
                     'usage': {
-                        'total_tokens': len(content.split()) if isinstance(content, str) else 0  # Rough estimate
+                        'output_tokens': output_tokens,
+                        'total_tokens': 0  # Rough estimate
                     },
                     'raw_response': response_json if 'response_json' in locals() else None
                 },

@@ -19,6 +19,7 @@ const InferencePage = ({
   const refreshIntervalRef = useRef(null);
   const currentModelsRef = useRef([]);
 
+
   // Convert files to base64
   const filesToBase64 = (files) => {
     return Promise.all(
@@ -97,7 +98,7 @@ const InferencePage = ({
         frames: base64Data,
         mediaType: dataset.type,
         max_tokens: params.max_tokens || 1024,
-        temperature: params.temperature || 0.1
+        temperature: params.temperature || 0.6
       })
     });
 
