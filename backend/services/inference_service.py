@@ -765,17 +765,25 @@ class InferenceService:
                     content = response_json['generated_text']
                 else:
                     content = response_text
-                
+
                 if 'generated_tokens' in response_json:
                     output_tokens = response_json['generated_tokens']
                 else:
-                    output_tokens = 0
+                    # Fallback: estimate tokens based on text length
+                    output_tokens = len(content.split()) if content else 0
 
             except json.JSONDecodeError:
                 content = response_text
+                # Estimate tokens for raw text response
+                output_tokens = len(response_text.split()) if response_text else 0
 
             end_time = datetime.now()
             processing_time = (end_time - start_time).total_seconds()
+
+            # Estimate input tokens from prompt length
+            prompt_text = data.get('text', '')
+            input_tokens = len(prompt_text.split()) if prompt_text else 0
+            total_tokens = input_tokens + output_tokens
 
             result = {
                 'model': model_name,
@@ -783,8 +791,11 @@ class InferenceService:
                 'result': {
                     'content': content,
                     'usage': {
+                        'input_tokens': input_tokens,
+                        'prompt_tokens': input_tokens,  # Alternative field name
                         'output_tokens': output_tokens,
-                        'total_tokens': 0  # Rough estimate
+                        'completion_tokens': output_tokens,  # Alternative field name
+                        'total_tokens': total_tokens
                     },
                     'raw_response': response_json if 'response_json' in locals() else None
                 },
