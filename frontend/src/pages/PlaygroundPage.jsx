@@ -393,6 +393,10 @@ const PlaygroundPage = ({
         message.warning('请填写SageMaker端点名称');
         return;
       }
+      if (!manualConfig.model_name.trim()) {
+        message.warning('请填写模型显示名称（Huggingface模型名称）');
+        return;
+      }
     }
 
     if (!dataset.prompt.trim()) {
@@ -653,12 +657,13 @@ const PlaygroundPage = ({
                         autoComplete="model-display-name"
                         value={manualConfig.model_name}
                         onChange={(e) => setManualConfig({ ...manualConfig, model_name: e.target.value })}
-                        placeholder="Qwen3-Coder-30B (可选，用于结果显示)"
+                        placeholder="例如：Qwen/Qwen2.5-Coder-32B-Instruct （必填）"
                         style={{ marginTop: 4, width: '100%' }}
                         prefix={<RocketOutlined />}
+                        required
                       />
                       <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
-                        可选：自定义模型在结果中的显示名称，不填写则使用端点名称
+                        原始模型在Huggingface上的完整名称，例如 Qwen/Qwen2.5-Coder-32B-Instruct
                       </Text>
                     </div>
                   </Space>
@@ -938,7 +943,7 @@ const PlaygroundPage = ({
               disabled={
                 inputMode === 'dropdown' ? selectedModels.length === 0 :
                 inputMode === 'manual' ? (!manualConfig.api_url.trim() || !manualConfig.model_name.trim()) :
-                inputMode === 'sagemaker' ? !manualConfig.endpoint_name.trim() : false
+                inputMode === 'sagemaker' ? (!manualConfig.endpoint_name.trim() || !manualConfig.model_name.trim()) : false
               }
               style={{ width: '100%' }}
             >

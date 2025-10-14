@@ -8,6 +8,7 @@ from datetime import datetime
 
 from ..core.models import model_registry
 from ..utils import get_logger
+from transformers import AutoTokenizer
 
 
 logger = get_logger(__name__)
@@ -661,7 +662,7 @@ class InferenceService:
         try:
             start_time = datetime.now()
             endpoint_name = sagemaker_config.get('endpoint_name')
-            model_name = sagemaker_config.get('model_name', endpoint_name)
+            model_name = sagemaker_config.get('model_name', "")
 
             if not endpoint_name:
                 raise ValueError("endpoint_name is required for SageMaker endpoint")
@@ -698,48 +699,46 @@ class InferenceService:
 
             # For text-only models, we can apply chat template formatting on our side
             # This matches the format from your working example
-            # if 'qwen' in endpoint_name.lower() or 'coder' in endpoint_name.lower():
-            #     # Build messages for chat template
-            #     messages = [
-            #         {"role": "system", "content": "You are a helpful assistant."},
-            #         {"role": "user", "content": text_prompt}
-            #     ]
+            input_tokens = 0
+            if model_name:
+                # Build messages for chat template
+                tokenizer = AutoTokenizer.from_pretrained(model_name)
+                messages = [
+                    {"role": "system", "content": "You are a helpful assistant."},
+                    {"role": "user", "content": text_prompt}
+                ]
 
-            #     # Apply a simple chat template formatting (Qwen style)
-            #     formatted_prompt = ""
-            #     for msg in messages:
-            #         if msg["role"] == "system":
-            #             formatted_prompt += f"<|im_start|>system\n{msg['content']}<|im_end|>\n"
-            #         elif msg["role"] == "user":
-            #             formatted_prompt += f"<|im_start|>user\n{msg['content']}<|im_end|>\n"
-            #     formatted_prompt += "<|im_start|>assistant\n"
+                # Apply a simple chat template formatting (Qwen style)
+                prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+                print(f"prompt: {prompt}")
+                input_tokens = len(tokenizer.tokenize(prompt))
 
-            #     request_payload = {
-            #         "inputs": formatted_prompt,
-            #         "parameters": {
-            #             "max_new_tokens": max_tokens,
-            #             "temperature": temperature,
-            #             "top_p": 0.9,
-            #             "include_stop_str_in_output": False,
-            #             "ignore_eos": False,
-            #             "repetition_penalty": 1.0,
-            #             "details": True
-            #         }
-            #     }
-            # else:
-            # Generic format for other models
-            request_payload = {
-                "inputs": text_prompt,
-                "parameters": {
-                    "max_new_tokens": max_tokens,
-                    "temperature": temperature,
-                    "top_p": 0.9,
-                    "include_stop_str_in_output": False,
-                    "ignore_eos": False,
-                    "repetition_penalty": 1.0,
-                    "details": True
+                request_payload = {
+                    "inputs": prompt,
+                    "parameters": {
+                        "max_new_tokens": max_tokens,
+                        "temperature": temperature,
+                        "top_p": 0.9,
+                        "include_stop_str_in_output": False,
+                        "ignore_eos": False,
+                        "repetition_penalty": 1.0,
+                        "details": True
+                    }
                 }
-            }
+            else:
+                # Generic format for other models
+                request_payload = {
+                    "inputs": text_prompt,
+                    "parameters": {
+                        "max_new_tokens": max_tokens,
+                        "temperature": temperature,
+                        "top_p": 0.9,
+                        "include_stop_str_in_output": False,
+                        "ignore_eos": False,
+                        "repetition_penalty": 1.0,
+                        "details": True
+                    }
+                }
 
             # Add image frames if provided - for multimodal models
             if frames:
@@ -780,9 +779,6 @@ class InferenceService:
             end_time = datetime.now()
             processing_time = (end_time - start_time).total_seconds()
 
-            # Estimate input tokens from prompt length
-            prompt_text = data.get('text', '')
-            input_tokens = len(prompt_text.split()) if prompt_text else 0
             total_tokens = input_tokens + output_tokens
 
             result = {
@@ -792,9 +788,7 @@ class InferenceService:
                     'content': content,
                     'usage': {
                         'input_tokens': input_tokens,
-                        'prompt_tokens': input_tokens,  # Alternative field name
                         'output_tokens': output_tokens,
-                        'completion_tokens': output_tokens,  # Alternative field name
                         'total_tokens': total_tokens
                     },
                     'raw_response': response_json if 'response_json' in locals() else None
