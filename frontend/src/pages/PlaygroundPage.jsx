@@ -1,5 +1,4 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { flushSync } from 'react-dom';
 import { 
   Row, 
   Col, 
@@ -448,158 +447,193 @@ const PlaygroundPage = ({
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
-      const reader = response.body.getReader();
+      const body = response.body;
+      if (!body) {
+        throw new Error('Streaming response body is not available');
+      }
+
+      const reader = body.getReader();
       const decoder = new TextDecoder('utf-8');  // Explicitly specify UTF-8
-      let buffer = '';
 
       console.log('🎯 Starting to read streaming response...');
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) {
-          console.log('✅ Stream reading completed');
-          break;
-        }
+      const processStream = async () => {
+        let buffer = '';
+        let processedLineCount = 0;
 
-        // CRITICAL: Use { stream: true } to handle multi-byte UTF-8 characters across chunks
-        const chunk = decoder.decode(value, { stream: true });
-        console.log('📦 Raw chunk received:', chunk.length, 'chars');
-        
-        buffer += chunk;
-        const lines = buffer.split('\n');
-        
-        // Keep the last potentially incomplete line in buffer
-        buffer = lines.pop() || '';
-        
-        console.log('📝 Processing', lines.length, 'lines from buffer');
-
-        for (const line of lines) {
-          if (!line.trim()) continue; // Skip empty lines
-          
-          console.log('📄 Processing line:', line.substring(0, 100) + (line.length > 100 ? '...' : ''));
-          
-          if (line.startsWith('data: ')) {
-            try {
-              const jsonStr = line.slice(6).trim();
-              
-              if (jsonStr && jsonStr !== '') {
-                const data = JSON.parse(jsonStr);
-                console.log('✅ Parsed streaming data:', data.type, data.model, data.delta ? `"${data.delta}"` : '');
-                
-                if (data.type === 'complete') {
-                  console.log('🏁 Stream complete');
-                  setIsInferring(false);
-                  break;
-                } else if (data.type === 'heartbeat') {
-                  console.log('💓 Heartbeat received');
-                } else {
-                  const modelKey = data.model_key || data.model;
-                  if (!modelKey) {
-                    console.warn('⚠️ Streaming payload missing model key:', data);
-                    continue;
-                  }
-
-                  const displayName = data.label || data.display_name || data.model || modelKey;
-
-                  if (data.type === 'chunk') {
-                    console.log('✍️ Streaming chunk for model:', displayName, data.delta);
-                    // Force immediate state update for real-time streaming - use flushSync to prevent React 18 batching
-                    flushSync(() => {
-                      setInferenceResults(prev => {
-                        const previousEntry = prev[modelKey] || {};
-                        const previousContent = previousEntry.partialContent || '';
-                        const deltaText = data.delta || '';
-                        const newContent = `${previousContent}${deltaText}`;
-
-                        console.log(`🔄 Updating ${displayName}: "${deltaText}" -> Total: "${newContent.substring(0, 50)}..."`);
-
-                        const updatedEntry = {
-                          ...previousEntry,
-                          status: data.status || 'streaming',
-                          partialContent: newContent,
-                          lastChunk: data,
-                          model: modelKey,
-                          label: displayName,
-                          displayName,
-                          api_url: data.api_url || previousEntry.api_url,
-                          provider: data.provider || previousEntry.provider,
-                          lastUpdated: Date.now() // Force re-render
-                        };
-
-                        return {
-                          ...prev,
-                          [modelKey]: updatedEntry
-                        };
-                      });
-                    });
-                  } else if (data.type === 'result') {
-                    console.log('📚 Final result for model:', displayName);
-                    setInferenceResults(prev => {
-                      const previousEntry = prev[modelKey] || {};
-                      const partialContent = previousEntry.partialContent || '';
-                      let resultPayload = data.result ? { ...data.result } : undefined;
-
-                      if (resultPayload) {
-                        if (!resultPayload.content && partialContent) {
-                          resultPayload.content = partialContent;
-                        }
-                      } else {
-                        resultPayload = { content: partialContent || '' };
-                      }
-
-                      return {
-                        ...prev,
-                        [modelKey]: {
-                          ...previousEntry,
-                          ...data,
-                          model: modelKey,
-                          label: displayName,
-                          displayName,
-                          status: data.status || 'success',
-                          result: resultPayload,
-                          partialContent: undefined,
-                          streamCompleted: true
-                        }
-                      };
-                    });
-                  } else if (data.type === 'error') {
-                    console.log('❗ Error result for model:', displayName, data.message);
-                    setInferenceResults(prev => ({
-                      ...prev,
-                      [modelKey]: {
-                        ...(prev[modelKey] || {}),
-                        ...data,
-                        model: modelKey,
-                        label: displayName,
-                        status: 'error',
-                        partialContent: undefined
-                      }
-                    }));
-                  } else {
-                    console.log('📊 Updating results for model:', displayName);
-                    setInferenceResults(prev => ({
-                      ...prev,
-                      [modelKey]: {
-                        ...(prev[modelKey] || {}),
-                        ...data,
-                        model: modelKey,
-                        label: displayName
-                      }
-                    }));
-                  }
-                }
-              }
-            } catch (e) {
-              console.error('❌ 解析SSE数据失败:', e, 'Line:', line);
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) {
+              console.log('✅ Stream reading completed');
+              break;
             }
-          } else if (line.trim()) {
-            console.log('⚠️ Non-SSE line received:', line);
+
+            // CRITICAL: Use { stream: true } to handle multi-byte UTF-8 characters across chunks
+            const chunk = decoder.decode(value, { stream: true });
+            console.log('📦 Raw chunk received:', chunk.length, 'chars');
+
+            buffer += chunk;
+            const lines = buffer.split('\n');
+
+            // Keep the last potentially incomplete line in buffer
+            buffer = lines.pop() || '';
+
+            console.log('📝 Processing', lines.length, 'lines from buffer');
+
+            let processedLines = false;
+
+            for (const line of lines) {
+              if (!line.trim()) continue; // Skip empty lines
+              processedLineCount += 1;
+              processedLines = true;
+
+              console.log('📄 Processing line:', line.substring(0, 100) + (line.length > 100 ? '...' : ''));
+
+              if (line.startsWith('data: ')) {
+                try {
+                  const jsonStr = line.slice(6).trim();
+
+                  if (jsonStr) {
+                    const data = JSON.parse(jsonStr);
+                    console.log('✅ Parsed streaming data:', data.type, data.model, data.delta ? `"${data.delta}"` : '');
+
+                    if (data.type === 'complete') {
+                      console.log('🏁 Stream complete');
+                      return;
+                    } else if (data.type === 'heartbeat') {
+                      console.log('💓 Heartbeat received');
+                    } else {
+                      const modelKey = data.model_key || data.model;
+                      if (!modelKey) {
+                        console.warn('⚠️ Streaming payload missing model key:', data);
+                        continue;
+                      }
+
+                      const displayName = data.label || data.display_name || data.model || modelKey;
+
+                      if (data.type === 'chunk') {
+                        console.log('✍️ Streaming chunk for model:', displayName, data.delta);
+                        setInferenceResults(prev => {
+                          const previousEntry = prev[modelKey] || {};
+                          const previousContent = previousEntry.partialContent || '';
+                          const deltaText = data.delta || '';
+                          const newContent = `${previousContent}${deltaText}`;
+
+                          console.log(`🔄 Updating ${displayName}: "${deltaText}" -> Total: "${newContent.substring(0, 50)}..."`);
+
+                          const updatedEntry = {
+                            ...previousEntry,
+                            status: data.status || 'streaming',
+                            partialContent: newContent,
+                            lastChunk: data,
+                            model: modelKey,
+                            label: displayName,
+                            displayName,
+                            api_url: data.api_url || previousEntry.api_url,
+                            provider: data.provider || previousEntry.provider,
+                            lastUpdated: Date.now() // Force re-render
+                          };
+
+                          return {
+                            ...prev,
+                            [modelKey]: updatedEntry
+                          };
+                        });
+                      } else if (data.type === 'result') {
+                        console.log('📚 Final result for model:', displayName);
+                        setInferenceResults(prev => {
+                          const previousEntry = prev[modelKey] || {};
+                          const partialContent = previousEntry.partialContent || '';
+                          let resultPayload = data.result ? { ...data.result } : undefined;
+
+                          if (resultPayload) {
+                            if (!resultPayload.content && partialContent) {
+                              resultPayload.content = partialContent;
+                            }
+                          } else {
+                            resultPayload = { content: partialContent || '' };
+                          }
+
+                          return {
+                            ...prev,
+                            [modelKey]: {
+                              ...previousEntry,
+                              ...data,
+                              model: modelKey,
+                              label: displayName,
+                              displayName,
+                              status: data.status || 'success',
+                              result: resultPayload,
+                              partialContent: undefined,
+                              streamCompleted: true
+                            }
+                          };
+                        });
+                      } else if (data.type === 'error') {
+                        console.log('❗ Error result for model:', displayName, data.message);
+                        setInferenceResults(prev => ({
+                          ...prev,
+                          [modelKey]: {
+                            ...(prev[modelKey] || {}),
+                            ...data,
+                            model: modelKey,
+                            label: displayName,
+                            status: 'error',
+                            partialContent: undefined
+                          }
+                        }));
+                      } else {
+                        console.log('📊 Updating results for model:', displayName);
+                        setInferenceResults(prev => ({
+                          ...prev,
+                          [modelKey]: {
+                            ...(prev[modelKey] || {}),
+                            ...data,
+                            model: modelKey,
+                            label: displayName
+                          }
+                        }));
+                      }
+                    }
+                  }
+                } catch (e) {
+                  console.error('❌ 解析SSE数据失败:', e, 'Line:', line);
+                }
+              } else if (line.trim()) {
+                console.log('⚠️ Non-SSE line received:', line);
+              }
+
+              if (processedLineCount % 20 === 0) {
+                await new Promise(resolve => {
+                  if (typeof window !== 'undefined' && window.requestAnimationFrame) {
+                    window.requestAnimationFrame(() => resolve());
+                  } else {
+                    setTimeout(resolve, 0);
+                  }
+                });
+              }
+            }
+
+            if (processedLines) {
+              await new Promise(resolve => setTimeout(resolve, 0));
+            }
           }
+        } finally {
+          console.log('🎯 Stream processing finished');
+          try {
+            reader.releaseLock();
+          } catch (releaseError) {
+            console.debug('Unable to release stream reader lock:', releaseError);
+          }
+          setIsInferring(false);
         }
-      }
-      
-      console.log('🎯 Stream processing finished');
-      setIsInferring(false);
+      };
+
+      processStream().catch(error => {
+        console.error('推理请求失败:', error);
+        message.error('推理请求失败，请检查网络连接');
+      });
     } catch (error) {
       console.error('推理请求失败:', error);
       message.error('推理请求失败，请检查网络连接');
@@ -1009,7 +1043,7 @@ const PlaygroundPage = ({
             title="推理结果" 
             size="small"
             style={{ height: '100%' }}
-            bodyStyle={{ maxHeight: 'calc(100vh - 200px)', overflowY: 'auto', padding: '16px' }}
+            styles={{ body: { maxHeight: 'calc(100vh - 200px)', overflowY: 'auto', padding: '16px' } }}
           >
             {Object.keys(inferenceResults).length === 0 && !isInferring ? (
               <Empty

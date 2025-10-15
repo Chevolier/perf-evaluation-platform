@@ -1771,7 +1771,6 @@ const StressTestPage = () => {
                         name="deployment_method"
                         label="部署方式"
                         rules={[{ required: true, message: '请选择部署方式' }]}
-                        initialValue="SageMaker Endpoint"
                         style={{ marginBottom: 16 }}
                       >
                         <Select placeholder="选择部署方式">
@@ -1787,7 +1786,6 @@ const StressTestPage = () => {
                         name="dataset"
                         label="数据集"
                         rules={[{ required: true, message: '请选择数据集' }]}
-                        initialValue="random"
                         style={{ marginBottom: 16 }}
                       >
                         <Select 
@@ -1950,7 +1948,6 @@ const StressTestPage = () => {
                         name="deployment_method"
                         label="部署方式"
                         rules={[{ required: true, message: '请选择部署方式' }]}
-                        initialValue="EC2"
                         style={{ marginBottom: 16 }}
                       >
                         <Select placeholder="选择部署方式">
@@ -1966,7 +1963,6 @@ const StressTestPage = () => {
                         name="dataset"
                         label="数据集"
                         rules={[{ required: true, message: '请选择数据集' }]}
-                        initialValue="random"
                         style={{ marginBottom: 16 }}
                       >
                         <Select 
@@ -2219,7 +2215,6 @@ const StressTestPage = () => {
                     name="image_width"
                     label="图像宽度"
                     rules={shouldEnableImageParams() ? [{ required: true, message: '请输入图像宽度' }] : []}
-                    initialValue={512}
                     style={{ marginBottom: 0 }}
                   >
                     <InputNumber
@@ -2237,7 +2232,6 @@ const StressTestPage = () => {
                     name="image_height"
                     label="图像高度"
                     rules={shouldEnableImageParams() ? [{ required: true, message: '请输入图像高度' }] : []}
-                    initialValue={512}
                     style={{ marginBottom: 0 }}
                   >
                     <InputNumber
@@ -2255,7 +2249,6 @@ const StressTestPage = () => {
                     name="image_num"
                     label="图像数量"
                     rules={shouldEnableImageParams() ? [{ required: true, message: '请输入图像数量' }] : []}
-                    initialValue={1}
                     style={{ marginBottom: 0 }}
                   >
                     <InputNumber
