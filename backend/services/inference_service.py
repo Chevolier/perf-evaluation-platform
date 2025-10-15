@@ -4,6 +4,7 @@ import json
 import os
 import queue
 import threading
+import time
 from typing import Dict, Any, List, Generator, Optional
 from datetime import datetime
 
@@ -29,6 +30,12 @@ class InferenceService:
         """Initialize inference service."""
         self.registry = model_registry
         self._aws_account_id: Optional[str] = None
+        delay_ms = os.environ.get('STREAMING_CHUNK_DELAY_MS')
+        try:
+            self._chunk_delay_seconds = max(float(delay_ms) / 1000.0, 0.0) if delay_ms is not None else 0.05
+        except (TypeError, ValueError):
+            self._chunk_delay_seconds = 0.05
+
     
     def multi_inference(self, data: Dict[str, Any]) -> Generator[str, None, None]:
         """Run inference on multiple models simultaneously.
@@ -80,6 +87,7 @@ class InferenceService:
                 result_queue.put({
                     'type': 'error',
                     'model': model,
+                    'label': model,
                     'status': 'error',
                     'message': f'Unknown model: {model}'
                 })
@@ -91,7 +99,9 @@ class InferenceService:
         # Wait for results and stream them back
         completed = 0
         total_models = len(threads)
-        
+
+        logger.info(f"Starting to wait for {total_models} models: {models}")
+
         while completed < total_models:
             try:
                 result = result_queue.get(timeout=1)
@@ -234,6 +244,11 @@ class InferenceService:
         if isinstance(event_json.get('usage'), dict):
             usage_candidates.append(event_json['usage'])
 
+        # Check metadata.usage for Nova models
+        metadata = event_json.get('metadata')
+        if isinstance(metadata, dict) and isinstance(metadata.get('usage'), dict):
+            usage_candidates.append(metadata['usage'])
+
         delta = event_json.get('delta')
         if isinstance(delta, dict) and isinstance(delta.get('usage'), dict):
             usage_candidates.append(delta['usage'])
@@ -268,6 +283,15 @@ class InferenceService:
         segments: List[str] = []
         event_type = event_json.get('type')
 
+        # Handle Nova's camelCase format: {"contentBlockDelta": {"delta": {"text": "..."}}}
+        content_block_delta = event_json.get('contentBlockDelta')
+        if isinstance(content_block_delta, dict):
+            delta = content_block_delta.get('delta')
+            if isinstance(delta, dict) and isinstance(delta.get('text'), str):
+                segments.append(delta['text'])
+                return segments  # Nova format found, return immediately
+
+        # Handle Claude's format
         delta = event_json.get('delta')
         if event_type == 'content_block_delta' and isinstance(delta, dict):
             if delta.get('type') == 'text_delta' and isinstance(delta.get('text'), str):
@@ -278,7 +302,9 @@ class InferenceService:
             elif isinstance(event_json.get('text'), str):
                 segments.append(event_json['text'])
         elif isinstance(event_json.get('text'), str) and event_type not in (
-            'message_start', 'message_delta', 'message_stop', 'content_block_start', 'content_block_stop'
+            'message_start', 'message_delta', 'message_stop', 'content_block_start', 'content_block_stop',
+            'messageStart', 'messageDelta', 'messageStop', 'contentBlockStart', 'contentBlockStop',
+            'contentBlockStop'
         ):
             segments.append(event_json['text'])
 
@@ -288,7 +314,7 @@ class InferenceService:
                 if isinstance(block, dict):
                     if block.get('type') == 'text' and isinstance(block.get('text'), str):
                         segments.append(block['text'])
-                    elif isinstance(block.get('text'), str) and event_type == 'output_text':
+                    elif isinstance(block.get('text'), str) and event_type in ('output_text', 'outputText'):
                         segments.append(block['text'])
 
         # Remove duplicates while preserving order
@@ -301,8 +327,258 @@ class InferenceService:
 
         return unique_segments
 
+    @staticmethod
+    def _normalize_usage_payload(usage_payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """Normalize usage payload keys to the standard input/output/total_tokens fields."""
+        if not isinstance(usage_payload, dict):
+            return {}
+
+        input_tokens = (usage_payload.get('input_tokens') or
+                        usage_payload.get('prompt_tokens') or
+                        usage_payload.get('inputTokens') or
+                        usage_payload.get('promptTokens'))
+
+        output_tokens = (usage_payload.get('output_tokens') or
+                         usage_payload.get('completion_tokens') or
+                         usage_payload.get('outputTokens') or
+                         usage_payload.get('completionTokens'))
+
+        total_tokens = (usage_payload.get('total_tokens') or
+                        usage_payload.get('totalTokens'))
+
+        if total_tokens is None and (input_tokens is not None or output_tokens is not None):
+            total_tokens = (input_tokens or 0) + (output_tokens or 0)
+
+        normalized: Dict[str, Any] = {}
+        if input_tokens is not None:
+            normalized['input_tokens'] = input_tokens
+        if output_tokens is not None:
+            normalized['output_tokens'] = output_tokens
+        if total_tokens is not None:
+            normalized['total_tokens'] = total_tokens
+
+        return normalized
+
+    @staticmethod
+    def _extract_text_from_openai_event(event_json: Dict[str, Any]) -> List[str]:
+        """Extract textual segments from an OpenAI-compatible streaming event."""
+        if not isinstance(event_json, dict):
+            return []
+
+        segments: List[str] = []
+
+        choices = event_json.get('choices')
+        if isinstance(choices, list):
+            for choice in choices:
+                if not isinstance(choice, dict):
+                    continue
+
+                delta = choice.get('delta')
+                if isinstance(delta, dict):
+                    content = delta.get('content')
+                    if isinstance(content, str) and content:
+                        segments.append(content)
+
+                    text_value = delta.get('text')
+                    if isinstance(text_value, str) and text_value:
+                        segments.append(text_value)
+
+                    reasoning_content = delta.get('reasoning_content')
+                    if isinstance(reasoning_content, str) and reasoning_content:
+                        # EMD Qwen models send reasoning_content as a string
+                        segments.append(reasoning_content)
+                    elif isinstance(reasoning_content, list):
+                        # Some models send it as a list of objects
+                        for entry in reasoning_content:
+                            if isinstance(entry, dict):
+                                text_piece = entry.get('text')
+                                if isinstance(text_piece, str) and text_piece:
+                                    segments.append(text_piece)
+
+                # Some providers stream using `text` at the top level of the choice
+                choice_text = choice.get('text')
+                if isinstance(choice_text, str) and choice_text:
+                    segments.append(choice_text)
+
+                message = choice.get('message')
+                if isinstance(message, dict):
+                    message_content = message.get('content')
+                    if isinstance(message_content, str) and message_content:
+                        segments.append(message_content)
+
+        # Fallback keys that occasionally appear
+        output_text = event_json.get('output_text')
+        if isinstance(output_text, str) and output_text:
+            segments.append(output_text)
+
+        content_field = event_json.get('content')
+        if isinstance(content_field, str) and content_field:
+            segments.append(content_field)
+
+        reasoning_field = event_json.get('reasoning_content')
+        if isinstance(reasoning_field, list):
+            for entry in reasoning_field:
+                if isinstance(entry, dict):
+                    text_piece = entry.get('text')
+                    if isinstance(text_piece, str) and text_piece:
+                        segments.append(text_piece)
+
+        # Deduplicate while preserving order
+        unique_segments: List[str] = []
+        seen = set()
+        for segment in segments:
+            if segment and segment not in seen:
+                unique_segments.append(segment)
+                seen.add(segment)
+
+        return unique_segments
+
+    def _delay_stream_chunk(self) -> None:
+        """Optional throttling between streaming chunk events for UI pacing."""
+        if getattr(self, "_chunk_delay_seconds", 0.0) > 0:
+            time.sleep(self._chunk_delay_seconds)
+
+    def _stream_sagemaker_endpoint(
+        self,
+        runtime_client: Any,
+        endpoint_name: str,
+        payload: Dict[str, Any],
+        model_key: str,
+        start_time: datetime,
+        result_queue: queue.Queue,
+        provider: str = 'emd',
+        label: Optional[str] = None
+    ) -> bool:
+        """Attempt to stream inference from a SageMaker endpoint. Returns True if streaming succeeded."""
+        display_label = label or model_key
+        stream_response = None
+        try:
+            stream_response = runtime_client.invoke_endpoint_with_response_stream(
+                EndpointName=endpoint_name,
+                ContentType='application/json',
+                Body=json.dumps(payload)
+            )
+
+            stream_body = stream_response.get('Body') if isinstance(stream_response, dict) else None
+
+            aggregated_chunks: List[str] = []
+            usage_info: Dict[str, Any] = {}
+            raw_events: List[Any] = []
+
+            if stream_body:
+                for event in stream_body:
+                    payload_bytes = None
+                    if isinstance(event, dict):
+                        payload_part = (
+                            event.get('PayloadPart')
+                            or event.get('payloadPart')
+                            or event.get('chunk')
+                            or event.get('Chunk')
+                        )
+                        if isinstance(payload_part, dict):
+                            payload_bytes = (
+                                payload_part.get('Bytes')
+                                or payload_part.get('bytes')
+                                or payload_part.get('value')
+                            )
+
+                    if not payload_bytes:
+                        continue
+
+                    decoded_payload = payload_bytes.decode('utf-8', errors='ignore')
+                    if not decoded_payload.strip():
+                        continue
+
+                    lines = decoded_payload.splitlines()
+                    if not lines:
+                        lines = [decoded_payload]
+
+                    for raw_line in lines:
+                        stripped = raw_line.strip()
+                        if not stripped or stripped.startswith(':'):
+                            continue
+
+                        payload_str = stripped[5:].strip() if stripped.startswith('data:') else stripped
+                        if not payload_str or payload_str == '[DONE]':
+                            continue
+
+                        try:
+                            event_json = json.loads(payload_str)
+                            raw_events.append(event_json)
+                        except json.JSONDecodeError:
+                            raw_events.append(payload_str)
+                            aggregated_chunks.append(payload_str)
+                            result_queue.put({
+                                'type': 'chunk',
+                                'model': model_key,
+                                'label': display_label,
+                                'status': 'streaming',
+                                'delta': payload_str,
+                                'provider': provider
+                            })
+                            self._delay_stream_chunk()
+                            continue
+
+                        text_segments = self._extract_text_from_openai_event(event_json)
+                        for segment in text_segments:
+                            aggregated_chunks.append(segment)
+                            result_queue.put({
+                                'type': 'chunk',
+                                'model': model_key,
+                                'label': display_label,
+                                'status': 'streaming',
+                                'delta': segment,
+                                'provider': provider
+                            })
+                            self._delay_stream_chunk()
+
+                        usage_info = self._merge_usage_dicts(
+                            usage_info,
+                            self._normalize_usage_payload(event_json.get('usage'))
+                        )
+
+            final_content = ''.join(aggregated_chunks)
+            if not final_content and raw_events:
+                last_event = raw_events[-1]
+                if isinstance(last_event, dict):
+                    final_content = json.dumps(last_event, ensure_ascii=False)
+                else:
+                    final_content = str(last_event)
+
+            result_queue.put({
+                'type': 'result',
+                'model': model_key,
+                'label': display_label,
+                'status': 'success',
+                'result': {
+                    'content': final_content,
+                    'usage': usage_info,
+                    'raw_response': raw_events
+                },
+                'duration_ms': (datetime.now() - start_time).total_seconds() * 1000
+            })
+            return True
+        except Exception as stream_error:
+            logger.warning(
+                "Streaming invocation failed for %s on endpoint %s: %s",
+                display_label,
+                endpoint_name,
+                stream_error,
+                exc_info=True
+            )
+            return False
+        finally:
+            if stream_response:
+                body = stream_response.get('Body') if isinstance(stream_response, dict) else None
+                if hasattr(body, 'close'):
+                    try:
+                        body.close()
+                    except Exception:  # pragma: no cover - best effort
+                        pass
+
     def _process_bedrock_model(self, model: str, data: Dict[str, Any], result_queue: queue.Queue) -> None:
         """Process inference for a Bedrock model."""
+        display_label = model
         try:
             start_time = datetime.now()
 
@@ -340,6 +616,8 @@ class InferenceService:
             model_id = model_info.get('model_id')
             if not model_id:
                 raise ValueError(f"No model_id found for model {model}")
+
+            display_label = model_info.get('name', model)
 
             # Prepare request body based on model type
             text_prompt = data.get('text', '') or data.get('message', '')
@@ -382,11 +660,19 @@ class InferenceService:
                     ]
                 }
             elif 'nova' in model.lower() or 'amazon' in model_id.lower():
+                # Nova requires array format for content, no 'type' field for text-only
+                if len(message_content) == 1 and message_content[0].get('type') == 'text':
+                    # Text-only: use simplified format without 'type' field
+                    nova_content = [{"text": message_content[0]['text']}]
+                else:
+                    # Multimodal: keep full format
+                    nova_content = message_content
+                
                 request_body = {
                     "messages": [
                         {
                             "role": "user",
-                            "content": message_content
+                            "content": nova_content
                         }
                     ],
                     "inferenceConfig": {
@@ -475,10 +761,12 @@ class InferenceService:
                                     result_queue.put({
                                         'type': 'chunk',
                                         'model': model,
+                                        'label': display_label,
                                         'status': 'streaming',
                                         'delta': piece,
                                         'provider': 'bedrock'
                                     })
+                                    self._delay_stream_chunk()
                                     continue
 
                                 text_segments = self._extract_text_from_bedrock_event(event_json)
@@ -487,10 +775,15 @@ class InferenceService:
                                     result_queue.put({
                                         'type': 'chunk',
                                         'model': model,
+                                        'label': display_label,
                                         'status': 'streaming',
                                         'delta': segment,
                                         'provider': 'bedrock'
                                     })
+                                    self._delay_stream_chunk()
+                                    # Add small delay for visible streaming
+                                    import time
+                                    time.sleep(0.05)
 
                                 usage_info = self._merge_usage_dicts(
                                     usage_info,
@@ -508,6 +801,7 @@ class InferenceService:
                     result_queue.put({
                         'type': 'result',
                         'model': model,
+                        'label': display_label,
                         'status': 'success',
                         'result': {
                             'content': final_content,
@@ -562,19 +856,25 @@ class InferenceService:
                         'output_tokens': response_body['usage'].get('output_tokens', 0),
                         'total_tokens': response_body['usage'].get('input_tokens', 0) + response_body['usage'].get('output_tokens', 0)
                     }
-            elif 'nova' in model.lower():
+            elif 'nova' in model.lower() or 'amazon' in model_id.lower():
+                # Nova response structure: output.message.content[] or metadata.usage
                 if 'output' in response_body and 'message' in response_body['output']:
                     content_entries = response_body['output']['message'].get('content', [])
                     if isinstance(content_entries, list):
                         text_values = [item.get('text') for item in content_entries if item.get('text')]
                         if text_values:
                             content = ''.join(text_values)
-                if 'usage' in response_body:
+                
+                # Nova usage can be in 'usage' or 'metadata.usage'
+                usage_data = response_body.get('usage') or (response_body.get('metadata', {}).get('usage'))
+                if usage_data:
                     usage = {
-                        'input_tokens': response_body['usage'].get('inputTokens', 0),
-                        'output_tokens': response_body['usage'].get('outputTokens', 0),
-                        'total_tokens': response_body['usage'].get('totalTokens', 0)
+                        'input_tokens': usage_data.get('inputTokens', 0),
+                        'output_tokens': usage_data.get('outputTokens', 0),
+                        'total_tokens': usage_data.get('totalTokens', 0)
                     }
+                    if not usage.get('total_tokens'):
+                        usage['total_tokens'] = usage.get('input_tokens', 0) + usage.get('output_tokens', 0)
             else:
                 content = response_body.get('output_text') or response_body.get('completion') or str(response_body)
                 if 'usage' in response_body:
@@ -590,6 +890,7 @@ class InferenceService:
             result = {
                 'type': 'result',
                 'model': model,
+                'label': display_label,
                 'status': 'success',
                 'result': {
                     'content': content,
@@ -605,16 +906,18 @@ class InferenceService:
             logger.error(f"Bedrock client error for model {model}: {client_error}")
             error_message = client_error.response['Error'].get('Message', str(client_error))
             result_queue.put({
-                'type': 'error',
-                'model': model,
-                'status': 'error',
-                'message': error_message
-            })
+                        'type': 'error',
+                        'model': model,
+                        'label': display_label,
+                        'status': 'error',
+                        'message': error_message
+                    })
         except Exception as e:
             logger.error(f"Error processing Bedrock model {model}: {e}")
             result_queue.put({
                 'type': 'error',
                 'model': model,
+                'label': display_label,
                 'status': 'error',
                 'message': str(e)
             })
@@ -627,6 +930,7 @@ class InferenceService:
             data: Request data
             result_queue: Queue to put results
         """
+        display_label = model
         try:
             import requests
             from .model_service import ModelService
@@ -638,6 +942,7 @@ class InferenceService:
             if deployment_status.get('status') != 'deployed':
                 result_queue.put({
                     'model': model,
+                    'label': display_label,
                     'status': 'not_deployed',
                     'message': f'Model {model} is not deployed: {deployment_status.get("message", "Unknown status")}'
                 })
@@ -649,6 +954,7 @@ class InferenceService:
             model_info = self.registry.get_model_info(model)
             if not model_info:
                 raise ValueError(f"Model {model} not found in registry")
+            display_label = model_info.get('name', model)
             
             # Get model path for EMD lookup
             model_path = model_info.get('model_path', model)
@@ -672,14 +978,19 @@ class InferenceService:
                     )
 
             if endpoint_url:
-                # Include deployment tag in model name for EMD endpoints
+                # Include deployment tag in model name for EMD endpoints (but not for external deployments)
                 deployment_tag = deployment_status.get('tag')
-                full_model_name = f"{model_path}/{deployment_tag}" if deployment_tag else model_path
+                # Don't append 'external' tag to model name - it's from external registration
+                if deployment_tag and deployment_tag != 'external':
+                    full_model_name = f"{model_path}/{deployment_tag}"
+                else:
+                    full_model_name = model_path
                 
                 manual_config = {
                     'api_url': endpoint_url,
                     'model_name': full_model_name,
-                    'label': model,
+                    'label': display_label,
+                    'model_key': model,
                     'allow_fallback': True
                 }
                 try:
@@ -763,14 +1074,30 @@ class InferenceService:
                 
                 # Use boto3 SageMaker Runtime client directly
                 runtime_client = boto3.client('sagemaker-runtime', region_name='us-east-1')
-                
-                # Call EMD endpoint via SageMaker Runtime
+
+                if model_info.get('supports_streaming', True):
+                    stream_payload = dict(emd_payload)
+                    stream_payload['stream'] = True
+
+                    if self._stream_sagemaker_endpoint(
+                        runtime_client,
+                        endpoint_name,
+                        stream_payload,
+                        model,
+                        start_time,
+                        result_queue,
+                        provider='emd',
+                        label=display_label
+                    ):
+                        return
+
+                # Call EMD endpoint via SageMaker Runtime (non-streaming fallback)
                 response = runtime_client.invoke_endpoint(
                     EndpointName=endpoint_name,
                     ContentType='application/json',
                     Body=json.dumps(emd_payload)
                 )
-                
+
                 # Parse response
                 response_body = json.loads(response['Body'].read().decode('utf-8'))
                 logger.info(f"EMD response for {model}: {response_body}")
@@ -808,7 +1135,22 @@ class InferenceService:
                     
                     # Use boto3 SageMaker Runtime client with actual endpoint name
                     runtime_client = boto3.client('sagemaker-runtime', region_name='us-east-1')
-                    
+
+                    if model_info.get('supports_streaming', True):
+                        stream_payload = dict(emd_payload)
+                        stream_payload['stream'] = True
+                        if self._stream_sagemaker_endpoint(
+                            runtime_client,
+                            actual_endpoint_name,
+                            stream_payload,
+                            model,
+                            start_time,
+                            result_queue,
+                            provider='emd',
+                            label=display_label
+                        ):
+                            return
+
                     response = runtime_client.invoke_endpoint(
                         EndpointName=actual_endpoint_name,
                         ContentType='application/json',
@@ -882,6 +1224,7 @@ class InferenceService:
             result = {
                 'type': 'result',
                 'model': model,
+                'label': display_label,
                 'status': 'success',
                 'result': {
                     'content': content,
@@ -899,6 +1242,7 @@ class InferenceService:
             result_queue.put({
                 'type': 'error',
                 'model': model,
+                'label': display_label,
                 'status': 'error',
                 'message': str(e)
             })
@@ -906,6 +1250,7 @@ class InferenceService:
     def _process_external_model(self, model: str, data: Dict[str, Any], result_queue: queue.Queue) -> None:
         """Process inference for an externally registered deployment."""
 
+        display_label = model
         try:
             model_info = self.registry.get_model_info(model, "external")
             if not model_info:
@@ -916,11 +1261,13 @@ class InferenceService:
                 raise ValueError(f"External deployment {model} missing endpoint URL")
 
             model_name = model_info.get('model_name') or model_info.get('name') or model
+            display_label = model_info.get('name') or model_name or model
 
             manual_config = {
                 'api_url': endpoint_url,
                 'model_name': model_name,
-                'label': model_info.get('name') or model,
+                'label': display_label,
+                'model_key': model,
                 'allow_fallback': False
             }
 
@@ -931,6 +1278,7 @@ class InferenceService:
             result_queue.put({
                 'type': 'error',
                 'model': model,
+                'label': display_label,
                 'status': 'error',
                 'message': str(exc)
             })
@@ -957,6 +1305,14 @@ class InferenceService:
 
             if not api_url or not model_name:
                 raise ValueError("Both api_url and model_name are required in manual_config")
+
+            model_key = (
+                manual_config.get('model_key')
+                or manual_config.get('key')
+                or manual_config.get('label')
+                or manual_config.get('model')
+                or model_name
+            )
 
             # Prepare request data
             text_prompt = data.get('text', '')
@@ -1048,9 +1404,17 @@ class InferenceService:
             streamed = False
             raw_body_lines = []
 
-            for line in response.iter_lines(decode_unicode=True):
-                if line is None:
+            # Use explicit UTF-8 decoding to prevent corruption
+            for line_bytes in response.iter_lines(decode_unicode=False):
+                if line_bytes is None:
                     continue
+                # Explicitly decode as UTF-8
+                try:
+                    line = line_bytes.decode('utf-8')
+                except UnicodeDecodeError:
+                    logger.warning(f"Failed to decode line as UTF-8: {line_bytes[:100]}")
+                    continue
+
                 stripped = line.strip()
                 if not stripped:
                     continue
@@ -1073,49 +1437,35 @@ class InferenceService:
                         aggregated_chunks.append(payload_str)
                         result_queue.put({
                             'type': 'chunk',
-                            'model': label,
+                            'model': model_key,
+                            'label': label,
                             'delta': payload_str,
                             'status': 'streaming',
                             'api_url': api_url
                         })
+                        self._delay_stream_chunk()
                         continue
 
-                    choices = event_json.get('choices', [])
-                    for choice in choices:
-                        delta = choice.get('delta', {}) if isinstance(choice, dict) else {}
-                        delta_text = delta.get('content') if isinstance(delta, dict) else None
-                        if delta_text:
-                            aggregated_chunks.append(delta_text)
-                            result_queue.put({
-                                'type': 'chunk',
-                                'model': label,
-                                'delta': delta_text,
-                                'status': 'streaming',
-                                'api_url': api_url
-                            })
+                    text_segments = self._extract_text_from_openai_event(event_json)
+                    for segment in text_segments:
+                        aggregated_chunks.append(segment)
+                        result_queue.put({
+                            'type': 'chunk',
+                            'model': model_key,
+                            'label': label,
+                            'delta': segment,
+                            'status': 'streaming',
+                            'api_url': api_url
+                        })
+                        self._delay_stream_chunk()
+                        # Add small delay for visible streaming
+                        import time
+                        time.sleep(0.05)
 
-                    if 'output_text' in event_json:
-                        output_text = event_json.get('output_text')
-                        if isinstance(output_text, str) and output_text:
-                            aggregated_chunks.append(output_text)
-                            result_queue.put({
-                                'type': 'chunk',
-                                'model': label,
-                                'delta': output_text,
-                                'status': 'streaming',
-                                'api_url': api_url
-                            })
-
-                    if 'usage' in event_json and isinstance(event_json['usage'], dict):
-                        usage_obj = event_json['usage']
-                        prompt_tokens = usage_obj.get('prompt_tokens', usage_obj.get('input_tokens', 0))
-                        completion_tokens = usage_obj.get('completion_tokens', usage_obj.get('output_tokens', 0))
-                        total_tokens = usage_obj.get('total_tokens', prompt_tokens + completion_tokens)
-                        usage = {
-                            'input_tokens': prompt_tokens,
-                            'output_tokens': completion_tokens,
-                            'total_tokens': total_tokens
-                        }
+                    usage = self._merge_usage_dicts(
+                        usage,
+                        self._normalize_usage_payload(event_json.get('usage'))
+                    )
 
                 elif attempted_stream:
                     # Some APIs stream plain text without SSE framing
@@ -1123,7 +1473,8 @@ class InferenceService:
                     aggregated_chunks.append(stripped)
                     result_queue.put({
                         'type': 'chunk',
-                        'model': label,
+                        'model': model_key,
+                        'label': label,
                         'delta': stripped,
                         'status': 'streaming',
                         'api_url': api_url
@@ -1137,7 +1488,8 @@ class InferenceService:
 
                 result_queue.put({
                     'type': 'result',
-                    'model': label,
+                    'model': model_key,
+                    'label': label,
                     'status': 'success',
                     'result': {
                         'content': combined_content or raw_body_text,
@@ -1204,7 +1556,8 @@ class InferenceService:
 
             result_queue.put({
                 'type': 'result',
-                'model': label,
+                'model': model_key,
+                'label': label,
                 'status': 'success',
                 'result': {
                     'content': content,
@@ -1221,7 +1574,8 @@ class InferenceService:
                 raise
             result_queue.put({
                 'type': 'error',
-                'model': label,
+                'model': model_key,
+                'label': label,
                 'status': 'error',
                 'message': str(e),
                 'api_url': manual_config.get('api_url', 'Unknown')

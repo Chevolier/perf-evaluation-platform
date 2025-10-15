@@ -1,5 +1,5 @@
 import React from 'react';
-import { Card, Typography, Tag, Space, Divider, Spin } from 'antd';
+import { Card, Typography, Tag, Space, Divider, Spin, Alert } from 'antd';
 import { 
   CheckCircleOutlined, 
   ClockCircleOutlined, 
@@ -233,7 +233,14 @@ const PlaygroundResultsDisplay = ({ results, loading }) => {
 
   return (
     <div style={{ padding: '8px 0' }}>
-      {Object.entries(results).map(([modelName, result]) => (
+      {Object.entries(results).map(([modelName, result]) => {
+        const displayName = result.label || result.displayName || modelName;
+        const showTechnicalName = displayName !== modelName;
+        const displayContent = (result?.result && (result.result.content ?? (typeof result.result === "string" ? result.result : null))) ?? result?.partialContent ?? null;
+        const isStreaming = result.status === "streaming";
+        const showContent = displayContent !== null && displayContent !== undefined && displayContent !== "";
+
+        return (
         <Card
           key={modelName}
           size="small"
@@ -244,10 +251,17 @@ const PlaygroundResultsDisplay = ({ results, loading }) => {
                    result.status === 'streaming' ? '1px solid #1890ff' : '1px solid #d9d9d9'
           }}
           title={
-            <Space>
-              <RobotOutlined />
-              <Text strong>{modelName}</Text>
-              {getStatusTag(result.status)}
+            <Space direction="vertical" size={0} style={{ gap: 0 }}>
+              <Space>
+                <RobotOutlined />
+                <Text strong>{displayName}</Text>
+                {getStatusTag(result.status)}
+              </Space>
+              {showTechnicalName && (
+                <Text type="secondary" style={{ fontSize: '11px' }}>
+                  {modelName}
+                </Text>
+              )}
             </Space>
           }
           extra={
@@ -261,75 +275,63 @@ const PlaygroundResultsDisplay = ({ results, loading }) => {
             </Space>
           }
         >
-          {result.status === 'streaming' ? (
+          {result.status === 'error' ? (
+            <Alert
+              type="error"
+              message="推理失败"
+              description={result.message || '推理请求发生错误'}
+              showIcon
+            />
+          ) : (
             <div>
-              <div
-                style={{
-                  marginBottom: 12,
-                  maxHeight: '400px',
-                  overflowY: 'auto',
-                  backgroundColor: '#f0f9ff',
-                  padding: '12px',
-                  borderRadius: '6px',
-                  border: '1px solid #bae7ff'
-                }}
-              >
-                {result.partialContent && result.partialContent.length > 0 ? (
-                  <div>
-                    {renderFormattedContent(result.partialContent)}
-                    {/* Visual streaming indicator */}
-                    <span style={{
-                      display: 'inline-block',
-                      width: '8px',
-                      height: '16px',
-                      backgroundColor: '#1890ff',
-                      animation: 'blink 1s infinite',
-                      marginLeft: '2px',
-                      verticalAlign: 'middle'
-                    }}>
-                    </span>
-                    <style dangerouslySetInnerHTML={{
-                      __html: `
-                        @keyframes blink {
-                          0%, 50% { opacity: 1; }
-                          51%, 100% { opacity: 0; }
-                        }
-                      `
-                    }} />
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <Spin size="small" />
-                    <Text type="secondary" style={{ fontSize: '12px' }}>
-                      等待首个响应...
-                    </Text>
-                  </div>
-                )}
-              </div>
-              <Space size="small" align="center">
-                <Spin size="small" />
-                <Text type="secondary" style={{ fontSize: '12px' }}>
-                  模型正在生成...
-                </Text>
-              </Space>
-            </div>
-          ) : result.status === 'success' && result.result ? (
-            <div>
-              <div
-                style={{
-                  marginBottom: 12,
-                  maxHeight: '400px',
-                  overflowY: 'auto',
-                  backgroundColor: '#fafafa',
-                  padding: '12px',
-                  borderRadius: '6px',
-                  border: '1px solid #f0f0f0'
-                }}
-              >
-                {renderFormattedContent(formatResponse(result.result))}
-              </div>
-              
-              {result.result.usage && (
+              {showContent && (
+                <div
+                  style={{
+                    marginBottom: 12,
+                    maxHeight: '400px',
+                    overflowY: 'auto',
+                    backgroundColor: isStreaming ? '#f0f9ff' : '#fafafa',
+                    padding: '12px',
+                    borderRadius: '6px',
+                    border: isStreaming ? '1px solid #bae7ff' : '1px solid #f0f0f0'
+                  }}
+                >
+                  {renderFormattedContent(displayContent)}
+                  {isStreaming && (
+                    <span
+                      style={{
+                        display: 'inline-block',
+                        width: '8px',
+                        height: '16px',
+                        backgroundColor: '#1890ff',
+                        animation: 'blink 1s infinite',
+                        marginLeft: '2px',
+                        verticalAlign: 'middle'
+                      }}
+                    />
+                  )}
+                </div>
+              )}
+
+              {!showContent && isStreaming && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: 12 }}>
+                  <Spin size="small" />
+                  <Text type="secondary" style={{ fontSize: '12px' }}>
+                    等待首个响应...
+                  </Text>
+                </div>
+              )}
+
+              {isStreaming && (
+                <Space size="small" align="center">
+                  <Spin size="small" />
+                  <Text type="secondary" style={{ fontSize: '12px' }}>
+                    模型正在生成...
+                  </Text>
+                </Space>
+              )}
+
+              {result.status === 'success' && result.result?.usage && (
                 <div>
                   <Divider style={{ margin: '8px 0' }} />
                   <Space size="large">
@@ -345,63 +347,19 @@ const PlaygroundResultsDisplay = ({ results, loading }) => {
                   </Space>
                 </div>
               )}
-            </div>
-          ) : result.status === 'error' ? (
-            <div>
-              <Text type="danger" style={{ display: 'block', marginBottom: '8px' }}>
-                推理失败
-              </Text>
-              <div style={{
-                backgroundColor: '#fff2f0',
-                border: '1px solid #ffccc7',
-                borderRadius: '6px',
-                padding: '12px',
-                maxHeight: '200px',
-                overflowY: 'auto',
-                fontSize: '12px',
-                fontFamily: 'monospace'
-              }}>
-                {(() => {
-                  const errorMsg = result.error || result.message || '推理过程中发生错误';
-                  // 尝试美化JSON错误信息
-                  try {
-                    const parsed = JSON.parse(errorMsg);
-                    return JSON.stringify(parsed, null, 2);
-                  } catch {
-                    return errorMsg;
-                  }
-                })()}
-              </div>
-              {result.error && result.error.includes('500') && (
-                <div style={{ marginTop: '8px', padding: '8px', backgroundColor: '#fffbe6', border: '1px solid #ffe58f', borderRadius: '4px' }}>
-                  <Text type="secondary" style={{ fontSize: '12px', display: 'block', marginBottom: '4px' }}>
-                    <strong>💡 500错误常见原因和解决方案：</strong>
+
+              {!isStreaming && result.status !== 'success' && !showContent && (
+                <div style={{ textAlign: 'center', padding: '20px' }}>
+                  <Spin />
+                  <Text type="secondary" style={{ display: 'block', marginTop: '8px' }}>
+                    处理中...
                   </Text>
-                  <ul style={{ margin: '4px 0', paddingLeft: '16px', fontSize: '11px', color: '#666' }}>
-                    <li><strong>模型资源不足：</strong>端点实例可能内存不足或过载，尝试稍后重试</li>
-                    <li><strong>输入过大：</strong>减少图片数量、降低图片分辨率或压缩文件大小</li>
-                    <li><strong>推理超时：</strong>多媒体处理时间过长，建议使用更小的文件</li>
-                    <li><strong>模型故障：</strong>如果持续失败，可能是模型端点需要重新部署</li>
-                  </ul>
                 </div>
               )}
             </div>
-          ) : result.status === 'not_deployed' ? (
-            <div>
-              <Text type="warning">
-                {result.message || '模型尚未部署，请稍后再试'}
-              </Text>
-            </div>
-          ) : (
-            <div style={{ textAlign: 'center', padding: '20px' }}>
-              <Spin />
-              <Text type="secondary" style={{ display: 'block', marginTop: '8px' }}>
-                处理中...
-              </Text>
-            </div>
           )}
         </Card>
-      ))}
+      )})}
     </div>
   );
 };

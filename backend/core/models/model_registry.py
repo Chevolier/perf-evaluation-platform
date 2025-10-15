@@ -215,49 +215,85 @@ class ModelRegistry:
     
     def get_model_info(self, model_key: str, model_type: str = None) -> Dict[str, Any]:
         """Get information about a specific model.
-        
+
         Args:
-            model_key: Key identifying the model
+            model_key: Key identifying the model (or model_id/model_path)
             model_type: Type of model ('emd' or 'bedrock'). If None, searches both.
-            
+
         Returns:
             Model information dictionary or empty dict if not found
         """
+        # Resolve the key first in case it's a model_id or model_path
+        resolved_key = self.resolve_model_key(model_key)
+
         if model_type == "emd" or model_type is None:
-            if model_key in self._emd_models:
-                return self._emd_models[model_key].copy()
-        
+            if resolved_key in self._emd_models:
+                return self._emd_models[resolved_key].copy()
+
         if model_type == "bedrock" or model_type is None:
-            if model_key in self._bedrock_models:
-                return self._bedrock_models[model_key].copy()
+            if resolved_key in self._bedrock_models:
+                return self._bedrock_models[resolved_key].copy()
 
         if model_type == "external" or model_type is None:
-            if model_key in self._external_models:
-                return self._external_models[model_key].copy()
+            if resolved_key in self._external_models:
+                return self._external_models[resolved_key].copy()
 
         return {}
     
     def is_emd_model(self, model_key: str) -> bool:
         """Check if a model is an EMD model.
-        
+
         Args:
             model_key: Model key to check
-            
+
         Returns:
             True if model is an EMD model
         """
-        return model_key in self._emd_models
+        # Resolve the key first in case it's a model_path
+        resolved_key = self.resolve_model_key(model_key)
+        return resolved_key in self._emd_models
     
+    def resolve_model_key(self, model_identifier: str) -> str:
+        """Resolve a model identifier to its registry key.
+
+        Handles both model keys (e.g., 'claude35-sonnet-v2') and model_ids
+        (e.g., 'us.anthropic.claude-3-5-sonnet-20241022-v2:0').
+
+        Args:
+            model_identifier: Model key or model_id
+
+        Returns:
+            Resolved model key, or original identifier if not found
+        """
+        # Check if it's already a valid key
+        if model_identifier in self._bedrock_models or model_identifier in self._emd_models or model_identifier in self._external_models:
+            return model_identifier
+
+        # Try to find by model_id in Bedrock models
+        for key, info in self._bedrock_models.items():
+            if info.get('model_id') == model_identifier:
+                return key
+
+        # Try to find by model_path in EMD models
+        for key, info in self._emd_models.items():
+            if info.get('model_path') == model_identifier:
+                return key
+
+        # Not found, return original
+        return model_identifier
+
     def is_bedrock_model(self, model_key: str) -> bool:
         """Check if a model is a Bedrock model.
-        
+
         Args:
             model_key: Model key to check
-        
+
         Returns:
             True if model is a Bedrock model
         """
-        return model_key in self._bedrock_models
+        # Resolve the key first in case it's a model_id
+        resolved_key = self.resolve_model_key(model_key)
+        return resolved_key in self._bedrock_models
 
     def is_external_model(self, model_key: str) -> bool:
         """Check if a model is an externally registered deployment."""

@@ -260,22 +260,57 @@ class ModelService:
             emd_models_with_status[key] = emd_model_info
 
         external_models_with_status = {}
+        hyperpod_models_with_status = {}
         for key, model_info in all_models.get("external", {}).items():
+            deployment_method = (model_info.get("deployment_method") or "").lower()
+            model_name = model_info.get("model_name", "").lower()
+
+            # Skip EMD endpoints ONLY if the model is already in the EMD registry
+            # This allows custom EMD deployments to appear
+            if "emd" in deployment_method:
+                # Check if this model exists in the EMD registry
+                is_in_emd_registry = False
+                for emd_key, emd_info in emd_models_with_status.items():
+                    emd_model_path = emd_info.get("model_path", "").lower()
+                    if model_name and (model_name == emd_key.lower() or model_name == emd_model_path):
+                        # This EMD deployment matches a model in the EMD registry
+                        # Update the registry model with the deployment info
+                        emd_models_with_status[emd_key]["deployment_status"] = {
+                            "status": "deployed",
+                            "message": "Endpoint available via external deployment",
+                            "endpoint": model_info.get("endpoint"),
+                            "external_key": key
+                        }
+                        emd_models_with_status[emd_key]["endpoint"] = model_info.get("endpoint")
+                        is_in_emd_registry = True
+                        break
+
+                # Skip this external entry if it's already in the EMD registry
+                if is_in_emd_registry:
+                    continue
+
             external_info = model_info.copy()
             external_info.setdefault("deployment_status", {
                 "status": "deployed",
                 "message": "Endpoint available",
                 "endpoint": model_info.get("endpoint")
             })
-            external_models_with_status[key] = external_info
-        
+
+            target_map = hyperpod_models_with_status if "hyperpod" in deployment_method else external_models_with_status
+            target_map[key] = external_info
+
+        models_payload = {
+            "bedrock": bedrock_models_with_status,
+            "emd": emd_models_with_status,
+            "external": external_models_with_status
+        }
+
+        if hyperpod_models_with_status:
+            models_payload["hyperpod"] = hyperpod_models_with_status
+
         return {
             "status": "success",
-            "models": {
-                "bedrock": bedrock_models_with_status,
-                "emd": emd_models_with_status,
-                "external": external_models_with_status
-            }
+            "models": models_payload
         }
 
     def register_external_endpoint(
@@ -333,6 +368,17 @@ class ModelService:
         if not self.registry.is_emd_model(model_key):
             return {"status": "unknown", "message": "Model not found"}
         
+        # Check if there's an external model registered with this name
+        for ext_key, ext_info in self._external_models.items():
+            if ext_info.get('name') == model_key:
+                logger.info(f"EMD model {model_key} found as external deployment: {ext_key}")
+                return {
+                    "status": "deployed",
+                    "message": "Model deployed via external registration",
+                    "tag": "external",
+                    "endpoint": ext_info.get('endpoint')
+                }
+        
         # Try to get real EMD status if SDK is available
         if EMD_AVAILABLE:
             try:
@@ -375,6 +421,75 @@ class ModelService:
             "tag": None
         }
     
+    def _get_emd_models_from_sagemaker(self) -> Dict[str, Any]:
+        """Fallback to detect EMD models directly from SageMaker when SDK is unavailable.
+        
+        Returns:
+            Dictionary with deployed, inprogress, and failed models
+        """
+        try:
+            import boto3
+            sm_client = boto3.client('sagemaker', region_name='us-east-1')
+            
+            deployed = {}
+            inprogress = {}
+            
+            # List SageMaker endpoints matching EMD pattern
+            response = sm_client.list_endpoints(
+                MaxResults=100,
+                NameContains='EMD-Model-'
+            )
+            
+            # Create reverse mapping from model name to model key
+            reverse_mapping = {}
+            for model_key, model_info in self.registry.get_emd_models().items():
+                # EMD endpoints are named: EMD-Model-{model_name}-endpoint or EMD-Model-{model_name}-{tag}-endpoint
+                model_path = model_info.get("model_path", model_key)
+                model_name = model_path.replace("/", "-").lower()
+                reverse_mapping[model_name] = model_key
+            
+            logger.info(f"SageMaker fallback: Found {len(response.get('Endpoints', []))} EMD endpoints")
+            
+            for endpoint in response.get('Endpoints', []):
+                endpoint_name = endpoint['EndpointName']
+                status = endpoint['EndpointStatus']
+                
+                # Try to extract model name from endpoint name
+                # Format: EMD-Model-{model_name}-endpoint or EMD-Model-{model_name}-{tag}-endpoint
+                if endpoint_name.startswith('EMD-Model-'):
+                    parts = endpoint_name.replace('EMD-Model-', '').replace('-endpoint', '').split('-')
+                    # Try different combinations to match model key
+                    for model_name_candidate, model_key in reverse_mapping.items():
+                        if model_name_candidate in endpoint_name.lower():
+                            if status == 'InService':
+                                deployed[model_key] = {
+                                    "tag": "sagemaker",
+                                    "model_id": endpoint_name,
+                                    "status": "InService",
+                                    "endpoint": endpoint_name
+                                }
+                                logger.info(f"SageMaker fallback: Matched {model_key} to endpoint {endpoint_name}")
+                            elif status in ['Creating', 'Updating']:
+                                inprogress[model_key] = {
+                                    "tag": "sagemaker",
+                                    "model_id": endpoint_name,
+                                    "status": status
+                                }
+                            break
+            
+            result = {"deployed": deployed, "inprogress": inprogress, "failed": {}}
+            
+            # Update cache using the correct cache structure
+            self._emd_status_cache['data'] = result
+            self._emd_status_cache['timestamp'] = time.time()
+            
+            logger.info(f"SageMaker fallback: deployed={list(deployed.keys())}, inprogress={list(inprogress.keys())}")
+            return result
+            
+        except Exception as e:
+            logger.warning(f"SageMaker fallback failed: {e}")
+            return {"deployed": {}, "inprogress": {}, "failed": {}}
+    
     def _retry_with_exponential_backoff(self, func, max_retries=3, base_delay=1):
         """Retry function with exponential backoff for throttling errors."""
         for attempt in range(max_retries + 1):
@@ -416,6 +531,11 @@ class ModelService:
         cached_data = self._get_cached_emd_data()
         if cached_data:
             return cached_data
+        
+        # If EMD SDK is not available, try direct SageMaker query as fallback
+        if not EMD_AVAILABLE:
+            logger.info("EMD SDK not available, using SageMaker fallback")
+            return self._get_emd_models_from_sagemaker()
         
         def _get_status():
             status = get_model_status()
@@ -795,7 +915,20 @@ class ModelService:
                             "message": "Model not deployed",
                             "tag": None
                         }
-                    
+
+                    if status_info.get("status") in {None, "not_deployed", "unknown"} and self._external_models:
+                        for ext_key, ext_info in self._external_models.items():
+                            ext_name = ext_info.get('name') or ext_info.get('model_name')
+                            if ext_name == model_key:
+                                status_info = {
+                                    "status": "deployed",
+                                    "message": "Endpoint available via external deployment",
+                                    "tag": ext_info.get('metadata', {}).get('deployment_tag') or ext_info.get('deployment_id'),
+                                    "endpoint": ext_info.get('endpoint'),
+                                    "external_key": ext_key
+                                }
+                                break
+
                     # Map our status format to what frontend expects
                     model_status[model_key] = {
                         "status": self._map_status_for_frontend(status_info.get("status")),
@@ -821,7 +954,7 @@ class ModelService:
                         "message": "Model not found"
                     }
             return model_status
-        
+
         try:
             # Use retry wrapper for status checks that might get throttled
             model_status = self._retry_with_exponential_backoff(_check_status, max_retries=2, base_delay=0.3)

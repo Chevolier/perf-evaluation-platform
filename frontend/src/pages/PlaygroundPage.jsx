@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { flushSync } from 'react-dom';
 import { 
   Row, 
   Col, 
@@ -396,12 +397,15 @@ const PlaygroundPage = ({
     
     // Initialize results immediately with streaming status to avoid long loading screen
     const initialResults = {};
-    const modelsToProcess = inputMode === 'dropdown' ? selectedModels : [manualConfig.model_name];
+    const modelsToProcess = inputMode === 'dropdown'
+      ? selectedModels
+      : [manualConfig.model_name || manualConfig.model || manualConfig.api_url || 'Manual API'];
     modelsToProcess.forEach(model => {
       initialResults[model] = {
         status: 'streaming',
         partialContent: '',
-        model: model
+        model,
+        label: model
       };
     });
     setInferenceResults(initialResults);
@@ -429,7 +433,7 @@ const PlaygroundPage = ({
       console.log('🚀 Starting inference request:', requestData);
       
       // 使用流式接口
-      const response = await fetch('http://localhost:5000/api/multi-inference', {
+      const response = await fetch('/api/multi-inference', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -445,7 +449,7 @@ const PlaygroundPage = ({
       }
 
       const reader = response.body.getReader();
-      const decoder = new TextDecoder();
+      const decoder = new TextDecoder('utf-8');  // Explicitly specify UTF-8
       let buffer = '';
 
       console.log('🎯 Starting to read streaming response...');
@@ -457,8 +461,9 @@ const PlaygroundPage = ({
           break;
         }
 
+        // CRITICAL: Use { stream: true } to handle multi-byte UTF-8 characters across chunks
         const chunk = decoder.decode(value, { stream: true });
-        console.log('📦 Raw chunk received:', chunk.length, 'bytes');
+        console.log('📦 Raw chunk received:', chunk.length, 'chars');
         
         buffer += chunk;
         const lines = buffer.split('\n');
@@ -487,37 +492,50 @@ const PlaygroundPage = ({
                   break;
                 } else if (data.type === 'heartbeat') {
                   console.log('💓 Heartbeat received');
-                } else if (data.model) {
+                } else {
+                  const modelKey = data.model_key || data.model;
+                  if (!modelKey) {
+                    console.warn('⚠️ Streaming payload missing model key:', data);
+                    continue;
+                  }
+
+                  const displayName = data.label || data.display_name || data.model || modelKey;
+
                   if (data.type === 'chunk') {
-                    console.log('✍️ Streaming chunk for model:', data.model, data.delta);
-                    // Force immediate state update for real-time streaming
-                    setInferenceResults(prev => {
-                      const previousEntry = prev[data.model] || {};
-                      const previousContent = previousEntry.partialContent || '';
-                      const deltaText = data.delta || '';
-                      const newContent = `${previousContent}${deltaText}`;
+                    console.log('✍️ Streaming chunk for model:', displayName, data.delta);
+                    // Force immediate state update for real-time streaming - use flushSync to prevent React 18 batching
+                    flushSync(() => {
+                      setInferenceResults(prev => {
+                        const previousEntry = prev[modelKey] || {};
+                        const previousContent = previousEntry.partialContent || '';
+                        const deltaText = data.delta || '';
+                        const newContent = `${previousContent}${deltaText}`;
 
-                      console.log(`🔄 Updating ${data.model}: "${deltaText}" -> Total: "${newContent.substring(0, 50)}..."`);
+                        console.log(`🔄 Updating ${displayName}: "${deltaText}" -> Total: "${newContent.substring(0, 50)}..."`);
 
-                      const updatedEntry = {
-                        ...previousEntry,
-                        status: data.status || 'streaming',
-                        partialContent: newContent,
-                        lastChunk: data,
-                        model: data.model,
-                        api_url: data.api_url || previousEntry.api_url,
-                        lastUpdated: Date.now() // Force re-render
-                      };
+                        const updatedEntry = {
+                          ...previousEntry,
+                          status: data.status || 'streaming',
+                          partialContent: newContent,
+                          lastChunk: data,
+                          model: modelKey,
+                          label: displayName,
+                          displayName,
+                          api_url: data.api_url || previousEntry.api_url,
+                          provider: data.provider || previousEntry.provider,
+                          lastUpdated: Date.now() // Force re-render
+                        };
 
-                      return {
-                        ...prev,
-                        [data.model]: updatedEntry
-                      };
+                        return {
+                          ...prev,
+                          [modelKey]: updatedEntry
+                        };
+                      });
                     });
                   } else if (data.type === 'result') {
-                    console.log('📚 Final result for model:', data.model);
+                    console.log('📚 Final result for model:', displayName);
                     setInferenceResults(prev => {
-                      const previousEntry = prev[data.model] || {};
+                      const previousEntry = prev[modelKey] || {};
                       const partialContent = previousEntry.partialContent || '';
                       let resultPayload = data.result ? { ...data.result } : undefined;
 
@@ -531,9 +549,12 @@ const PlaygroundPage = ({
 
                       return {
                         ...prev,
-                        [data.model]: {
+                        [modelKey]: {
                           ...previousEntry,
                           ...data,
+                          model: modelKey,
+                          label: displayName,
+                          displayName,
                           status: data.status || 'success',
                           result: resultPayload,
                           partialContent: undefined,
@@ -542,21 +563,28 @@ const PlaygroundPage = ({
                       };
                     });
                   } else if (data.type === 'error') {
-                    console.log('❗ Error result for model:', data.model, data.message);
+                    console.log('❗ Error result for model:', displayName, data.message);
                     setInferenceResults(prev => ({
                       ...prev,
-                      [data.model]: {
-                        ...(prev[data.model] || {}),
+                      [modelKey]: {
+                        ...(prev[modelKey] || {}),
                         ...data,
+                        model: modelKey,
+                        label: displayName,
                         status: 'error',
                         partialContent: undefined
                       }
                     }));
                   } else {
-                    console.log('📊 Updating results for model:', data.model);
+                    console.log('📊 Updating results for model:', displayName);
                     setInferenceResults(prev => ({
                       ...prev,
-                      [data.model]: data
+                      [modelKey]: {
+                        ...(prev[modelKey] || {}),
+                        ...data,
+                        model: modelKey,
+                        label: displayName
+                      }
                     }));
                   }
                 }

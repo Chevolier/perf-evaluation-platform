@@ -4,6 +4,7 @@ import {
   RobotOutlined, 
   CloudOutlined, 
   ThunderboltOutlined,
+  DeploymentUnitOutlined,
   CheckCircleOutlined
 } from '@ant-design/icons';
 
@@ -33,6 +34,12 @@ const PlaygroundModelSelector = ({
       color: '#52c41a',
       alwaysAvailable: false
     },
+    hyperpod: {
+      title: 'HyperPod 集群模型',
+      icon: <DeploymentUnitOutlined />,
+      color: '#722ed1',
+      alwaysAvailable: false
+    },
     external: {
       title: '外部部署',
       icon: <RobotOutlined />,
@@ -53,7 +60,17 @@ const PlaygroundModelSelector = ({
         alwaysAvailable: true
       };
 
-      const models = Object.entries(categoryModels || {}).map(([key, info]) => {
+      const entries = Object.entries(categoryModels || {}).filter(([_, info]) => {
+        if (categoryKey === 'external') {
+          const method = (info.deployment_method || '').toLowerCase();
+          if (method.includes('emd')) {
+            return false;
+          }
+        }
+        return true;
+      });
+
+      const models = entries.map(([key, info]) => {
         modelKeys.push(key);
         const statusInfo = info.deployment_status || {};
         const alwaysAvailable = Object.prototype.hasOwnProperty.call(info, 'always_available')
@@ -71,12 +88,14 @@ const PlaygroundModelSelector = ({
         };
       });
 
-      categories[categoryKey] = {
-        title: preset.title,
-        icon: preset.icon,
-        color: preset.color,
-        models
-      };
+      if (models.length > 0) {
+        categories[categoryKey] = {
+          title: preset.title,
+          icon: preset.icon,
+          color: preset.color,
+          models
+        };
+      }
     });
 
     return { categories, modelKeys };

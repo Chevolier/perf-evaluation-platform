@@ -47,7 +47,7 @@ const StreamingResultsDisplay = ({ dataset, selectedModels, params, onStreamComp
       const textContent = response.content
         .filter(item => item.type === 'text')
         .map(item => item.text)
-        .join('\\n');
+        .join('\n');
       if (textContent) return textContent;
     }
     
@@ -58,17 +58,17 @@ const StreamingResultsDisplay = ({ dataset, selectedModels, params, onStreamComp
         const textContent = content
           .filter(item => item.text)
           .map(item => item.text)
-          .join('\\n');
+          .join('\n');
         if (textContent) return textContent;
       }
     }
-    
+
     // Extract text from EMD API response
     if (response && response.content && Array.isArray(response.content)) {
       const textContent = response.content
         .filter(item => item.text)
         .map(item => item.text)
-        .join('\\n');
+        .join('\n');
       if (textContent) return textContent;
     }
     
@@ -99,7 +99,8 @@ const StreamingResultsDisplay = ({ dataset, selectedModels, params, onStreamComp
     selectedModels.forEach(model => {
       initialResults[model] = {
         status: 'processing',
-        message: '等待开始处理...'
+        message: '等待开始处理...',
+        label: model
       };
     });
     setResults(initialResults);
@@ -134,7 +135,7 @@ const StreamingResultsDisplay = ({ dataset, selectedModels, params, onStreamComp
       };
 
       // 发起推理请求
-      const response = await fetch('http://localhost:5000/api/multi-inference', {
+      const response = await fetch('/api/multi-inference', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -166,7 +167,7 @@ const StreamingResultsDisplay = ({ dataset, selectedModels, params, onStreamComp
           }
 
           const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split('\\n\\n');
+          const lines = chunk.split('\n\n');
 
           for (const line of lines) {
             if (line.startsWith('data: ')) {
@@ -179,17 +180,23 @@ const StreamingResultsDisplay = ({ dataset, selectedModels, params, onStreamComp
                     console.log('开始处理模型:', data.models);
                     break;
 
-                  case 'model_start':
+                  case 'model_start': {
+                    const modelKey = data.model_key || data.model;
+                    if (!modelKey) break;
+                    const displayName = data.label || data.display_name || data.model || modelKey;
+
                     setResults(prev => ({
                       ...prev,
-                      [data.model]: {
-                        ...prev[data.model],
+                      [modelKey]: {
+                        ...prev[modelKey],
                         status: 'processing',
                         message: '正在处理中...',
-                        startTime: new Date().toISOString()
+                        startTime: new Date().toISOString(),
+                        label: displayName
                       }
                     }));
                     break;
+                  }
 
                   case 'heartbeat':
                     console.log('收到心跳:', data.timestamp);
@@ -203,25 +210,93 @@ const StreamingResultsDisplay = ({ dataset, selectedModels, params, onStreamComp
                     }
                     break;
 
-                  default:
-                    // 模型结果
-                    if (data.model) {
+                  default: {
+                    const modelKey = data.model_key || data.model;
+                    if (!modelKey) break;
+                    const displayName = data.label || data.display_name || data.model || modelKey;
+
+                    const eventType = data.type || data.status;
+
+                    if (eventType === 'chunk') {
+                      setResults(prev => {
+                        const previousEntry = prev[modelKey] || {};
+                        const newContent = (previousEntry.partialContent || '') + (data.delta || '');
+                        return {
+                          ...prev,
+                          [modelKey]: {
+                            ...previousEntry,
+                            status: data.status || 'streaming',
+                            partialContent: newContent,
+                            label: displayName,
+                            provider: data.provider || previousEntry.provider,
+                            lastUpdated: Date.now()
+                          }
+                        };
+                      });
+                      break;
+                    }
+
+                    if (eventType === 'result') {
+                      setResults(prev => {
+                        const previousEntry = prev[modelKey] || {};
+                        const partialContent = previousEntry.partialContent || '';
+                        let resultPayload = data.result ? { ...data.result } : undefined;
+                        if (resultPayload) {
+                          if (!resultPayload.content && partialContent) {
+                            resultPayload.content = partialContent;
+                          }
+                        } else if (partialContent) {
+                          resultPayload = { content: partialContent };
+                        }
+
+                        return {
+                          ...prev,
+                          [modelKey]: {
+                            ...previousEntry,
+                            status: data.status || 'success',
+                            result: resultPayload,
+                            partialContent: undefined,
+                            label: displayName,
+                            provider: data.provider || previousEntry.provider,
+                            timestamp: data.timestamp
+                          }
+                        };
+                      });
+
+                      setCompletedCount(prev => prev + 1);
+                      break;
+                    }
+
+                    if (eventType === 'error') {
                       setResults(prev => ({
                         ...prev,
-                        [data.model]: {
-                          status: data.status,
-                          processing_time: data.processing_time,
-                          result: data.result,
-                          error: data.error,
+                        [modelKey]: {
+                          ...(prev[modelKey] || {}),
+                          status: 'error',
+                          error: data.error || data.message,
+                          label: displayName,
                           timestamp: data.timestamp
                         }
                       }));
 
-                      if (data.status === 'success' || data.status === 'error') {
-                        setCompletedCount(prev => prev + 1);
-                      }
+                      setCompletedCount(prev => prev + 1);
+                      break;
                     }
+
+                    setResults(prev => ({
+                      ...prev,
+                      [modelKey]: {
+                        ...(prev[modelKey] || {}),
+                        status: data.status || 'processing',
+                        processing_time: data.processing_time,
+                        result: data.result,
+                        error: data.error,
+                        timestamp: data.timestamp,
+                        label: displayName
+                      }
+                    }));
                     break;
+                  }
                 }
               } catch (error) {
                 console.error('解析流式数据失败:', error, line);
@@ -257,39 +332,37 @@ const StreamingResultsDisplay = ({ dataset, selectedModels, params, onStreamComp
     };
   }, []);
 
-  const renderModelCard = (modelName, result) => (
-    <Card
-      key={modelName}
-      size="small"
-      style={{ marginBottom: 16 }}
-      title={
-        <Space>
-          {getStatusIcon(result?.status)}
-          <Text strong>{modelName}</Text>
-          {getStatusTag(result?.status)}
-          {result?.processing_time && (
-            <Text type="secondary">({result.processing_time}s)</Text>
-          )}
-        </Space>
-      }
-    >
-      {result?.status === 'success' ? (
-        <div>
-          <Paragraph
-            style={{
-              background: '#f5f5f5',
-              padding: 12,
-              borderRadius: 6,
-              whiteSpace: 'pre-wrap',
-              maxHeight: 200,
-              overflow: 'auto',
-              margin: 0
-            }}
-          >
-            {formatResponse(result.result)}
-          </Paragraph>
-        </div>
-      ) : result?.status === 'error' ? (
+  const renderModelCard = (modelName, result) => {
+    const displayName = result?.label || modelName;
+    const showTechnicalName = displayName !== modelName;
+    const displayContent = (result?.result && (result.result.content ?? (typeof result.result === "string" ? result.result : null))) ?? result?.partialContent ?? null;
+    const isStreaming = result?.status === "streaming";
+    const showContent = displayContent !== null && displayContent !== undefined && displayContent !== "";
+
+    return (
+      <Card
+        key={modelName}
+        size="small"
+        style={{ marginBottom: 16 }}
+        title={
+          <Space direction="vertical" size={0} style={{ gap: 0 }}>
+            <Space>
+              {getStatusIcon(result?.status)}
+              <Text strong>{displayName}</Text>
+              {getStatusTag(result?.status)}
+              {result?.processing_time && (
+                <Text type="secondary">({result.processing_time}s)</Text>
+              )}
+            </Space>
+            {showTechnicalName && (
+              <Text type="secondary" style={{ fontSize: '11px' }}>
+                {modelName}
+              </Text>
+            )}
+          </Space>
+        }
+      >
+      {result?.status === 'error' ? (
         <Alert
           type="error"
           message="推理失败"
@@ -297,15 +370,67 @@ const StreamingResultsDisplay = ({ dataset, selectedModels, params, onStreamComp
           showIcon
         />
       ) : (
-        <div style={{ textAlign: 'center', padding: 20 }}>
-          <ClockCircleOutlined style={{ fontSize: 24, color: '#1890ff' }} />
-          <Paragraph style={{ marginTop: 8, marginBottom: 0 }}>
-            {result?.message || '等待处理...'}
-          </Paragraph>
+        <div>
+          {showContent && (
+            <Paragraph
+              style={{
+                background: isStreaming ? '#f0f9ff' : '#f5f5f5',
+                padding: 12,
+                borderRadius: 6,
+                whiteSpace: 'pre-wrap',
+                maxHeight: 200,
+                overflow: 'auto',
+                margin: 0
+              }}
+            >
+              {displayContent}
+              {isStreaming && (
+                <span
+                  style={{
+                    display: 'inline-block',
+                    width: '8px',
+                    height: '16px',
+                    backgroundColor: '#1890ff',
+                    animation: 'blink 1s infinite',
+                    marginLeft: '2px',
+                    verticalAlign: 'middle'
+                  }}
+                />
+              )}
+            </Paragraph>
+          )}
+
+          {!showContent && isStreaming && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 0' }}>
+              <Spin size="small" />
+              <Text type="secondary" style={{ fontSize: '12px' }}>
+                等待首个响应...
+              </Text>
+            </div>
+          )}
+
+          {isStreaming && (
+            <Space size="small" align="center">
+              <Spin size="small" />
+              <Text type="secondary" style={{ fontSize: '12px' }}>
+                模型正在生成...
+              </Text>
+            </Space>
+          )}
+
+          {!isStreaming && result?.status !== 'success' && !showContent && (
+            <div style={{ textAlign: 'center', padding: 20 }}>
+              <ClockCircleOutlined style={{ fontSize: 24, color: '#1890ff' }} />
+              <Paragraph style={{ marginTop: 8, marginBottom: 0 }}>
+                {result?.message || '等待处理...'}
+              </Paragraph>
+            </div>
+          )}
         </div>
       )}
-    </Card>
-  );
+      </Card>
+    );
+  };
 
   const progress = selectedModels.length > 0 ? (completedCount / selectedModels.length) * 100 : 0;
 

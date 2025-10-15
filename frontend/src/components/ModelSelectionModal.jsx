@@ -82,6 +82,18 @@ const ModelSelectionModal = ({
           capabilities: []
         },
         {
+          key: 'qwen3-0.6b',
+          name: 'Qwen3-0.6B',
+          description: '最新Qwen3模型，0.6B参数，高效轻量',
+          capabilities: []
+        },
+        {
+          key: 'qwen3-8b',
+          name: 'Qwen3-8B',
+          description: 'Qwen3模型，8B参数，平衡性能与效率',
+          capabilities: []
+        },
+        {
           key: 'ui-tars-1.5-7b',
           name: 'UI-TARS-1.5-7B',
           description: '用户界面理解专用模型',
