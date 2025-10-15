@@ -2491,116 +2491,198 @@ except Exception as e:
 
         connect_timeout = test_params.get("connect_timeout", 7200)
         read_timeout = test_params.get("read_timeout", 7200)
-
+        
         # VLM parameters
         image_width = test_params.get('image_width', 512)
         image_height = test_params.get('image_height', 512)
         image_num = test_params.get('image_num', 1)
         image_format = test_params.get('image_format', 'RGB')
 
-        logger.info(f"[DEBUG] SageMaker endpoint - Raw parameters from frontend:")
+        api_url = "http://localhost:4000/chat/completions"
+        sm_model_name = f"sagemaker/{endpoint_name}"
+
+        # Create config.yaml file for litellm
+        config_dir = Path(__file__).parent.parent.parent / 'config'
+        config_dir.mkdir(exist_ok=True)
+        config_file = config_dir / 'sm_config.yaml'
+
+        config_content = f"""model_list:
+  - model_name: {model_name}
+    litellm_params:
+      model: {sm_model_name}
+      drop_params: True
+      aws_access_key_id:
+      aws_secret_access_key:
+      aws_region_name:
+"""
+
+        with open(config_file, 'w', encoding='utf-8') as f:
+            f.write(config_content)
+
+        logger.info(f"Created config.yaml file at {config_file}")
+
+        # Start litellm server
+        try:
+            import subprocess
+            import time
+
+            # Check if litellm server is already running on port 4000
+            try:
+                import requests
+                test_response = requests.get("http://localhost:4000/health", timeout=2)
+                if test_response.status_code == 200:
+                    logger.info("Litellm server already running on port 4000")
+                else:
+                    raise requests.RequestException("Server not healthy")
+            except (requests.RequestException, requests.ConnectionError):
+                logger.info("Starting litellm server...")
+
+                # Start litellm server in background
+                litellm_process = subprocess.Popen([
+                    'litellm', '--config', str(config_file), '--port', '4000'
+                ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+                # Wait a few seconds for server to start
+                time.sleep(5)
+
+                # Verify server is running
+                max_retries = 12  # 60 seconds total
+                for retry in range(max_retries):
+                    try:
+                        test_response = requests.get("http://localhost:4000/health", timeout=2)
+                        if test_response.status_code == 200:
+                            logger.info("Litellm server started successfully")
+                            break
+                    except (requests.RequestException, requests.ConnectionError):
+                        if retry < max_retries - 1:
+                            logger.info(f"Waiting for litellm server to start... (attempt {retry + 1}/{max_retries})")
+                            time.sleep(5)
+                        else:
+                            logger.error("Failed to start litellm server after 60 seconds")
+                            raise Exception("无法启动litellm服务器")
+
+        except ImportError:
+            logger.error("litellm not installed")
+            raise Exception("litellm未安装，请运行: pip install litellm")
+        except Exception as e:
+            logger.error(f"Error starting litellm server: {e}")
+            raise Exception(f"启动litellm服务器失败: {str(e)}")
+
+        logger.info(f"[DEBUG] Custom API - Raw parameters from frontend:")
         logger.info(f"[DEBUG]   num_requests: {num_requests_list} (type: {type(num_requests_list)})")
         logger.info(f"[DEBUG]   concurrency: {concurrency_list} (type: {type(concurrency_list)})")
         logger.info(f"[DEBUG]   prefix_length: {prefix_length} (type: {type(prefix_length)})")
-
-        # Convert to lists if single values were provided
+        
+        # Convert to lists if single values were provided for backward compatibility
         if not isinstance(num_requests_list, list):
             num_requests_list = [num_requests_list]
         if not isinstance(concurrency_list, list):
             concurrency_list = [concurrency_list]
-
+        
         # Ensure lists are not empty
         if not num_requests_list:
-            logger.warning("[DEBUG] SageMaker endpoint - num_requests_list is empty, using default [50]")
+            logger.warning("[DEBUG] Custom API - num_requests_list is empty, using default [50]")
             num_requests_list = [50]
         if not concurrency_list:
-            logger.warning("[DEBUG] SageMaker endpoint - concurrency_list is empty, using default [5]")
+            logger.warning("[DEBUG] Custom API - concurrency_list is empty, using default [5]")
             concurrency_list = [5]
-
+            
         # Validate that both lists have the same length for paired combinations
         if len(num_requests_list) != len(concurrency_list):
             raise Exception(f"请求总数和并发数的值数量必须相同。当前请求总数有 {len(num_requests_list)} 个值，并发数有 {len(concurrency_list)} 个值。")
-
-        logger.info(f"Starting evalscope stress test with SageMaker endpoint: {num_requests_list} requests, {concurrency_list} concurrent")
-
+        
+        logger.info(f"Starting evalscope stress test with custom API: {num_requests_list} requests, {concurrency_list} concurrent")
+        
         self._update_session(session_id, {
-            "current_message": "测试SageMaker端点连接..."
+            "current_message": "测试自定义API端点连接..."
         })
-
-        # Test SageMaker endpoint connectivity
+        
+        # Test endpoint connectivity first
         try:
-            import boto3
-            import sagemaker
-            from sagemaker import serializers, deserializers
-
-            # Create predictor to test connectivity
-            try:
-                sess = sagemaker.session.Session()
-            except Exception:
-                sess = sagemaker.session.Session()
-
-            predictor = sagemaker.Predictor(
-                endpoint_name=endpoint_name,
-                sagemaker_session=sess,
-                serializer=serializers.JSONSerializer()
-            )
-
-            # Simple test payload
+            import requests
+            # Try a simple request to test the endpoint
             test_payload = {
-                "inputs": "Test connection",
-                "parameters": {
-                    "max_new_tokens": 10,
-                    "temperature": 0.1
-                }
+                "model": model_name,
+                "messages": [{"role": "user", "content": "Test connection"}],
+                "max_tokens": 10
             }
-
-            logger.info(f"Testing SageMaker endpoint: {endpoint_name}")
-            test_response = predictor.predict(test_payload)
-            logger.info(f"SageMaker endpoint test successful: {test_response}")
-
+            
+            logger.info(f"Testing custom API endpoint: {api_url}")
+            logger.info(f"Test payload: {test_payload}")
+            
+            test_response = requests.post(api_url, json=test_payload, timeout=15)
+            
+            logger.info(f"Custom endpoint test response: {test_response.status_code}")
+            logger.info(f"Response headers: {dict(test_response.headers)}")
+            logger.info(f"Response body: {test_response.text[:500]}")
+            
+            if test_response.status_code == 404:
+                response_text = test_response.text
+                if "not found in any endpoint" in response_text or "model" in response_text.lower():
+                    raise Exception(f"模型未找到 (404): 模型 '{model_name}' 在此端点不存在，请检查模型名称是否正确")
+                else:
+                    raise Exception(f"API端点不存在 (404): 请检查URL是否正确。确保使用完整路径如 /v1/chat/completions。当前URL: {api_url}")
+            elif test_response.status_code == 401:
+                raise Exception(f"认证失败 (401): API需要认证，请检查API密钥或认证方式")
+            elif test_response.status_code == 403:
+                raise Exception(f"访问被拒绝 (403): 无权限访问此API端点")
+            elif test_response.status_code == 422:
+                raise Exception(f"请求格式错误 (422): 请检查模型名称是否正确。当前模型: {model_name}")
+            elif test_response.status_code == 500:
+                raise Exception(f"服务器内部错误 (500): API服务器出现问题")
+            elif test_response.status_code != 200:
+                raise Exception(f"API返回错误状态码 {test_response.status_code}: {test_response.text[:200]}")
+                
+        except requests.exceptions.ConnectionError:
+            logger.error(f"Connection error when testing custom endpoint: {api_url}")
+            raise Exception(f"无法连接到API端点: {api_url}，请检查URL是否正确且服务是否可访问")
+        except requests.exceptions.Timeout:
+            logger.error(f"Timeout when testing custom endpoint: {api_url}")
+            raise Exception(f"API端点响应超时: {api_url}，请检查服务是否正常")
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Request error when testing custom endpoint: {e}")
+            raise Exception(f"请求失败: {str(e)}")
         except Exception as e:
-            logger.error(f"SageMaker endpoint connectivity test failed: {e}")
-            raise Exception(f"SageMaker端点连接失败: {str(e)}")
-
+            logger.error(f"Custom endpoint connectivity test failed: {e}")
+            raise Exception(f"自定义API端点连接失败: {str(e)}")
+        
         self._update_session(session_id, {
             "current_message": "配置evalscope测试参数..."
         })
-
+        
         try:
             # Use single token values instead of ranges
             min_tokens = output_tokens
             max_tokens = output_tokens
             min_prompt_length = input_tokens
             max_prompt_length = input_tokens
-
-            logger.info(f"[DEBUG] SageMaker Token parameters: prefix_length={prefix_length}, input_tokens={input_tokens}, output_tokens={output_tokens}")
-            logger.info(f"[DEBUG] SageMaker Evalscope config: min_prompt_length={min_prompt_length}, max_prompt_length={max_prompt_length}, min_tokens={min_tokens}, max_tokens={max_tokens}")
+            
+            logger.info(f"[DEBUG] Custom API Token parameters: prefix_length={prefix_length}, input_tokens={input_tokens}, output_tokens={output_tokens}")
+            logger.info(f"[DEBUG] Custom API Evalscope config: min_prompt_length={min_prompt_length}, max_prompt_length={max_prompt_length}, min_tokens={min_tokens}, max_tokens={max_tokens}")
+            logger.info(f"[DEBUG] Custom API Token parameters: connect_timeout={connect_timeout}, read_timeout={read_timeout}")
 
             # Get appropriate tokenizer path based on model name
             tokenizer_path = self._get_tokenizer_path(model_name)
             logger.info(f"[DEBUG] Using tokenizer path: {tokenizer_path}")
-
+            
+            print(f"custom_api, model_name: {model_name}")
             # Create output directory using the same structure as regular model tests
             output_dir = self._create_custom_api_output_dir(model_name, session_id)
-
+            
             # Store output directory in session
             self.test_sessions[session_id]["output_directory"] = output_dir
-
+            
+            # Let real-time polling handle all progress updates - no hardcoded progress here
             self._update_session(session_id, {
-                "current_message": f"正在执行SageMaker端点基准测试 ({num_requests_list} 请求, {concurrency_list} 并发)..."
+                "current_message": f"正在执行evalscope基准测试 ({num_requests_list} 请求, {concurrency_list} 并发)..."
             })
-
-            # Create Python script to run evalscope with SageMaker endpoint
-            # Note: This needs to use the SageMaker endpoint format, not OpenAI format
+            
+            # Create Python script to run evalscope programmatically using the same approach as original implementation
             dataset_param = f"'{dataset_path}'" if dataset == 'custom' and dataset_path else f"'{dataset}'"
-
-            # Check if VLM parameters should be included
+            
+            # Check if VLM parameters should be included (when image parameters are provided)
             has_vlm_params = 'image_width' in test_params and 'image_height' in test_params and 'image_num' in test_params
-
-            # For SageMaker endpoints, we need to construct a custom URL that evalscope can understand
-            # Since SageMaker uses a different invocation format, we'll create a wrapper URL
-            sagemaker_url = f"sagemaker://{endpoint_name}"
-
+            
             script_content = f'''#!/usr/bin/env python
 import sys
 import json
@@ -2611,15 +2693,14 @@ sys.path.insert(0, '/home/ec2-user/SageMaker/efs/conda_envs/evalscope/lib/python
 try:
     from evalscope.perf.main import run_perf_benchmark
     from evalscope.perf.arguments import Arguments
-
-    # Create evalscope configuration for SageMaker endpoint
-    # Note: We use a special 'sagemaker' API type to handle the different format
+    
+    # Create evalscope configuration (this will create cartesian product and subfolders)
     task_cfg = Arguments(
         parallel={concurrency_list},
         number={num_requests_list},
-        model='{model_name}',
-        url='{sagemaker_url}',
-        api='sagemaker',  # Use 'sagemaker' instead of 'openai'
+        model='{sm_model_name}',
+        url='{api_url}',
+        api='openai',
         dataset={dataset_param},
         min_tokens={min_tokens},
         max_tokens={max_tokens},
@@ -2634,47 +2715,195 @@ try:
         read_timeout={read_timeout},
         seed=42{', image_width=' + str(image_width) + ', image_height=' + str(image_height) + ', image_format="' + image_format + '", image_num=' + str(image_num) if has_vlm_params else ''}
     )
-
-    # Run the benchmark
+    
+    # Run the benchmark (this creates the subfolder structure)
     results = run_perf_benchmark(task_cfg)
-
+    
     # Output results as JSON
     print("EVALSCOPE_RESULTS_START")
     print(json.dumps(results, default=str, ensure_ascii=False))
     print("EVALSCOPE_RESULTS_END")
-
+    
 except Exception as e:
     print("EVALSCOPE_ERROR:", str(e))
     import traceback
     traceback.print_exc()
     sys.exit(1)
 '''
-
-            script_path = f"{output_dir}/run_evalscope_sagemaker.py"
+            
+            script_path = f"{output_dir}/run_evalscope.py"
             with open(script_path, 'w', encoding='utf-8') as f:
                 f.write(script_content)
-
-            logger.info(f"[DEBUG] SageMaker Evalscope execution script written to: {script_path}")
-
-            # Note: The above approach assumes evalscope supports 'sagemaker' API type
-            # If not, we need to create a custom implementation that directly uses SageMaker SDK
-            # For now, let's try a different approach using a custom Python script
-
-            # Alternative: Create a custom stress test implementation for SageMaker
-            logger.info("Using custom SageMaker stress test implementation...")
-
-            results = self._run_custom_sagemaker_stress_test(
-                endpoint_name, model_name, test_params, session_id, output_dir
+            
+            logger.info(f"[DEBUG] Custom API Evalscope execution script written to: {script_path}")
+            
+            # Run evalscope in subprocess with conda environment
+            env = os.environ.copy()
+            cmd = [
+                '/bin/bash', '-c',
+                f'source /home/ubuntu/anaconda3/etc/profile.d/conda.sh && conda activate evalscope && python {script_path}'
+            ]
+            
+            logger.info(f"Executing custom API evalscope command in subprocess...")
+            
+            # Calculate timeout based on cartesian product (evalscope runs all combinations)
+            num_combinations = len(num_requests_list) * len(concurrency_list)
+            base_timeout = 120  # 2 minutes per combination
+            total_timeout = max(7200, num_combinations * base_timeout)  # At least 1 hour
+            
+            logger.info(f"[DEBUG] Custom API - Running {num_combinations} combinations ({len(concurrency_list)} concurrency × {len(num_requests_list)} requests)")
+            logger.info(f"[DEBUG] Custom API - Setting timeout to {total_timeout} seconds ({total_timeout/60:.1f} minutes)")
+            logger.info(f"[DEBUG] Custom API - Will filter to paired combinations: {list(zip(concurrency_list, num_requests_list))}")
+            
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=total_timeout,
+                env=env
             )
+            
+            if result.returncode != 0:
+                logger.error(f"Custom API Evalscope subprocess failed - stdout: {result.stdout}")
+                logger.error(f"Custom API Evalscope subprocess failed - stderr: {result.stderr}")
+                # Check if results file exists anyway (evalscope might have completed but subprocess failed)
+                results_file = f"{output_dir}/benchmark_results.json"
+                if Path(results_file).exists():
+                    logger.info(f"Found results file despite subprocess failure, attempting to parse: {results_file}")
+                    try:
+                        import json
+                        with open(results_file, 'r') as f:
+                            file_results = json.load(f)
+                        
+                        # Save results and return them
+                        try:
+                            self._save_results_to_output_dir(output_dir, file_results, test_params, model_name, session_id)
+                        except Exception as save_error:
+                            logger.error(f"Failed to save results (non-critical): {save_error}")
+                        
+                        return file_results
+                    except Exception as e:
+                        logger.error(f"Failed to parse results file: {e}")
+                
+                raise Exception(f"Evalscope执行失败: {result.stderr}")
+            
+            logger.info(f"Custom API Evalscope subprocess completed successfully")
+            logger.info(f"Stdout: {result.stdout}")
+            
+            # Parse real progress before processing results
+            output_dir = self.test_sessions[session_id].get("output_directory") 
+            if output_dir:
+                progress_info = self._parse_benchmark_log_progress(output_dir, session_id)
+                total_expected_requests = self._calculate_total_expected_requests(test_params)
+                
+                if total_expected_requests > 0 and progress_info['total_processed'] > 0:
+                    real_progress = round(min(90, (progress_info['total_processed'] / total_expected_requests) * 100))
+                    progress_message = f"已处理 {progress_info['total_processed']}/{total_expected_requests} 个请求，正在处理测试结果..."
+                    
+                    self._update_session(session_id, {
+                        "progress": real_progress,
+                        "current_message": progress_message,
+                        "real_progress_info": progress_info
+                    })
 
-            return results
-
+            # Check if evalscope generated subfolder results (new multi-combination format)
+            subfolder_results = self._collect_subfolder_results(output_dir, session_id)
+            if subfolder_results:
+                logger.info(f"Custom API - Found {len(subfolder_results)} subfolder results, using comprehensive format")
+                # Transform results to match frontend expectations
+                transformed_results = self._process_comprehensive_results(subfolder_results, test_params, session_id)
+                
+                # Save results to output directory for consistency
+                try:
+                    self._save_results_to_output_dir(output_dir, transformed_results, test_params, model_name, session_id)
+                except Exception as save_error:
+                    logger.error(f"Failed to save results (non-critical): {save_error}")
+                    # Continue processing even if save fails
+                
+                return transformed_results
+            
+            # Fallback to parsing from stdout if no subfolders found
+            output = result.stdout
+            start_marker = "EVALSCOPE_RESULTS_START"
+            end_marker = "EVALSCOPE_RESULTS_END"
+            
+            if start_marker in output and end_marker in output:
+                start_idx = output.find(start_marker) + len(start_marker)
+                end_idx = output.find(end_marker)
+                results_json_str = output[start_idx:end_idx].strip()
+            else:
+                logger.error(f"No results markers found in custom API output")
+                logger.error(f"Output: {output}")
+                
+                # Try to read results from file as fallback
+                results_file = f"{output_dir}/benchmark_results.json"
+                if Path(results_file).exists():
+                    logger.info(f"Stdout parsing failed, trying to read results from file: {results_file}")
+                    try:
+                        import json
+                        with open(results_file, 'r') as f:
+                            file_results = json.load(f)
+                        
+                        logger.info(f"Successfully read results from file: {file_results}")
+                        
+                        # Save results and return them
+                        try:
+                            self._save_results_to_output_dir(output_dir, file_results, test_params, model_name, session_id)
+                        except Exception as save_error:
+                            logger.error(f"Failed to save results (non-critical): {save_error}")
+                        
+                        return file_results
+                    except Exception as e:
+                        logger.error(f"Failed to read results from file: {e}")
+                
+                if "EVALSCOPE_ERROR:" in output:
+                    error_line = [line for line in output.split('\n') if 'EVALSCOPE_ERROR:' in line]
+                    if error_line:
+                        raise Exception(f"Evalscope执行出错: {error_line[0].split('EVALSCOPE_ERROR:')[1].strip()}")
+                raise Exception("无法从evalscope输出中提取测试结果")
+            
+            try:
+                import json
+                results = json.loads(results_json_str)
+                logger.info(f"Custom API parsed results type: {type(results)}")
+                logger.info(f"Custom API parsed results preview: {str(results)[:200]}...")
+                
+                # Handle legacy single result format (we now use subfolder results instead)
+                if isinstance(results, list) and len(results) > 0:
+                    # If results is a list, take the first element (which should be the main results)
+                    actual_results = results[0] if isinstance(results[0], dict) else {}
+                    logger.info(f"Using first element from list: {actual_results}")
+                elif isinstance(results, dict):
+                    actual_results = results
+                else:
+                    logger.warning(f"Unexpected results format: {type(results)}")
+                    actual_results = {}
+                
+                # Transform results to match frontend expectations (like original implementation)
+                transformed_results = self._transform_evalscope_results_to_frontend_format(
+                    actual_results, test_params, session_id
+                )
+                
+                # Save results to output directory for consistency
+                try:
+                    self._save_results_to_output_dir(output_dir, transformed_results, test_params, model_name, session_id)
+                except Exception as save_error:
+                    logger.error(f"Failed to save results (non-critical): {save_error}")
+                    # Continue processing even if save fails
+                
+                return transformed_results
+                
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse custom API results JSON: {e}")
+                logger.error(f"Results string: {results_json_str}")
+                raise Exception(f"解析测试结果失败: {str(e)}")
+            
         except subprocess.TimeoutExpired as e:
-            logger.error(f"SageMaker Evalscope subprocess timed out for session {session_id}: {e}")
-            raise Exception(f"SageMaker端点压力测试超时")
+            logger.error(f"Custom API Evalscope subprocess timed out after {total_timeout} seconds for session {session_id}")
+            raise Exception(f"Evalscope执行超时 ({total_timeout}秒)，可能是模型连接问题或tokenizer加载缓慢。当前运行 {num_combinations} 个组合测试，建议减少测试参数组合数量")
         except Exception as e:
-            logger.error(f"SageMaker Evalscope execution failed for session {session_id}: {e}")
-            raise Exception(f"SageMaker端点压力测试失败: {str(e)}")
+            logger.error(f"Custom API Evalscope execution failed for session {session_id}: {e}")
+            raise Exception(f"Evalscope执行失败: {str(e)}")
 
     def _run_custom_sagemaker_stress_test(self, endpoint_name: str, model_name: str, test_params: Dict[str, Any], session_id: str, output_dir: str) -> Dict[str, Any]:
         """Run custom stress test implementation for SageMaker endpoints.

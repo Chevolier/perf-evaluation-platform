@@ -9,3 +9,5 @@ ffmpeg-python==0.2.0
 evalscope
 kubernetes
 vllm
+litellm
+litellm[proxy]
