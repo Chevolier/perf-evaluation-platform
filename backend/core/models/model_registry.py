@@ -3,10 +3,11 @@
 from typing import Dict, Any
 
 
-# EMD (Elastic Model Deployment) Models Configuration
+# EMD (Easy Model Deployment) Models Configuration
 EMD_MODELS = {
     "qwen2.5-7b-instruct": {
         "name": "Qwen2.5-7B-Instruct",
+        "huggingface_repo": "Qwen/Qwen2.5-7B-Instruct",
         "description": "Qwen2.5模型",
         "model_path": "Qwen2.5-7B-Instruct",  # Use EMD supported model ID
         "supports_multimodal": False,
@@ -14,6 +15,7 @@ EMD_MODELS = {
     },
     "qwen3-0.6b": {
         "name": "Qwen3-0.6B",
+        "huggingface_repo": "Qwen/Qwen3-0.6B",
         "description": "最新Qwen3模型，0.6B参数，高效轻量",
         "model_path": "Qwen3-0.6B",  # Already correct
         "supports_multimodal": False,
@@ -21,6 +23,7 @@ EMD_MODELS = {
     },
     "qwen3-8b": {
         "name": "Qwen3-8B",
+        "huggingface_repo": "Qwen/Qwen3-8B",
         "description": "最新Qwen3模型，8B参数，强大性能",
         "model_path": "Qwen3-8B",  # Already correct
         "supports_multimodal": False,
@@ -28,6 +31,7 @@ EMD_MODELS = {
     },
     "qwen2-vl-7b": {
         "name": "Qwen2-VL-7B-Instruct",
+        "huggingface_repo": "Qwen/Qwen2-VL-7B-Instruct",
         "description": "通义千问视觉语言模型，7B参数",
         "model_path": "Qwen2-VL-7B-Instruct",  # Use EMD supported model ID
         "supports_multimodal": True,
@@ -35,6 +39,7 @@ EMD_MODELS = {
     },
     "qwen2.5-vl-32b": {
         "name": "Qwen2.5-VL-32B-Instruct",
+        "huggingface_repo": "Qwen/Qwen2.5-VL-32B-Instruct",
         "description": "通义千问视觉语言模型，32B参数",
         "model_path": "Qwen2.5-VL-32B-Instruct",  # Use EMD supported model ID
         "supports_multimodal": True,

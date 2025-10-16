@@ -2,6 +2,8 @@
 
 import time
 import random
+import subprocess
+import threading
 from typing import Dict, Any, List
 from datetime import datetime
 
@@ -17,9 +19,7 @@ from ..core.models import model_registry, EMDModel
 from ..config import get_config
 from ..utils import get_logger
 
-
 logger = get_logger(__name__)
-
 
 class ModelService:
     """Service for managing model deployment and status."""
@@ -29,7 +29,11 @@ class ModelService:
         self.registry = model_registry
         self._deployment_status = {}
         self._current_emd_tag = None
-        
+
+        # EC2 Docker deployment tracking
+        self._ec2_deployments = {}  # Store running Docker containers info
+        self._ec2_status_checkers = {}  # Store status checker threads
+
         # Circuit breaker for AWS throttling
         self._circuit_breaker = {
             'state': 'closed',  # closed, open, half_open
@@ -39,7 +43,7 @@ class ModelService:
             'recovery_timeout': 60,  # Try again after 60 seconds
             'half_open_success_threshold': 1  # Close circuit after 1 success in half-open
         }
-        
+
         # Enhanced caching for throttling scenarios
         self._emd_status_cache = {
             'data': None,
@@ -717,7 +721,378 @@ class ModelService:
                 "success": False,
                 "error": str(e)
             }
-    
+
+    def deploy_model_on_ec2(self, model_key: str, instance_type: str = "g5.2xlarge",
+                           engine_type: str = "vllm", service_type: str = "vllm_realtime",
+                           port: int = 8000, tp_size: int = 1, dp_size: int = 1) -> Dict[str, Any]:
+        """Deploy a model using Docker on EC2.
+
+        Args:
+            model_key: Model to deploy
+            instance_type: AWS instance type (for reference only)
+            engine_type: Inference engine type (vllm, sglang)
+            service_type: Service type
+            port: Port to expose the service
+            tp_size: Tensor parallelism size
+            dp_size: Data parallelism size
+
+        Returns:
+            Deployment result
+        """
+        if not self.registry.is_emd_model(model_key):
+            return {
+                "success": False,
+                "error": f"Model {model_key} not found in registry"
+            }
+
+        model_config = self.registry.get_model_info(model_key, "emd")
+        huggingface_repo = model_config.get("huggingface_repo", model_key)
+        model_path = model_config.get("model_path", model_key)
+
+        # Generate deployment tag
+        deployment_tag = f"{model_key}-{int(time.time())}"
+        container_name = f"{model_key.replace('_', '-')}-{deployment_tag}"
+
+        # Check if model is already deployed
+        if model_key in self._ec2_deployments:
+            existing_container = self._ec2_deployments[model_key]
+            if self._check_container_running(existing_container["container_name"]):
+                return {
+                    "success": False,
+                    "error": f"Model {model_key} is already deployed in container {existing_container['container_name']}"
+                }
+
+        # Update deployment status to starting
+        self._deployment_status[model_key] = {
+            "status": "inprogress",
+            "message": f"Starting Docker deployment for {model_key}",
+            "tag": deployment_tag,
+            "container_name": container_name,
+            "port": port,
+            "started_at": datetime.now().isoformat()
+        }
+
+        try:
+            logger.info(f"🚀 Starting Docker deployment for {model_key} with model path {model_path} using {engine_type}")
+
+            # Construct Docker command based on framework
+            if engine_type.lower() == "sglang":
+                # SGLang deployment
+                docker_cmd = [
+                    "docker", "run", "-d",
+                    "--gpus", "all",
+                    "--shm-size", "32g",
+                    "-v", f"{self._get_hf_cache_dir()}:/root/.cache/huggingface",
+                    "-p", f"{port}:{port}",
+                    "--ipc=host",
+                    "--name", container_name
+                ]
+
+                # Add HuggingFace token if available
+                hf_token = self._get_hf_token()
+                if hf_token:
+                    docker_cmd.extend(["--env", f"HF_TOKEN={hf_token}"])
+
+                # Add SGLang image and launch command
+                docker_cmd.extend([
+                    "lmsysorg/sglang:latest",
+                    "python3", "-m", "sglang.launch_server",
+                    "--model-path", huggingface_repo,
+                    "--host", "0.0.0.0",
+                    "--port", str(port)
+                ])
+
+                # Add TP/DP parameters for SGLang
+                if tp_size > 1:
+                    docker_cmd.extend(["--tp-size", str(tp_size)])
+                if dp_size > 1:
+                    docker_cmd.extend(["--dp-size", str(dp_size)])
+
+            else:
+                # vLLM deployment (default)
+                docker_cmd = [
+                    "docker", "run", "-d",
+                    "--runtime", "nvidia",
+                    "--gpus", "all",
+                    "-v", f"{self._get_hf_cache_dir()}:/root/.cache/huggingface",
+                    "-p", f"{port}:{port}",
+                    "--ipc=host",
+                    "--name", container_name
+                ]
+
+                # Add HuggingFace token if available
+                hf_token = self._get_hf_token()
+                if hf_token:
+                    docker_cmd.extend(["--env", f"HUGGING_FACE_HUB_TOKEN={hf_token}"])
+
+                # Add vLLM image and model arguments
+                docker_cmd.extend([
+                    "vllm/vllm-openai:latest",
+                    "--model", huggingface_repo,
+                    "--host", "0.0.0.0",
+                    "--port", str(port),
+                    "--enable-prompt-tokens-details",
+                    "--trust-remote-code"
+                ])
+
+                # Add TP/DP parameters for vLLM
+                if tp_size > 1:
+                    docker_cmd.extend(["--tensor-parallel-size", str(tp_size)])
+                if dp_size > 1:
+                    docker_cmd.extend(["--pipeline-parallel-size", str(dp_size)])
+
+            logger.info(f"🐳 Running Docker command: {' '.join(docker_cmd)}")
+
+            # Start Docker container
+            result = subprocess.run(docker_cmd, capture_output=True, text=True, timeout=30)
+
+            if result.returncode == 0:
+                container_id = result.stdout.strip()
+                logger.info(f"✅ Docker container started successfully: {container_id}")
+
+                # Store deployment info
+                self._ec2_deployments[model_key] = {
+                    "container_name": container_name,
+                    "container_id": container_id,
+                    "port": port,
+                    "model_path": model_path,
+                    "tag": deployment_tag,
+                    "engine_type": engine_type,
+                    "tp_size": tp_size,
+                    "dp_size": dp_size,
+                    "started_at": datetime.now().isoformat()
+                }
+
+                # Start status monitoring thread
+                self._start_ec2_status_monitoring(model_key, container_name, port)
+
+                # Update status
+                self._deployment_status[model_key] = {
+                    "status": "inprogress",
+                    "message": f"Docker container starting, waiting for model to load...",
+                    "tag": deployment_tag,
+                    "container_name": container_name,
+                    "container_id": container_id,
+                    "port": port,
+                    "engine_type": engine_type,
+                    "tp_size": tp_size,
+                    "dp_size": dp_size,
+                    "started_at": datetime.now().isoformat()
+                }
+
+                return {
+                    "success": True,
+                    "message": f"Docker deployment started for {model_key}",
+                    "tag": deployment_tag,
+                    "container_name": container_name,
+                    "container_id": container_id,
+                    "port": port,
+                    "model_key": model_key
+                }
+
+            else:
+                error_msg = result.stderr or result.stdout or "Unknown Docker error"
+                logger.error(f"❌ Docker deployment failed: {error_msg}")
+
+                self._deployment_status[model_key] = {
+                    "status": "failed",
+                    "message": f"Docker deployment failed: {error_msg}",
+                    "tag": deployment_tag,
+                    "error": error_msg
+                }
+
+                return {
+                    "success": False,
+                    "error": f"Docker deployment failed: {error_msg}",
+                    "model_key": model_key
+                }
+
+        except subprocess.TimeoutExpired:
+            logger.error(f"❌ Docker deployment timeout for {model_key}")
+            self._deployment_status[model_key] = {
+                "status": "failed",
+                "message": "Docker deployment timeout",
+                "tag": deployment_tag,
+                "error": "Deployment timeout after 30 seconds"
+            }
+            return {
+                "success": False,
+                "error": "Docker deployment timeout",
+                "model_key": model_key
+            }
+        except Exception as e:
+            logger.error(f"❌ Docker deployment error for {model_key}: {e}")
+            self._deployment_status[model_key] = {
+                "status": "failed",
+                "message": f"Docker deployment error: {str(e)}",
+                "tag": deployment_tag,
+                "error": str(e)
+            }
+            return {
+                "success": False,
+                "error": f"Docker deployment error: {str(e)}",
+                "model_key": model_key
+            }
+
+    def _get_hf_cache_dir(self) -> str:
+        """Get HuggingFace cache directory."""
+        import os
+        return os.path.expanduser("~/.cache/huggingface")
+
+    def _get_hf_token(self) -> str:
+        """Get HuggingFace token from environment."""
+        import os
+        return os.environ.get("HUGGING_FACE_HUB_TOKEN", os.environ.get("HF_TOKEN", ""))
+
+    def _check_container_running(self, container_name: str) -> bool:
+        """Check if Docker container is running."""
+        try:
+            result = subprocess.run(
+                ["docker", "inspect", container_name, "--format", "{{.State.Running}}"],
+                capture_output=True, text=True, timeout=10
+            )
+            return result.returncode == 0 and result.stdout.strip().lower() == "true"
+        except:
+            return False
+
+    def _start_ec2_status_monitoring(self, model_key: str, container_name: str, port: int):
+        """Start a background thread to monitor EC2 deployment status."""
+        def monitor_status():
+            max_wait_time = 600  # 10 minutes max wait
+            check_interval = 10  # Check every 10 seconds
+            start_time = time.time()
+
+            while time.time() - start_time < max_wait_time:
+                try:
+                    # Check if container is still running
+                    if not self._check_container_running(container_name):
+                        logger.error(f"❌ Container {container_name} stopped unexpectedly")
+                        self._deployment_status[model_key] = {
+                            "status": "failed",
+                            "message": "Docker container stopped unexpectedly",
+                            "tag": self._deployment_status[model_key].get("tag"),
+                            "container_name": container_name
+                        }
+                        break
+
+                    # Check if model server is ready by making a health check
+                    if self._check_model_health(port):
+                        logger.info(f"✅ Model {model_key} is ready and healthy")
+                        self._deployment_status[model_key] = {
+                            "status": "deployed",
+                            "message": f"Model {model_key} deployed successfully on EC2",
+                            "tag": self._deployment_status[model_key].get("tag"),
+                            "container_name": container_name,
+                            "port": port,
+                            "endpoint": f"http://localhost:{port}"
+                        }
+                        break
+
+                    time.sleep(check_interval)
+
+                except Exception as e:
+                    logger.warning(f"Status check error for {model_key}: {e}")
+                    time.sleep(check_interval)
+
+            else:
+                # Timeout reached
+                logger.error(f"❌ Deployment timeout for {model_key} after {max_wait_time}s")
+                self._deployment_status[model_key] = {
+                    "status": "failed",
+                    "message": f"Deployment timeout after {max_wait_time} seconds",
+                    "tag": self._deployment_status[model_key].get("tag"),
+                    "container_name": container_name
+                }
+
+            # Clean up monitoring thread
+            if model_key in self._ec2_status_checkers:
+                del self._ec2_status_checkers[model_key]
+
+        # Start monitoring thread
+        monitor_thread = threading.Thread(target=monitor_status, daemon=True)
+        monitor_thread.start()
+        self._ec2_status_checkers[model_key] = monitor_thread
+        logger.info(f"🔍 Started status monitoring for {model_key}")
+
+    def _check_model_health(self, port: int) -> bool:
+        """Check if the model server is healthy and ready."""
+        try:
+            import requests
+            health_url = f"http://localhost:{port}/health"
+            response = requests.get(health_url, timeout=5)
+            return response.status_code == 200
+        except:
+            # Try alternative endpoints that vLLM might expose
+            try:
+                import requests
+                models_url = f"http://localhost:{port}/v1/models"
+                response = requests.get(models_url, timeout=5)
+                return response.status_code == 200
+            except:
+                return False
+
+    def stop_ec2_model(self, model_key: str) -> Dict[str, Any]:
+        """Stop an EC2 Docker deployment."""
+        if model_key not in self._ec2_deployments:
+            return {
+                "success": False,
+                "error": f"Model {model_key} not found in EC2 deployments"
+            }
+
+        deployment_info = self._ec2_deployments[model_key]
+        container_name = deployment_info["container_name"]
+
+        try:
+            logger.info(f"🛑 Stopping Docker container for {model_key}: {container_name}")
+
+            # Stop and remove container
+            stop_result = subprocess.run(
+                ["docker", "stop", container_name],
+                capture_output=True, text=True, timeout=30
+            )
+
+            subprocess.run(
+                ["docker", "rm", container_name],
+                capture_output=True, text=True, timeout=30
+            )
+
+            if stop_result.returncode == 0:
+                logger.info(f"✅ Docker container stopped successfully: {container_name}")
+
+                # Clean up tracking
+                del self._ec2_deployments[model_key]
+                if model_key in self._ec2_status_checkers:
+                    del self._ec2_status_checkers[model_key]
+
+                # Update status
+                self._deployment_status[model_key] = {
+                    "status": "not_deployed",
+                    "message": "Model stopped successfully",
+                    "tag": None
+                }
+
+                return {
+                    "success": True,
+                    "message": f"Model {model_key} stopped successfully",
+                    "model_key": model_key
+                }
+            else:
+                error_msg = stop_result.stderr or "Unknown error stopping container"
+                logger.error(f"❌ Failed to stop container {container_name}: {error_msg}")
+                return {
+                    "success": False,
+                    "error": f"Failed to stop container: {error_msg}",
+                    "model_key": model_key
+                }
+
+        except Exception as e:
+            logger.error(f"❌ Error stopping EC2 model {model_key}: {e}")
+            return {
+                "success": False,
+                "error": f"Error stopping model: {str(e)}",
+                "model_key": model_key
+            }
+
     def delete_emd_model(self, model_key: str) -> Dict[str, Any]:
         """Delete an EMD model deployment.
         

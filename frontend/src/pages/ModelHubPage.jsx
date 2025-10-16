@@ -52,27 +52,18 @@ const ModelHubPage = () => {
   });
   
   const [deploymentConfig, setDeploymentConfig] = useState(() => {
-    try {
-      const saved = localStorage.getItem('modelHub_deploymentConfig');
-      return saved ? JSON.parse(saved) : {
-        method: 'SageMaker Endpoint',
-        framework: 'vllm',
-        serviceType: 'sagemaker_realtime',
-        machineType: 'g5.2xlarge',
-        tpSize: 1,
-        dpSize: 1
-      };
-    } catch (error) {
-      console.error('Failed to load deployment config from localStorage:', error);
-      return {
-        method: 'SageMaker Endpoint',
-        framework: 'vllm',
-        serviceType: 'sagemaker_realtime',
-        machineType: 'g5.2xlarge',
-        tpSize: 1,
-        dpSize: 1
-      };
-    }
+    // Clear the old localStorage data first to ensure fresh defaults
+    localStorage.removeItem('modelHub_deploymentConfig');
+
+    // Return the default config
+    return {
+      method: 'EC2',
+      framework: 'vllm',
+      serviceType: 'vllm_realtime',
+      machineType: 'g5.2xlarge',
+      tpSize: 1,
+      dpSize: 1
+    };
   });
   // Memoized category templates to avoid recreating icons
   const categoryTemplates = useMemo(() => ({
@@ -772,9 +763,9 @@ const ModelHubPage = () => {
                       value={deploymentConfig.method}
                       onChange={(value) => setDeploymentConfig(prev => ({ ...prev, method: value }))}
                       options={[
-                        { value: 'SageMaker Endpoint', label: 'SageMaker Endpoint' },
-                        { value: 'SageMaker HyperPod', label: 'SageMaker HyperPod' },
-                        { value: 'EKS', label: 'EKS' },
+                        // { value: 'SageMaker Endpoint', label: 'SageMaker Endpoint' },
+                        // { value: 'SageMaker HyperPod', label: 'SageMaker HyperPod' },
+                        // { value: 'EKS', label: 'EKS' },
                         { value: 'EC2', label: 'EC2' }
                       ]}
                     />
@@ -788,8 +779,6 @@ const ModelHubPage = () => {
                       options={[
                         { value: 'vllm', label: 'vLLM' },
                         { value: 'sglang', label: 'SGLang' },
-                        { value: 'tgi', label: 'Text Generation Inference' },
-                        { value: 'transformers', label: 'Transformers' }
                       ]}
                     />
                   </Form.Item>

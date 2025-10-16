@@ -46,27 +46,58 @@ def init_emd():
 
 @model_bp.route('/deploy-models', methods=['POST'])
 def deploy_models():
-    """Deploy EMD models."""
+    """Deploy models using different deployment methods."""
     try:
         data = request.get_json() or {}
         models = data.get('models', [])
         instance_type = data.get('instance_type', 'ml.g5.2xlarge')
         engine_type = data.get('engine_type', 'vllm')
         service_type = data.get('service_type', 'sagemaker_realtime')
-        
+
+        # Get deployment method - defaults to 'EMD' for backward compatibility
+        method = data.get('method', 'EMD')
+
+        # Get TP/DP parameters for EC2 deployment
+        tp_size = data.get('tpSize', 1)
+        dp_size = data.get('dpSize', 1)
+
         print(f"🚀 DEBUG: Deploy request received:")
         print(f"  Models: {models}")
+        print(f"  Method: {method}")
         print(f"  Instance type: {instance_type}")
         print(f"  Engine type: {engine_type}")
         print(f"  Service type: {service_type}")
-        
+        print(f"  TP size: {tp_size}")
+        print(f"  DP size: {dp_size}")
+
         results = {}
         for model_key in models:
             print(f"🚀 DEBUG: Deploying model: {model_key}")
-            result = model_service.deploy_emd_model(model_key, instance_type, engine_type, service_type)
+
+            if method == 'EC2':
+                # Use EC2 Docker deployment
+                port = 8000  # Default port, could be made configurable
+                result = model_service.deploy_model_on_ec2(
+                    model_key=model_key,
+                    instance_type=instance_type,
+                    engine_type=engine_type,
+                    service_type=service_type,
+                    port=port,
+                    tp_size=tp_size,
+                    dp_size=dp_size
+                )
+            else:
+                # Use EMD deployment (default)
+                result = model_service.deploy_emd_model(
+                    model_key=model_key,
+                    instance_type=instance_type,
+                    engine_type=engine_type,
+                    service_type=service_type
+                )
+
             print(f"🚀 DEBUG: Deployment result for {model_key}: {result}")
             results[model_key] = result
-        
+
         return jsonify({
             "status": "success",
             "results": results

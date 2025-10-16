@@ -333,7 +333,7 @@ const StressTestPage = () => {
           prefix_length: values.prefix_length || 0,
           input_tokens: values.input_tokens,
           output_tokens: values.output_tokens,
-          temperature: 0.1,
+          temperature: 0.6,
           dataset: values.dataset,
           dataset_path: values.dataset_path,
           deployment_method: values.deployment_method
