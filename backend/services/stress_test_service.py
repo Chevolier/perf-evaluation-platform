@@ -982,6 +982,7 @@ try:
         prefix_length={prefix_length},
         min_prompt_length={min_prompt_length},
         max_prompt_length={max_prompt_length},
+        extra_args={{'ignore_eos': True}},
         tokenizer_path='{tokenizer_path}',
         temperature={temperature},
         outputs_dir='{output_dir}',
@@ -2102,6 +2103,9 @@ except Exception as e:
             logger.error(f"Failed to generate enhanced config for session {session_id}: {e}")
 
     def _run_evalscope_with_custom_api(self, api_url: str, model_name: str, test_params: Dict[str, Any], session_id: str) -> Dict[str, Any]:
+        # No-op function for functions that don't have litellm process
+        def cleanup_litellm_process():
+            pass
         """Run stress test using evalscope with custom API endpoint.
         
         Args:
@@ -2270,6 +2274,7 @@ try:
         prefix_length={prefix_length},
         min_prompt_length={min_prompt_length},
         max_prompt_length={max_prompt_length},
+        extra_args={{'ignore_eos': True}},
         tokenizer_path='{tokenizer_path}',
         temperature={temperature},
         outputs_dir='{output_dir}',
@@ -2344,6 +2349,8 @@ except Exception as e:
                         except Exception as save_error:
                             logger.error(f"Failed to save results (non-critical): {save_error}")
                         
+                        # Clean up litellm process before returning
+                        cleanup_litellm_process()
                         return file_results
                     except Exception as e:
                         logger.error(f"Failed to parse results file: {e}")
@@ -2383,6 +2390,8 @@ except Exception as e:
                     logger.error(f"Failed to save results (non-critical): {save_error}")
                     # Continue processing even if save fails
                 
+                # Clean up litellm process before returning
+                cleanup_litellm_process()
                 return transformed_results
             
             # Fallback to parsing from stdout if no subfolders found
@@ -2415,6 +2424,8 @@ except Exception as e:
                         except Exception as save_error:
                             logger.error(f"Failed to save results (non-critical): {save_error}")
                         
+                        # Clean up litellm process before returning
+                        cleanup_litellm_process()
                         return file_results
                     except Exception as e:
                         logger.error(f"Failed to read results from file: {e}")
@@ -2454,6 +2465,8 @@ except Exception as e:
                     logger.error(f"Failed to save results (non-critical): {save_error}")
                     # Continue processing even if save fails
                 
+                # Clean up litellm process before returning
+                cleanup_litellm_process()
                 return transformed_results
                 
             except json.JSONDecodeError as e:
@@ -2522,6 +2535,7 @@ except Exception as e:
         logger.info(f"Created config.yaml file at {config_file}")
 
         # Start litellm server
+        litellm_process = None  # Initialize process variable
         try:
             import subprocess
             import time
@@ -2559,6 +2573,13 @@ except Exception as e:
                             time.sleep(5)
                         else:
                             logger.error("Failed to start litellm server after 60 seconds")
+                            # Clean up failed process
+                            if litellm_process:
+                                try:
+                                    litellm_process.terminate()
+                                    litellm_process.wait(timeout=10)
+                                except:
+                                    pass
                             raise Exception("无法启动litellm服务器")
 
         except ImportError:
@@ -2566,19 +2587,26 @@ except Exception as e:
             raise Exception("litellm未安装，请运行: pip install litellm")
         except Exception as e:
             logger.error(f"Error starting litellm server: {e}")
+            # Clean up failed process
+            if litellm_process:
+                try:
+                    litellm_process.terminate()
+                    litellm_process.wait(timeout=10)
+                except:
+                    pass
             raise Exception(f"启动litellm服务器失败: {str(e)}")
 
         logger.info(f"[DEBUG] Custom API - Raw parameters from frontend:")
         logger.info(f"[DEBUG]   num_requests: {num_requests_list} (type: {type(num_requests_list)})")
         logger.info(f"[DEBUG]   concurrency: {concurrency_list} (type: {type(concurrency_list)})")
         logger.info(f"[DEBUG]   prefix_length: {prefix_length} (type: {type(prefix_length)})")
-        
+
         # Convert to lists if single values were provided for backward compatibility
         if not isinstance(num_requests_list, list):
             num_requests_list = [num_requests_list]
         if not isinstance(concurrency_list, list):
             concurrency_list = [concurrency_list]
-        
+
         # Ensure lists are not empty
         if not num_requests_list:
             logger.warning("[DEBUG] Custom API - num_requests_list is empty, using default [50]")
@@ -2586,13 +2614,28 @@ except Exception as e:
         if not concurrency_list:
             logger.warning("[DEBUG] Custom API - concurrency_list is empty, using default [5]")
             concurrency_list = [5]
-            
+
         # Validate that both lists have the same length for paired combinations
         if len(num_requests_list) != len(concurrency_list):
             raise Exception(f"请求总数和并发数的值数量必须相同。当前请求总数有 {len(num_requests_list)} 个值，并发数有 {len(concurrency_list)} 个值。")
-        
+
+        # Helper function to clean up litellm process
+        def cleanup_litellm_process():
+            if litellm_process:
+                try:
+                    logger.info("Stopping litellm server process...")
+                    litellm_process.terminate()
+                    litellm_process.wait(timeout=10)
+                    logger.info("Litellm server process stopped successfully")
+                except subprocess.TimeoutExpired:
+                    logger.warning("Litellm server process did not terminate gracefully, forcing kill...")
+                    litellm_process.kill()
+                    litellm_process.wait()
+                except Exception as cleanup_error:
+                    logger.error(f"Error stopping litellm server process: {cleanup_error}")
+
         logger.info(f"Starting evalscope stress test with custom API: {num_requests_list} requests, {concurrency_list} concurrent")
-        
+
         self._update_session(session_id, {
             "current_message": "测试自定义API端点连接..."
         })
@@ -2707,6 +2750,7 @@ try:
         prefix_length={prefix_length},
         min_prompt_length={min_prompt_length},
         max_prompt_length={max_prompt_length},
+        extra_args={{'ignore_eos': True}},
         tokenizer_path='{tokenizer_path}',
         temperature={temperature},
         outputs_dir='{output_dir}',
@@ -2781,6 +2825,8 @@ except Exception as e:
                         except Exception as save_error:
                             logger.error(f"Failed to save results (non-critical): {save_error}")
                         
+                        # Clean up litellm process before returning
+                        cleanup_litellm_process()
                         return file_results
                     except Exception as e:
                         logger.error(f"Failed to parse results file: {e}")
@@ -2820,6 +2866,8 @@ except Exception as e:
                     logger.error(f"Failed to save results (non-critical): {save_error}")
                     # Continue processing even if save fails
                 
+                # Clean up litellm process before returning
+                cleanup_litellm_process()
                 return transformed_results
             
             # Fallback to parsing from stdout if no subfolders found
@@ -2852,6 +2900,8 @@ except Exception as e:
                         except Exception as save_error:
                             logger.error(f"Failed to save results (non-critical): {save_error}")
                         
+                        # Clean up litellm process before returning
+                        cleanup_litellm_process()
                         return file_results
                     except Exception as e:
                         logger.error(f"Failed to read results from file: {e}")
@@ -2891,6 +2941,8 @@ except Exception as e:
                     logger.error(f"Failed to save results (non-critical): {save_error}")
                     # Continue processing even if save fails
                 
+                # Clean up litellm process before returning
+                cleanup_litellm_process()
                 return transformed_results
                 
             except json.JSONDecodeError as e:
@@ -2900,9 +2952,11 @@ except Exception as e:
             
         except subprocess.TimeoutExpired as e:
             logger.error(f"Custom API Evalscope subprocess timed out after {total_timeout} seconds for session {session_id}")
+            cleanup_litellm_process()
             raise Exception(f"Evalscope执行超时 ({total_timeout}秒)，可能是模型连接问题或tokenizer加载缓慢。当前运行 {num_combinations} 个组合测试，建议减少测试参数组合数量")
         except Exception as e:
             logger.error(f"Custom API Evalscope execution failed for session {session_id}: {e}")
+            cleanup_litellm_process()
             raise Exception(f"Evalscope执行失败: {str(e)}")
 
     def _get_emd_api_url(self, model_path: str, deployment_tag: str) -> str:

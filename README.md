@@ -162,6 +162,15 @@ nohup vllm serve /home/ec2-user/SageMaker/efs/Models/Qwen3-8B \
     --max-model-len 2048 \
     --enable-prompt-tokens-details \
     >logs/serve_qwen3-8b.out 2>&1 &
+
+nohup vllm serve /home/ec2-user/SageMaker/efs/Models/Qwen3-Coder-30B-A3B-Instruct \
+    --host 0.0.0.0 --port 8080 \
+    --dtype bfloat16\
+    --gpu-memory-utilization 0.9 \
+    --max-model-len 2048 \
+    --enable-prompt-tokens-details \
+    --tensor-parallel-size 4 \
+    >logs/serve_qwen3-coder-32b-a3b.out 2>&1 &
     
 ```
 You will obtain:
