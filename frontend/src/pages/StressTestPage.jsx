@@ -1706,8 +1706,8 @@ const StressTestPage = () => {
                 prefix_length: 0,
                 input_tokens: 32,
                 output_tokens: 32,
-                deployment_method: inputMode === 'dropdown' ? "SageMaker Endpoint" :
-                                  inputMode === 'sagemaker' ? "SageMaker Endpoint" : "EC2",
+                deployment_method: inputMode === 'dropdown' ? "EC2" :
+                                  inputMode === 'sagemaker' ? "EC2": "SageMaker Endpoint",
                 dataset: "random",
                 image_width: 512,
                 image_height: 512,
@@ -1801,9 +1801,9 @@ const StressTestPage = () => {
                         style={{ marginBottom: 16 }}
                       >
                         <Select placeholder="选择部署方式">
-                          <Option value="SageMaker Endpoint">Endpoint</Option>
+                          {/* <Option value="SageMaker Endpoint">Endpoint</Option>
                           <Option value="SageMaker HyperPod">HyperPod</Option>
-                          <Option value="EKS">EKS</Option>
+                          <Option value="EKS">EKS</Option> */}
                           <Option value="EC2">EC2</Option>
                         </Select>
                       </Form.Item>
@@ -1980,9 +1980,9 @@ const StressTestPage = () => {
                         style={{ marginBottom: 16 }}
                       >
                         <Select placeholder="选择部署方式">
-                          <Option value="SageMaker Endpoint">Endpoint</Option>
+                          {/* <Option value="SageMaker Endpoint">Endpoint</Option>
                           <Option value="SageMaker HyperPod">HyperPod</Option>
-                          <Option value="EKS">EKS</Option>
+                          <Option value="EKS">EKS</Option> */}
                           <Option value="EC2">EC2</Option>
                         </Select>
                       </Form.Item>
@@ -2233,13 +2233,13 @@ const StressTestPage = () => {
                         name="deployment_method"
                         label="部署方式"
                         rules={[{ required: true, message: '请选择部署方式' }]}
-                        initialValue="SageMaker Endpoint"
+                        initialValue="EC2"
                         style={{ marginBottom: 16 }}
                       >
                         <Select placeholder="选择部署方式">
-                          <Option value="SageMaker Endpoint">Endpoint</Option>
+                          {/* <Option value="SageMaker Endpoint">Endpoint</Option>
                           <Option value="SageMaker HyperPod">HyperPod</Option>
-                          <Option value="EKS">EKS</Option>
+                          <Option value="EKS">EKS</Option> */}
                           <Option value="EC2">EC2</Option>
                         </Select>
                       </Form.Item>

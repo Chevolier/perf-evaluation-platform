@@ -713,3 +713,97 @@ class ModelService:
                 "model_key": model_key
             }
 
+    def register_existing_deployment(self, model_key: str, container_name: str, port: int, tag: str = None) -> Dict[str, Any]:
+        """Register an existing Docker deployment that wasn't deployed through the platform.
+
+        Args:
+            model_key: Model key in the registry (e.g., "qwen3-8b")
+            container_name: Name of the running Docker container
+            port: Port the container is running on
+            tag: Optional deployment tag
+
+        Returns:
+            Success/failure result
+        """
+        try:
+            # Verify model exists in registry
+            if not self.registry.is_ec2_model(model_key):
+                return {
+                    "success": False,
+                    "error": f"Model {model_key} not found in EC2 model registry"
+                }
+
+            # Check if container is actually running
+            if not self._check_container_running(container_name):
+                return {
+                    "success": False,
+                    "error": f"Container {container_name} is not running"
+                }
+
+            # Check if already registered
+            if model_key in self._ec2_deployments:
+                existing = self._ec2_deployments[model_key]
+                if existing["container_name"] == container_name:
+                    return {
+                        "success": True,
+                        "message": f"Model {model_key} already registered with container {container_name}",
+                        "model_key": model_key
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "error": f"Model {model_key} already registered with different container {existing['container_name']}"
+                    }
+
+            # Generate tag if not provided
+            if not tag:
+                tag = f"manual-{int(time.time())}"
+
+            # Get container ID
+            try:
+                container_id_result = subprocess.run(
+                    ["docker", "inspect", container_name, "--format", "{{.Id}}"],
+                    capture_output=True, text=True, timeout=10
+                )
+                container_id = container_id_result.stdout.strip() if container_id_result.returncode == 0 else "unknown"
+            except:
+                container_id = "unknown"
+
+            # Register the deployment
+            model_info = self.registry.get_model_info(model_key)
+            self._ec2_deployments[model_key] = {
+                "container_name": container_name,
+                "container_id": container_id,
+                "port": port,
+                "model_path": model_info.get("model_path", model_key),
+                "tag": tag,
+                "deployment_time": time.time(),
+                "registered_manually": True
+            }
+
+            # Set deployment status as deployed (since container is running)
+            self._deployment_status[model_key] = {
+                "status": "deployed",
+                "message": "Model is deployed and ready (registered manually)",
+                "tag": tag,
+                "endpoint": f"http://localhost:{port}"
+            }
+
+            logger.info(f"✅ Manually registered existing deployment: {model_key} -> {container_name}:{port}")
+
+            return {
+                "success": True,
+                "message": f"Successfully registered existing deployment for {model_key}",
+                "model_key": model_key,
+                "container_name": container_name,
+                "port": port,
+                "tag": tag
+            }
+
+        except Exception as e:
+            logger.error(f"❌ Error registering existing deployment: {e}")
+            return {
+                "success": False,
+                "error": f"Error registering deployment: {str(e)}"
+            }
+

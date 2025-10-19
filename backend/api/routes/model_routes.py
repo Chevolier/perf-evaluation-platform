@@ -124,3 +124,31 @@ def stop_model():
     except Exception as e:
         logger.error(f"Error stopping model: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
+@model_bp.route('/register-deployment', methods=['POST'])
+def register_existing_deployment():
+    """Register an existing Docker deployment that wasn't deployed through the platform."""
+    try:
+        data = request.get_json() or {}
+        model_key = data.get('model_key')
+        container_name = data.get('container_name')
+        port = data.get('port')
+        tag = data.get('tag')
+
+        if not all([model_key, container_name, port]):
+            return jsonify({
+                "success": False,
+                "error": "model_key, container_name, and port are required"
+            }), 400
+
+        try:
+            port = int(port)
+        except ValueError:
+            return jsonify({"success": False, "error": "Port must be a valid integer"}), 400
+
+        result = model_service.register_existing_deployment(model_key, container_name, port, tag)
+        return jsonify(result)
+
+    except Exception as e:
+        logger.error(f"Error registering existing deployment: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500

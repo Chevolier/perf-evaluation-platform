@@ -872,18 +872,21 @@ class StressTestService:
         })
         
         if model_registry.is_ec2_model(model_key):
-            # Get EMD model info
-            deployment_status = model_service.get_ec2_deployment_status(model_key)
-            if deployment_status.get('status') != 'deployed':
-                raise Exception(f"EMD模型 {model_key} 未部署或不可用: {deployment_status.get('message')}")
-            
+            print(f"model_key: {model_key}")
+            # Check EC2 model status using the same method as the frontend
+            status_result = model_service.check_multiple_model_status([model_key])
+            model_status = status_result.get('model_status', {}).get(model_key)
+
+            if not model_status or model_status.get('status') != 'deployed':
+                raise Exception(f"EC2模型 {model_key} 未部署或不可用: {model_status.get('message', 'Model not deployed') if model_status else 'Model not found'}")
+
             model_info = model_registry.get_model_info(model_key)
             model_path = model_info.get('model_path', model_key)
-            deployment_tag = deployment_status.get('tag')
-            
-            # Get dynamic EMD API URL from deployment status
-            api_url = self._get_emd_api_url(model_path, deployment_tag)
-            
+            deployment_tag = model_status.get('tag')
+
+            # Get dynamic EC2 API URL from deployment status
+            api_url = self._get_ec2_api_url(model_path, deployment_tag, model_status.get('endpoint'))
+
             # Use the full deployed model name with tag
             if deployment_tag:
                 model_name = f"{model_path}/{deployment_tag}"
@@ -3039,6 +3042,39 @@ except Exception as e:
         except Exception as e:
             logger.error(f"Error getting EMD API URL: {e}")
             raise Exception(f"获取EMD API端点失败: {str(e)}")
+
+    def _get_ec2_api_url(self, model_path: str, deployment_tag: str, endpoint: str) -> str:
+        """Get EC2 API URL for Docker deployed models.
+
+        Args:
+            model_path: Model path (e.g., "Qwen3-8B")
+            deployment_tag: Deployment tag (optional)
+            endpoint: Endpoint URL from model status (e.g., "http://localhost:8000")
+
+        Returns:
+            Complete API URL for the deployed model
+
+        Raises:
+            Exception: If unable to construct API URL
+        """
+        try:
+            if endpoint:
+                # Use the endpoint provided by the model status
+                if endpoint.endswith('/'):
+                    api_url = f"{endpoint}v1/chat/completions"
+                else:
+                    api_url = f"{endpoint}/v1/chat/completions"
+                logger.info(f"Using EC2 API URL: {api_url}")
+                return api_url
+            else:
+                # Fallback to default localhost pattern if no endpoint provided
+                # This shouldn't happen with proper EC2 model registration
+                logger.warning(f"No endpoint provided for EC2 model {model_path}, using fallback")
+                raise Exception(f"无法获取EC2模型 {model_path} 的API端点")
+
+        except Exception as e:
+            logger.error(f"Error getting EC2 API URL: {e}")
+            raise Exception(f"获取EC2 API端点失败: {str(e)}")
 
     def _get_tokenizer_path(self, model_name: str) -> str:
         """Get appropriate tokenizer path based on model name.
