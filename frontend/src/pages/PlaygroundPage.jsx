@@ -48,11 +48,23 @@ const PlaygroundPage = ({
   onParamsChange,
   onModelChange
 }) => {
-  // Load inference results from localStorage
+  // Load inference results from localStorage and clean up incomplete results
   const [inferenceResults, setInferenceResults] = useState(() => {
     try {
       const saved = localStorage.getItem('playground_inferenceResults');
-      return saved ? JSON.parse(saved) : {};
+      if (saved) {
+        const parsedResults = JSON.parse(saved);
+        // Clean up incomplete results (those without proper status)
+        const cleanResults = {};
+        Object.entries(parsedResults).forEach(([modelName, result]) => {
+          // Only keep results with complete status
+          if (result && ['success', 'error', 'not_deployed'].includes(result.status)) {
+            cleanResults[modelName] = result;
+          }
+        });
+        return cleanResults;
+      }
+      return {};
     } catch (error) {
       console.error('Failed to load inference results from localStorage:', error);
       return {};
@@ -140,17 +152,31 @@ const PlaygroundPage = ({
   }, [originalFiles]);
 
 
+  // Clear inference results cache
+  const clearInferenceCache = useCallback(() => {
+    console.log('🧹 Clearing inference results cache');
+    setInferenceResults({});
+    setIsInferring(false);
+    try {
+      localStorage.removeItem('playground_inferenceResults');
+    } catch (error) {
+      console.error('Failed to clear inference results cache:', error);
+    }
+  }, []);
+
   // Handle page refresh (Command+R on Mac, F5 on Windows/Linux)
   const handlePageRefresh = useCallback((event) => {
     // Check for refresh key combinations
     if ((event.metaKey && event.key === 'r') || event.key === 'F5') {
       event.preventDefault();
-      
-      // Allow normal page refresh without clearing state
-      // State will be preserved through localStorage and restored on page load
+
+      // Clear inference cache on refresh to prevent stuck "处理中" states
+      clearInferenceCache();
+
+      // Allow normal page refresh
       window.location.reload();
     }
-  }, []);
+  }, [clearInferenceCache]);
 
   // Add keyboard event listener for refresh
   useEffect(() => {
@@ -954,11 +980,24 @@ const PlaygroundPage = ({
 
         {/* 右侧：结果展示 */}
         <Col xs={24} lg={14} style={{ height: '100%' }}>
-          <Card 
-            title="推理结果" 
+          <Card
+            title="推理结果"
             size="small"
             style={{ height: '100%' }}
             bodyStyle={{ maxHeight: 'calc(100vh - 200px)', overflowY: 'auto', padding: '16px' }}
+            extra={
+              Object.keys(inferenceResults).length > 0 && (
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<ClearOutlined />}
+                  onClick={clearInferenceCache}
+                  style={{ color: '#999' }}
+                >
+                  清除结果
+                </Button>
+              )
+            }
           >
             {Object.keys(inferenceResults).length === 0 && !isInferring ? (
               <Empty
