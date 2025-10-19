@@ -397,12 +397,12 @@ const ModelHubPage = () => {
         }
       }));
       
-      const response = await fetch('/api/delete-model', {
+      const response = await fetch('/api/stop-model', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           model_key: modelKey
         })
       });
