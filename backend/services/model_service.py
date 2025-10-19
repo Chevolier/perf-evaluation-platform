@@ -3,6 +3,9 @@
 import time
 import subprocess
 import threading
+import json
+import os
+from pathlib import Path
 from typing import Dict, Any, List
 from datetime import datetime
 
@@ -24,8 +27,84 @@ class ModelService:
         # EC2 Docker deployment tracking
         self._ec2_deployments = {}  # Store running Docker containers info
         self._ec2_status_checkers = {}  # Store status checker threads
-    
-    
+
+        # Deployment state persistence
+        self._state_dir = Path("data/deployment_state")
+        self._state_dir.mkdir(parents=True, exist_ok=True)
+        self._deployments_file = self._state_dir / "ec2_deployments.json"
+        self._status_file = self._state_dir / "deployment_status.json"
+
+        # Load existing deployment state on startup
+        self._load_deployment_state()
+
+    def _save_deployment_state(self):
+        """Save current deployment state to files."""
+        try:
+            # Save EC2 deployments
+            with open(self._deployments_file, 'w') as f:
+                json.dump(self._ec2_deployments, f, indent=2, default=str)
+
+            # Save deployment status
+            with open(self._status_file, 'w') as f:
+                json.dump(self._deployment_status, f, indent=2, default=str)
+
+            logger.debug(f"💾 Saved deployment state: {len(self._ec2_deployments)} deployments, {len(self._deployment_status)} statuses")
+        except Exception as e:
+            logger.error(f"❌ Failed to save deployment state: {e}")
+
+    def _load_deployment_state(self):
+        """Load deployment state from files on startup."""
+        try:
+            # Load EC2 deployments
+            if self._deployments_file.exists():
+                with open(self._deployments_file, 'r') as f:
+                    self._ec2_deployments = json.load(f)
+                logger.info(f"📂 Loaded {len(self._ec2_deployments)} EC2 deployments from state file")
+
+            # Load deployment status
+            if self._status_file.exists():
+                with open(self._status_file, 'r') as f:
+                    self._deployment_status = json.load(f)
+                logger.info(f"📂 Loaded {len(self._deployment_status)} deployment statuses from state file")
+
+            # Validate loaded deployments against running containers
+            self._validate_loaded_deployments()
+
+        except Exception as e:
+            logger.error(f"❌ Failed to load deployment state: {e}")
+            # Initialize with empty state on error
+            self._ec2_deployments = {}
+            self._deployment_status = {}
+
+    def _validate_loaded_deployments(self):
+        """Validate that loaded deployments match actual running containers."""
+        if not self._ec2_deployments:
+            return
+
+        invalid_deployments = []
+        for model_key, deployment_info in self._ec2_deployments.items():
+            container_name = deployment_info.get("container_name")
+            if not container_name or not self._check_container_running(container_name):
+                logger.warning(f"⚠️ Container {container_name} for model {model_key} is not running, marking as failed")
+                invalid_deployments.append(model_key)
+
+                # Update status to reflect container not running
+                self._deployment_status[model_key] = {
+                    "status": "failed",
+                    "message": "Container stopped unexpectedly (detected on startup)",
+                    "tag": deployment_info.get("tag"),
+                    "container_name": container_name
+                }
+
+        # Remove invalid deployments
+        for model_key in invalid_deployments:
+            del self._ec2_deployments[model_key]
+
+        if invalid_deployments:
+            logger.info(f"🧹 Cleaned up {len(invalid_deployments)} invalid deployments on startup")
+            # Save the cleaned state
+            self._save_deployment_state()
+
     def get_all_models(self) -> Dict[str, Dict[str, Any]]:
         """Get all available models.
         
@@ -471,6 +550,9 @@ class ModelService:
                     "started_at": datetime.now().isoformat()
                 }
 
+                # Save deployment state to persist across restarts
+                self._save_deployment_state()
+
                 # Start status monitoring thread
                 self._start_ec2_status_monitoring(model_key, container_name, port)
 
@@ -606,6 +688,8 @@ class ModelService:
                             "port": port,
                             "endpoint": f"http://localhost:{port}"
                         }
+                        # Save state when deployment becomes ready
+                        self._save_deployment_state()
                         break
 
                     time.sleep(check_interval)
@@ -790,6 +874,9 @@ class ModelService:
             }
 
             logger.info(f"✅ Manually registered existing deployment: {model_key} -> {container_name}:{port}")
+
+            # Save state after manual registration
+            self._save_deployment_state()
 
             return {
                 "success": True,

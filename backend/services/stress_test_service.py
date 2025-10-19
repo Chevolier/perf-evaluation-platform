@@ -887,11 +887,9 @@ class StressTestService:
             # Get dynamic EC2 API URL from deployment status
             api_url = self._get_ec2_api_url(model_path, deployment_tag, model_status.get('endpoint'))
 
-            # Use the full deployed model name with tag
-            if deployment_tag:
-                model_name = f"{model_path}/{deployment_tag}"
-            else:
-                model_name = model_path
+            # For EC2 Docker deployments, use only the model_path as the model name
+            # The deployment tag is just for tracking, not part of the served model name
+            model_name = model_path
             # Use appropriate tokenizer path based on model
             tokenizer_path = self._get_tokenizer_path(model_name)
             
