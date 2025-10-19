@@ -66,9 +66,9 @@ class InferenceService:
                     target=self._process_bedrock_model,
                     args=(model, data, result_queue)
                 )
-            elif self.registry.is_emd_model(model):
+            elif self.registry.is_ec2_model(model):
                 thread = threading.Thread(
-                    target=self._process_emd_model,
+                    target=self._process_ec2_model,
                     args=(model, data, result_queue)
                 )
             else:
@@ -269,22 +269,21 @@ class InferenceService:
                 'message': str(e)
             })
     
-    def _process_emd_model(self, model: str, data: Dict[str, Any], result_queue: queue.Queue) -> None:
-        """Process inference for an EMD model.
-        
+    def _process_ec2_model(self, model: str, data: Dict[str, Any], result_queue: queue.Queue) -> None:
+        """Process inference for an EC2 Docker-deployed model.
+
         Args:
-            model: Model identifier
+            model: Model identifier (platform key like 'qwen3-8b')
             data: Request data
             result_queue: Queue to put results
         """
         try:
             import requests
-            from .model_service import ModelService
-            model_service = ModelService()
-            
+            from ..api.routes.model_routes import model_service
+
             # Check if model is deployed
-            deployment_status = model_service.get_emd_deployment_status(model)
-            
+            deployment_status = model_service.get_ec2_deployment_status(model)
+
             if deployment_status.get('status') != 'deployed':
                 result_queue.put({
                     'model': model,
@@ -292,34 +291,37 @@ class InferenceService:
                     'message': f'Model {model} is not deployed: {deployment_status.get("message", "Unknown status")}'
                 })
                 return
-            
+
             start_time = datetime.now()
-            
+
             # Get model information
             model_info = self.registry.get_model_info(model)
             if not model_info:
                 raise ValueError(f"Model {model} not found in registry")
+
+            # Get the actual HuggingFace repo name for vLLM API call
+            huggingface_repo = model_info.get('huggingface_repo', model)
+
+            # Get the deployment endpoint
+            endpoint = deployment_status.get('endpoint', 'http://localhost:8000')
             
-            # Get model path for EMD lookup
-            model_path = model_info.get('model_path', model)
-            
-            # Prepare request data for EMD
+            # Prepare request data for vLLM API
             text_prompt = data.get('text', '')
             frames = data.get('frames', [])
             max_tokens = data.get('max_tokens', 1000)
             temperature = data.get('temperature', 0.7)
-            
-            # Build messages array for EMD inference
+
+            # Build messages array for vLLM Chat Completions API
             messages = []
             content_parts = []
-            
+
             # Add text content
             if text_prompt:
                 content_parts.append({
                     "type": "text",
                     "text": text_prompt
                 })
-            
+
             # Add image content for multimodal models
             if frames and model_info.get('supports_multimodal', False):
                 for frame_base64 in frames:
@@ -329,173 +331,80 @@ class InferenceService:
                             "url": f"data:image/jpeg;base64,{frame_base64}"
                         }
                     })
-            
+
             messages.append({
                 "role": "user",
-                "content": content_parts
+                "content": content_parts if len(content_parts) > 1 else text_prompt
             })
-            
-            # Prepare EMD request payload
-            emd_payload = {
+
+            # Prepare vLLM request payload
+            vllm_payload = {
+                "model": huggingface_repo,  # Use the actual HuggingFace repo name
                 "messages": messages,
                 "max_tokens": max_tokens,
                 "temperature": temperature,
-                "stream": False  # Use non-streaming for now
+                "stream": False
             }
+
+            logger.info(f"Calling EC2 vLLM model {model} ({huggingface_repo}) at {endpoint} with payload: {vllm_payload}")
             
-            logger.info(f"Calling EMD model {model} with payload: {emd_payload}")
-            
-            # Try to get EMD endpoint URL and make inference call
-            actual_endpoint_name = None
+            # Make HTTP request to local vLLM server
+            vllm_url = f"{endpoint}/v1/chat/completions"
+
             try:
-                import boto3
-                from botocore.exceptions import ClientError, NoCredentialsError
-
-                # Get the deployment tag for this model
-                deployment_tag = deployment_status.get('tag')
-                if not deployment_tag:
-                    raise ValueError(f"No deployment tag found for model {model}")
-
-                # Get endpoint name from EMD deployment info
-                # Based on the emd status output, the actual endpoint name uses model_path:
-                # EMD-Model-{model_path_converted}-{tag}-endpoint
-                # Convert model_path to lowercase and replace special chars with hyphens
-                model_name_for_endpoint = model_path.lower().replace('_', '-').replace('.', '-')
-                actual_endpoint_name = f"EMD-Model-{model_name_for_endpoint}-{deployment_tag}-endpoint"
-
-                logger.info(f"Using EMD endpoint: {actual_endpoint_name}")
-
-                # Use boto3 SageMaker Runtime client directly
-                runtime_client = boto3.client('sagemaker-runtime', region_name='us-west-2')
-
-                # Call EMD endpoint via SageMaker Runtime
-                response = runtime_client.invoke_endpoint(
-                    EndpointName=actual_endpoint_name,
-                    ContentType='application/json',
-                    Body=json.dumps(emd_payload)
+                response = requests.post(
+                    vllm_url,
+                    json=vllm_payload,
+                    headers={'Content-Type': 'application/json'},
+                    timeout=60  # 60 second timeout
                 )
 
-                # Parse response
-                response_body = json.loads(response['Body'].read().decode('utf-8'))
-                logger.info(f"EMD response for {model}: {response_body}")
-                
-            except Exception as emd_error:
-                logger.warning(f"EMD direct call failed for {model}: {emd_error}")
-                
-                # Try to use the actual deployed endpoint from EMD status
-                try:
-                    from emd.sdk.status import get_model_status
-                    
-                    # Get the current EMD status to find the actual endpoint name
-                    status = get_model_status()
-                    actual_endpoint_name = None
-                    
-                    # Look for the deployed model in the EMD status
-                    for model_entry in status.get("completed", []):
-                        model_id = model_entry.get("model_id")
-                        model_tag = model_entry.get("model_tag")
-                        stack_status = model_entry.get("stack_status", "")
-                        
-                        if model_id and model_path in model_id and "CREATE_COMPLETE" in stack_status:
-                            # Construct the endpoint name from EMD conventions using actual model_id
-                            # Convert model_id to lowercase and replace special chars with hyphens
-                            model_name_for_endpoint = model_id.lower().replace('_', '-').replace('.', '-')
-                            actual_endpoint_name = f"EMD-Model-{model_name_for_endpoint}-{model_tag}-endpoint"
-                            logger.info(f"Constructed endpoint name: {actual_endpoint_name} from model_id: {model_id}")
-                            break
-                    
-                    if not actual_endpoint_name:
-                        raise ValueError(f"Could not determine endpoint name for {model}")
-                    
-                    logger.info(f"Trying actual EMD endpoint: {actual_endpoint_name}")
-                    print(f"🔍 DEBUG: Attempting to invoke endpoint: {actual_endpoint_name}")
-                    
-                    # Use boto3 SageMaker Runtime client with actual endpoint name
-                    runtime_client = boto3.client('sagemaker-runtime', region_name='us-west-2')
-                    
-                    response = runtime_client.invoke_endpoint(
-                        EndpointName=actual_endpoint_name,
-                        ContentType='application/json',
-                        Body=json.dumps(emd_payload)
-                    )
-                    
-                    # Parse response
-                    response_body = json.loads(response['Body'].read().decode('utf-8'))
-                    logger.info(f"EMD response for {model}: {response_body}")
-                    
-                except Exception as final_error:
-                    logger.error(f"All EMD methods failed for {model}: {final_error}")
-                    raise ValueError(f"EMD inference failed: {final_error}")
-            
-            # Extract content and usage from EMD response
-            content = ""
-            usage = {}
-            
-            # Handle different EMD response formats
-            if isinstance(response_body, dict):
+                response.raise_for_status()  # Raise exception for HTTP errors
+                response_body = response.json()
+
+                logger.info(f"vLLM response for {model}: {response_body}")
+
+                # Extract content and usage from vLLM response (OpenAI-compatible format)
+                content = ""
+                usage = {}
+
                 if 'choices' in response_body and response_body['choices']:
-                    # OpenAI-compatible format
                     choice = response_body['choices'][0]
-                    if 'message' in choice:
-                        message = choice['message']
-                        # Check for reasoning_content first (EMD Qwen models)
-                        if 'reasoning_content' in message and message['reasoning_content']:
-                            reasoning = message['reasoning_content'].strip()
-                            main_content = message.get('content', '').strip() if message.get('content') else ''
-                            
-                            # Combine reasoning and main content
-                            if reasoning and main_content:
-                                content = f"**Reasoning:**\n{reasoning}\n\n**Response:**\n{main_content}"
-                            elif reasoning:
-                                # If only reasoning is available, present it as the response
-                                # This happens when the model hits token limits during generation
-                                content = f"**Reasoning:**\n{reasoning}\n\n**Note:** The model's response was cut off due to token limits. The reasoning shows the model's thought process before generating the final answer."
-                            elif main_content:
-                                content = main_content
-                            else:
-                                content = "No content available"
-                        elif 'content' in message and message['content']:
-                            content = message['content']
-                        else:
-                            content = str(message)
-                    elif 'text' in choice:
-                        content = choice['text']
+                    if 'message' in choice and 'content' in choice['message']:
+                        content = choice['message']['content']
                     else:
-                        content = str(choice)
-                elif 'generated_text' in response_body:
-                    # Hugging Face format
-                    content = response_body['generated_text']
-                elif 'outputs' in response_body:
-                    # Alternative format
-                    content = response_body['outputs'][0] if response_body['outputs'] else ""
+                        content = f"Unexpected vLLM response format: {choice}"
+
+                    # Extract usage information
+                    if 'usage' in response_body:
+                        usage = response_body['usage']
                 else:
-                    # Fallback: convert entire response to string
-                    content = str(response_body)
-                
-                # Extract usage information
-                if 'usage' in response_body:
-                    usage = {
-                        'input_tokens': response_body['usage'].get('prompt_tokens', 0),
-                        'output_tokens': response_body['usage'].get('completion_tokens', 0),
-                        'total_tokens': response_body['usage'].get('total_tokens', 0)
-                    }
-            else:
-                # Handle string response
-                content = str(response_body)
-            
-            result = {
-                'model': model,
-                'status': 'success',
-                'result': {
-                    'content': content,
-                    'usage': usage,
-                    'raw_response': response_body  # Include raw response for debugging
-                },
-                'duration_ms': (datetime.now() - start_time).total_seconds() * 1000,
-                'deployment_tag': deployment_status.get('tag')
-            }
-            
-            result_queue.put(result)
+                    content = f"Unexpected vLLM response format: {response_body}"
+
+                # Calculate response time
+                end_time = datetime.now()
+                response_time = (end_time - start_time).total_seconds()
+
+                result = {
+                    'model': model,
+                    'status': 'success',
+                    'result': {
+                        'content': content,
+                        'usage': usage,
+                        'raw_response': response_body
+                    },
+                    'duration_ms': response_time * 1000
+                }
+
+                result_queue.put(result)
+                return
+
+            except requests.exceptions.RequestException as req_error:
+                logger.error(f"HTTP request failed for {model}: {req_error}")
+                raise ValueError(f"vLLM request failed: {req_error}")
+            except Exception as parse_error:
+                logger.error(f"Response parsing failed for {model}: {parse_error}")
+                raise ValueError(f"Response parsing failed: {parse_error}")
             
         except Exception as e:
             logger.error(f"Error processing EMD model {model}: {e}")

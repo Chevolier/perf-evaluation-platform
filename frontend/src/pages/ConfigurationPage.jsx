@@ -9,10 +9,10 @@ const ConfigurationPage = ({ params, onParamsChange, onNext, onPrev, selectedMod
   const [deploymentStatus, setDeploymentStatus] = useState({});
   const [checking, setChecking] = useState(false);
   
-  const emdModels = ['qwen2-vl-7b', 'qwen2.5-vl-7b', 'qwen2.5-vl-32b', 'qwen2.5-0.5b', 'gemma-3-4b', 'ui-tars-1.5-7b'];
-  
+  const ec2Models = ['qwen2-vl-7b', 'qwen2.5-vl-7b', 'qwen2.5-vl-32b', 'qwen2.5-0.5b', 'gemma-3-4b', 'ui-tars-1.5-7b'];
+
   const checkModelStatus = async () => {
-    const localModels = selectedModels.filter(model => emdModels.includes(model));
+    const localModels = selectedModels.filter(model => ec2Models.includes(model));
     if (localModels.length === 0) return;
     
     setChecking(true);

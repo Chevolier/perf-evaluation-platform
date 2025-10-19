@@ -9,8 +9,9 @@ logging:
   file: "logs/development.log"
 
 models:
-  emd:
-    base_url: "http://localhost:8000"
+  ec2:
+    default_port: 8000
+    health_check_interval: 5
   
 cors:
   origins: ["http://localhost:3000", "http://localhost:3001"]

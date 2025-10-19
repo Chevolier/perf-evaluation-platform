@@ -17,10 +17,11 @@ aws:
   account_id: null  # Auto-detected
 
 models:
-  emd:
-    base_url: "http://localhost:8000"
-    default_tag: null
+  ec2:
+    default_port: 8000
     timeout: 300
+    health_check_interval: 10
+    deployment_timeout: 600
   bedrock:
     region: "us-west-2"
     timeout: 300

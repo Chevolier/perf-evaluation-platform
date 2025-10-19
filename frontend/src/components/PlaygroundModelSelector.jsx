@@ -25,8 +25,8 @@ const PlaygroundModelSelector = ({
       color: '#1890ff',
       models: []
     },
-    emd: {
-      title: 'EMD 部署模型',
+    ec2: {
+      title: 'EC2 部署模型',
       icon: <ThunderboltOutlined />,
       color: '#52c41a',
       models: []
@@ -61,21 +61,21 @@ const PlaygroundModelSelector = ({
             });
           }
           
-          // 处理EMD模型
-          if (data.models.emd) {
-            const emdModels = Object.entries(data.models.emd).map(([key, info]) => ({
+          // 处理EC2模型
+          if (data.models.ec2) {
+            const ec2Models = Object.entries(data.models.ec2).map(([key, info]) => ({
               key,
               name: info.name,
               description: info.description,
               alwaysAvailable: false
             }));
-            
+
             setModelCategories(prev => {
               const newState = {
                 ...prev,
-                emd: {
-                  ...prev.emd,
-                  models: emdModels
+                ec2: {
+                  ...prev.ec2,
+                  models: ec2Models
                 }
               };
               return newState;
@@ -149,17 +149,17 @@ const PlaygroundModelSelector = ({
                   alwaysAvailable: true
                 })) : [];
                 
-              // 构建emd模型列表
-              const emdModels = data.models.emd ? 
-                Object.entries(data.models.emd).map(([key, info]) => ({
+              // 构建EC2模型列表
+              const ec2Models = data.models.ec2 ?
+                Object.entries(data.models.ec2).map(([key, info]) => ({
                   key,
                   name: info.name,
                   description: info.description,
                   alwaysAvailable: false
                 })) : [];
-                
-              console.log('[Debug-PlaygroundSelector] 处理后的模型列表:', { bedrockModels, emdModels });
-                
+
+              console.log('[Debug-PlaygroundSelector] 处理后的模型列表:', { bedrockModels, ec2Models });
+
               // 更新模型分类信息
               setModelCategories({
                 bedrock: {
@@ -168,16 +168,16 @@ const PlaygroundModelSelector = ({
                   color: '#1890ff',
                   models: bedrockModels
                 },
-                emd: {
-                  title: 'EMD 部署模型',
+                ec2: {
+                  title: 'EC2 部署模型',
                   icon: <ThunderboltOutlined />,
                   color: '#52c41a',
-                  models: emdModels
+                  models: ec2Models
                 }
               });
-                
+
               // 立即准备模型列表并发送请求
-              const allModels = [...bedrockModels.map(m => m.key), ...emdModels.map(m => m.key)];
+              const allModels = [...bedrockModels.map(m => m.key), ...ec2Models.map(m => m.key)];
               console.log('[Debug-PlaygroundSelector] 将发送到后端的模型列表:', allModels);
                 
               if (allModels.length > 0) {

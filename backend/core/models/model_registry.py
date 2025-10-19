@@ -3,8 +3,8 @@
 from typing import Dict, Any
 
 
-# EMD (Easy Model Deployment) Models Configuration
-EMD_MODELS = {
+# EC2 Models Configuration (formerly EMD models)
+EC2_MODELS = {
     "qwen2.5-7b-instruct": {
         "name": "Qwen2.5-7B-Instruct",
         "huggingface_repo": "Qwen/Qwen2.5-7B-Instruct",
@@ -96,7 +96,7 @@ class ModelRegistry:
     
     def __init__(self):
         """Initialize the model registry."""
-        self._emd_models = EMD_MODELS.copy()
+        self._ec2_models = EC2_MODELS.copy()
         self._bedrock_models = BEDROCK_MODELS.copy()
     
     def get_all_models(self) -> Dict[str, Dict[str, Any]]:
@@ -107,16 +107,16 @@ class ModelRegistry:
         """
         return {
             "bedrock": self._bedrock_models,
-            "emd": self._emd_models
+            "ec2": self._ec2_models
         }
     
-    def get_emd_models(self) -> Dict[str, Dict[str, Any]]:
-        """Get all EMD models.
-        
+    def get_ec2_models(self) -> Dict[str, Dict[str, Any]]:
+        """Get all EC2 models.
+
         Returns:
-            Dictionary of EMD models
+            Dictionary of EC2 models
         """
-        return self._emd_models.copy()
+        return self._ec2_models.copy()
     
     def get_bedrock_models(self) -> Dict[str, Dict[str, Any]]:
         """Get all Bedrock models.
@@ -128,34 +128,34 @@ class ModelRegistry:
     
     def get_model_info(self, model_key: str, model_type: str = None) -> Dict[str, Any]:
         """Get information about a specific model.
-        
+
         Args:
             model_key: Key identifying the model
-            model_type: Type of model ('emd' or 'bedrock'). If None, searches both.
-            
+            model_type: Type of model ('ec2' or 'bedrock'). If None, searches both.
+
         Returns:
             Model information dictionary or empty dict if not found
         """
-        if model_type == "emd" or model_type is None:
-            if model_key in self._emd_models:
-                return self._emd_models[model_key].copy()
-        
+        if model_type == "ec2" or model_type is None:
+            if model_key in self._ec2_models:
+                return self._ec2_models[model_key].copy()
+
         if model_type == "bedrock" or model_type is None:
             if model_key in self._bedrock_models:
                 return self._bedrock_models[model_key].copy()
-        
+
         return {}
     
-    def is_emd_model(self, model_key: str) -> bool:
-        """Check if a model is an EMD model.
-        
+    def is_ec2_model(self, model_key: str) -> bool:
+        """Check if a model is an EC2 model.
+
         Args:
             model_key: Model key to check
-            
+
         Returns:
-            True if model is an EMD model
+            True if model is an EC2 model
         """
-        return model_key in self._emd_models
+        return model_key in self._ec2_models
     
     def is_bedrock_model(self, model_key: str) -> bool:
         """Check if a model is a Bedrock model.
@@ -169,16 +169,16 @@ class ModelRegistry:
         return model_key in self._bedrock_models
     
     def get_model_path(self, model_key: str) -> str:
-        """Get the model path for EMD models or model ID for Bedrock models.
-        
+        """Get the model path for EC2 models or model ID for Bedrock models.
+
         Args:
             model_key: Model key
-            
+
         Returns:
             Model path or ID, empty string if not found
         """
-        if model_key in self._emd_models:
-            return self._emd_models[model_key].get("model_path", "")
+        if model_key in self._ec2_models:
+            return self._ec2_models[model_key].get("model_path", "")
         elif model_key in self._bedrock_models:
             return self._bedrock_models[model_key].get("model_id", "")
         return ""

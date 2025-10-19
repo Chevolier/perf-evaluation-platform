@@ -89,9 +89,9 @@ class ConfigManager:
             'AWS_REGION': 'aws.region',
             'AWS_ACCOUNT_ID': 'aws.account_id',
             
-            # EMD configuration
-            'EMD_BASE_URL': 'models.emd.base_url',
-            'EMD_TAG': 'models.emd.default_tag',
+            # EC2 configuration
+            'EC2_DEFAULT_PORT': 'models.ec2.default_port',
+            'EC2_TIMEOUT': 'models.ec2.timeout',
             
             # Database configuration
             'DATABASE_URL': 'database.url',

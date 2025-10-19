@@ -10,5 +10,7 @@ logging:
   file: "logs/production.log"
 
 models:
-  emd:
-    base_url: "http://localhost:8000"
+  ec2:
+    default_port: 8000
+    health_check_interval: 15
+    deployment_timeout: 900

@@ -73,8 +73,8 @@ const ModelHubPage = () => {
       color: '#1890ff',
       models: []
     },
-    emd: {
-      title: '部署模型',
+    ec2: {
+      title: 'EC2 部署模型',
       icon: <ThunderboltOutlined />,
       color: '#52c41a',
       models: []
@@ -251,8 +251,8 @@ const ModelHubPage = () => {
               alwaysAvailable: true
             })) : [];
             
-          const emdModels = data.models.emd ? 
-            Object.entries(data.models.emd).map(([key, info]) => ({
+          const ec2Models = data.models.ec2 ?
+            Object.entries(data.models.ec2).map(([key, info]) => ({
               key,
               name: info.name,
               description: info.description,
@@ -260,7 +260,7 @@ const ModelHubPage = () => {
             })) : [];
             
           // Extract deployable model keys for status check
-          deployableModelKeys = emdModels.map(m => m.key);
+          deployableModelKeys = ec2Models.map(m => m.key);
           console.log('🔍 DEBUG: deployableModelKeys extracted:', deployableModelKeys);
             
           // Batch UI updates to reduce re-renders
@@ -270,9 +270,9 @@ const ModelHubPage = () => {
                 ...categoryTemplates.bedrock,
                 models: bedrockModels
               },
-              emd: {
-                ...categoryTemplates.emd,
-                models: emdModels
+              ec2: {
+                ...categoryTemplates.ec2,
+                models: ec2Models
               }
             });
             

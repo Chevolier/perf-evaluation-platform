@@ -871,9 +871,9 @@ class StressTestService:
             "current_message": "检查模型部署状态..."
         })
         
-        if model_registry.is_emd_model(model_key):
+        if model_registry.is_ec2_model(model_key):
             # Get EMD model info
-            deployment_status = model_service.get_emd_deployment_status(model_key)
+            deployment_status = model_service.get_ec2_deployment_status(model_key)
             if deployment_status.get('status') != 'deployed':
                 raise Exception(f"EMD模型 {model_key} 未部署或不可用: {deployment_status.get('message')}")
             

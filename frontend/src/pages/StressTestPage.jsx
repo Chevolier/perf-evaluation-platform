@@ -271,18 +271,18 @@ const StressTestPage = () => {
             });
           }
           
-          // 检查EMD模型状态
-          if (data.models.emd) {
-            const emdModelKeys = Object.keys(data.models.emd);
+          // 检查EC2模型状态
+          if (data.models.ec2) {
+            const ec2ModelKeys = Object.keys(data.models.ec2);
             const statusResponse = await fetch('/api/check-model-status', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ models: emdModelKeys })
+              body: JSON.stringify({ models: ec2ModelKeys })
             });
-            
+
             if (statusResponse.ok) {
               const statusData = await statusResponse.json();
-              Object.entries(data.models.emd).forEach(([key, info]) => {
+              Object.entries(data.models.ec2).forEach(([key, info]) => {
                 const status = statusData.model_status?.[key];
                 if (status && (status.status === 'deployed' || status.status === 'available')) {
                   availableModels.push({

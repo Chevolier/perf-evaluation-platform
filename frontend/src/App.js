@@ -55,10 +55,10 @@ function App() {
   const [params, setParams] = useState(() => {
     try {
       const saved = localStorage.getItem('playground_params');
-      return saved ? JSON.parse(saved) : { max_tokens: 1024, temperature: 0.1 };
+      return saved ? JSON.parse(saved) : { max_tokens: 200, temperature: 0.1 };
     } catch (error) {
       console.error('Failed to load params from localStorage:', error);
-      return { max_tokens: 1024, temperature: 0.1 };
+      return { max_tokens: 200, temperature: 0.1 };
     }
   });
   
