@@ -1784,7 +1784,7 @@ const StressTestPage = () => {
                               <Space>
                                 {model.type === 'bedrock' ? <CloudOutlined /> : <RocketOutlined />}
                                 {model.name}
-                                {model.tag && <Text type="secondary">({model.tag})</Text>}
+                                {/* Don't show deployment tags for EC2 models as they are internal tracking info */}
                                 {model.supports_multimodal && <Text type="success" style={{ fontSize: '12px' }}>[VLM]</Text>}
                               </Space>
                             </Option>
