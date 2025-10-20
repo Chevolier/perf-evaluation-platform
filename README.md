@@ -53,12 +53,12 @@ A comprehensive platform for model (LLMs, VLMs, etc.) deployment and performance
 - Node.js 16+ 
 - AWS credentials configured
 
-<!-- ### Automated Setup
+### Automated Setup
 
 ```bash
 # Run the setup script (recommended)
 ./scripts/setup.sh
-``` -->
+```
 
 ### Manual Setup
 
