@@ -12,6 +12,24 @@ else
     exit 1
 fi
 
+
+# Install Node.js
+# Download and install nvm:
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+
+# in lieu of restarting the shell
+\. "$HOME/.nvm/nvm.sh"
+
+# Download and install Node.js:
+nvm install 22
+
+# Verify the Node.js version:
+node -v # Should print "v22.19.0".
+nvm current # Should print "v22.19.0".
+
+# Verify npm version:
+npm -v # Should print "10.9.3".
+
 # Check Node.js version
 node_version=$(node --version 2>&1)
 if [[ $? -eq 0 ]]; then
@@ -68,15 +86,6 @@ else
     echo "   export AWS_SECRET_ACCESS_KEY=your_secret"
 fi
 
-# EMD setup
-echo ""
-echo "🤖 EMD setup..."
-if command -v emd >/dev/null 2>&1; then
-    echo "✓ EMD CLI installed"
-    echo "To initialize EMD, run: emd bootstrap"
-else
-    echo "⚠️  EMD CLI not found in PATH. Make sure to activate the virtual environment."
-fi
 
 echo ""
 echo "🎉 Setup complete!"

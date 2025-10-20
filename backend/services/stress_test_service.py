@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 
 from ..utils import get_logger
+from .model_service import ModelService
 
 logger = get_logger(__name__)
 
@@ -27,6 +28,34 @@ class StressTestService:
     def __init__(self):
         """Initialize stress test service."""
         self.test_sessions = {}
+        self.model_service = ModelService()
+
+    def _get_deployed_model_framework(self, model_key: str) -> str:
+        """Get the framework of a deployed model from ModelService.
+
+        Args:
+            model_key: Model key to check
+
+        Returns:
+            Framework name (e.g., 'vllm', 'sglang') or 'vllm' as default
+        """
+        try:
+            if self.model_service.registry.is_ec2_model(model_key):
+                # Check if model is currently deployed on EC2
+                if model_key in self.model_service._ec2_deployments:
+                    deployment_info = self.model_service._ec2_deployments[model_key]
+                    framework = deployment_info.get('engine_type', 'vllm')
+                    logger.info(f"Found deployed model {model_key} using framework: {framework}")
+                    return framework
+                else:
+                    logger.info(f"Model {model_key} is EC2 model but not currently deployed, defaulting to vllm")
+                    return 'vllm'
+            else:
+                logger.info(f"Model {model_key} is not EC2 model, defaulting to vllm")
+                return 'vllm'
+        except Exception as e:
+            logger.error(f"Error getting framework for model {model_key}: {e}")
+            return 'vllm'
     
     def start_stress_test(self, model_key: str, test_params: Dict[str, Any]) -> str:
         """Start a stress test for the specified model.
@@ -42,7 +71,13 @@ class StressTestService:
         session_id = str(uuid.uuid4())[:8]
         
         logger.info(f"Starting stress test for model {model_key} with session {session_id}")
-        
+
+        # Ensure framework information is set correctly in test_params
+        if 'inference_framework' not in test_params:
+            detected_framework = self._get_deployed_model_framework(model_key)
+            test_params['inference_framework'] = detected_framework
+            logger.info(f"Set inference_framework to {detected_framework} for model {model_key}")
+
         # Initialize test session with 0% progress
         self.test_sessions[session_id] = {
             "status": "preparing",
@@ -1790,7 +1825,7 @@ except Exception as e:
                 },
                 "deployment_config": {
                     "deployment_method": test_params.get('deployment_method', 'EMD'),
-                    "framework": test_params.get('inference_framework', 'vllm'),
+                    "framework": test_params.get('inference_framework', self._get_deployed_model_framework(model_key)),
                     "instance_type": test_params.get('instance_type', 'ml.g5.2xlarge'),
                     "tp_size": test_params.get('tp_size', self._infer_tp_size(test_params.get('instance_type', 'ml.g5.2xlarge'))),
                     "dp_size": test_params.get('dp_size', 1),
