@@ -185,6 +185,38 @@ const ModelHubPage = () => {
     });
   }, []);
 
+  // Handle clearing stale deployment statuses
+  const handleClearStaleStatus = useCallback(async () => {
+    try {
+      const response = await fetch('/api/clear-stale-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          message.success(`已清理 ${data.cleared_count} 个过期的部署状态`);
+
+          // Refresh model status after clearing
+          if (data.cleared_count > 0) {
+            // Force refresh by reloading the page
+            setTimeout(() => {
+              window.location.reload();
+            }, 1000);
+          }
+        } else {
+          message.error(`清理失败: ${data.error}`);
+        }
+      } else {
+        message.error('清理请求失败');
+      }
+    } catch (error) {
+      console.error('清理过期状态失败:', error);
+      message.error('清理过期状态失败');
+    }
+  }, []);
+
   // Save only non-status data to localStorage (keep selected models and config)
   useEffect(() => {
     const timeoutId = setTimeout(() => {
@@ -872,11 +904,18 @@ const ModelHubPage = () => {
                     >
                       部署选中模型 ({selectedModels.length})
                     </Button>
-                    <Button 
+                    <Button
                       onClick={() => setSelectedModels([])}
                       disabled={selectedModels.length === 0}
                     >
                       清空选择
+                    </Button>
+                    <Button
+                      onClick={handleClearStaleStatus}
+                      type="default"
+                      icon={<ReloadOutlined />}
+                    >
+                      清理过期状态
                     </Button>
                   </Space>
                 </Col>

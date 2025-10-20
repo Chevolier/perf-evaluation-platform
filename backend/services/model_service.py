@@ -88,12 +88,13 @@ class ModelService:
                 logger.warning(f"⚠️ Container {container_name} for model {model_key} is not running, marking as failed")
                 invalid_deployments.append(model_key)
 
-                # Update status to reflect container not running
+                # Update status to reflect container not running - use not_deployed instead of failed
+                # since this indicates the deployment no longer exists rather than a failure
                 self._deployment_status[model_key] = {
-                    "status": "failed",
-                    "message": "Container stopped unexpectedly (detected on startup)",
-                    "tag": deployment_info.get("tag"),
-                    "container_name": container_name
+                    "status": "not_deployed",
+                    "message": "Model not currently deployed",
+                    "tag": None,
+                    "container_name": None
                 }
 
         # Remove invalid deployments
@@ -104,6 +105,74 @@ class ModelService:
             logger.info(f"🧹 Cleaned up {len(invalid_deployments)} invalid deployments on startup")
             # Save the cleaned state
             self._save_deployment_state()
+
+        # Also clean up any other stale "failed" statuses that are old
+        self._cleanup_stale_failed_status()
+
+    def _cleanup_stale_failed_status(self):
+        """Clean up stale failed status entries that are no longer relevant."""
+        try:
+            stale_statuses = []
+            current_time = datetime.now()
+
+            for model_key, status_info in self._deployment_status.items():
+                # If status is "failed" and model is not currently being deployed
+                if status_info.get("status") == "failed":
+                    # Check if this is a recent failure (within last 10 minutes)
+                    try:
+                        if "started_at" in status_info:
+                            started_time = datetime.fromisoformat(status_info["started_at"])
+                            time_diff = (current_time - started_time).total_seconds()
+                            # If failure is older than 10 minutes, reset to not_deployed
+                            if time_diff > 600:  # 10 minutes
+                                stale_statuses.append(model_key)
+                        else:
+                            # No timestamp, consider it stale
+                            stale_statuses.append(model_key)
+                    except (ValueError, TypeError):
+                        # Invalid timestamp, consider it stale
+                        stale_statuses.append(model_key)
+
+            # Reset stale failed statuses to not_deployed
+            for model_key in stale_statuses:
+                logger.info(f"🧹 Resetting stale failed status for {model_key}")
+                self._deployment_status[model_key] = {
+                    "status": "not_deployed",
+                    "message": "Model not currently deployed",
+                    "tag": None,
+                    "container_name": None
+                }
+
+            if stale_statuses:
+                logger.info(f"🧹 Reset {len(stale_statuses)} stale failed statuses")
+                self._save_deployment_state()
+
+        except Exception as e:
+            logger.error(f"❌ Error cleaning up stale failed statuses: {e}")
+
+    def clear_stale_deployment_status(self) -> Dict[str, Any]:
+        """Manually clear stale deployment statuses. Public method for API use.
+
+        Returns:
+            Result dictionary with success status and cleared count
+        """
+        try:
+            original_count = len([k for k, v in self._deployment_status.items() if v.get("status") == "failed"])
+            self._cleanup_stale_failed_status()
+            new_count = len([k for k, v in self._deployment_status.items() if v.get("status") == "failed"])
+            cleared_count = original_count - new_count
+
+            return {
+                "success": True,
+                "message": f"Cleared {cleared_count} stale deployment statuses",
+                "cleared_count": cleared_count
+            }
+        except Exception as e:
+            logger.error(f"❌ Error in manual status cleanup: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
 
     def get_all_models(self) -> Dict[str, Dict[str, Any]]:
         """Get all available models.

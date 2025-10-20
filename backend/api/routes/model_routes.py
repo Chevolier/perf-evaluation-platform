@@ -160,3 +160,13 @@ def register_existing_deployment():
     except Exception as e:
         logger.error(f"Error registering existing deployment: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
+@model_bp.route('/clear-stale-status', methods=['POST'])
+def clear_stale_status():
+    """Clear stale deployment statuses (failed statuses older than 10 minutes)."""
+    try:
+        result = model_service.clear_stale_deployment_status()
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Error clearing stale status: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
