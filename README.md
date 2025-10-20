@@ -70,9 +70,6 @@ conda create -n perf-eval python=3.10 -y
 conda activate perf-eval
 pip install -r requirements.txt
 
-cd evalscope/
-pip install -e .
-
 # Configure AWS credentials
 aws configure
 # OR set environment variables:
@@ -130,10 +127,10 @@ cd frontend && npm start
 ## 📖 Platform Overview
 
 ### The frontend has 4 pages:
-1. 模型部署: Supports 1-click model deployment on Amazon SageMaker Endpoint, standalone deployment on Amazon SageMaker HyperPod, EKS, and EC2, supports selecting among different instances like g5.xlarge, g6e.xlarge, p4d.xlarge, etc., different inference frameworks like vllm, sglang, etc.
-2. 在线体验: Supports two ways to test the model: a. If you deployed the model using step 1, you'll find the model in the list, and you can choose the model to test. b. If you deployed a model manually, you can input your OpenAI-compatible api url and model name and test it directly.
+1. 模型部署: Supports 1-click model deployment on local EC2, supports selecting among different instances like g5.xlarge, g6e.xlarge, p4d.xlarge, etc., different inference frameworks like vllm, sglang.
+2. 在线体验: Supports three ways to test the model: a. If you deployed the model using step 1, you'll find the model in the list, and you can choose the model to test. b. If you deployed a model manually, you can input your OpenAI-compatible api url and model name and test it directly. c. If you deploy using SageMaker Endpoint, you can input your Endpoint name and model name.  
 3. 性能评测: Similarly, you can stress test on both the deployed model on this platform and manually-deployed model elsewhere by inputting your api url and model name. After stress test, you can click the button download to download the detailed evaluation results.
-4. 结果展示: You can select your previous results and compare them together. You can also click the download button to download a pdf file of the comparison results.
+4. 结果展示: You can select your previous results and compare them together. You can also click the download button to download a html file of the comparison results.
 
 
 ### Core Modules
