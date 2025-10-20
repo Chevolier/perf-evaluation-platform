@@ -4,7 +4,6 @@ boto3
 openai
 pillow==10.2.0
 requests
-easy-model-deployer==0.9.38
 ffmpeg-python==0.2.0
 evalscope
 kubernetes

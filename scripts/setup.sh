@@ -12,7 +12,6 @@ else
     exit 1
 fi
 
-
 # Install Node.js
 # Download and install nvm:
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
@@ -56,7 +55,7 @@ source venv/bin/activate
 # Install Python dependencies
 echo "Installing Python dependencies..."
 pip install --upgrade pip
-pip install -r requirements.txt
+pip install -r ../requirements.txt
 
 echo "✓ Backend setup complete!"
 
@@ -90,9 +89,58 @@ fi
 echo ""
 echo "🎉 Setup complete!"
 echo ""
-echo "To start the platform:"
-echo "1. Backend:"
-echo "  source venv/bin/activate && python run_backend.py"
-echo "2. Frontend (in another terminal):"
-echo "   cd frontend && npm start"
-echo "3. Access: http://localhost:3000"
+echo "🚀 Starting the platform..."
+
+# Create logs directory if it doesn't exist
+mkdir -p logs
+
+# Function to cleanup background processes on script exit
+cleanup() {
+    echo ""
+    echo "🛑 Shutting down platform..."
+    if [ ! -z "$BACKEND_PID" ]; then
+        kill $BACKEND_PID 2>/dev/null
+        echo "✓ Backend stopped"
+    fi
+    if [ ! -z "$FRONTEND_PID" ]; then
+        kill $FRONTEND_PID 2>/dev/null
+        echo "✓ Frontend stopped"
+    fi
+    exit 0
+}
+
+# Set up trap to cleanup on script exit
+trap cleanup SIGINT SIGTERM EXIT
+
+# Start backend in background
+echo "1. Starting backend..."
+cd backend
+source venv/bin/activate
+cd ..
+python run_backend.py > logs/backend.out 2>&1 &
+BACKEND_PID=$!
+echo "✓ Backend started (PID: $BACKEND_PID)"
+
+# Wait a moment for backend to initialize
+sleep 3
+
+# Start frontend in background
+echo "2. Starting frontend..."
+cd frontend
+npm start > ../logs/frontend.out 2>&1 &
+FRONTEND_PID=$!
+echo "✓ Frontend started (PID: $FRONTEND_PID)"
+
+echo ""
+echo "🌐 Platform is starting up..."
+echo "📊 Backend: http://localhost:5000"
+echo "🖥️  Frontend: http://localhost:3000"
+echo ""
+echo "📋 Logs:"
+echo "   Backend: logs/backend.out"
+echo "   Frontend: logs/frontend.out"
+echo ""
+echo "Press Ctrl+C to stop the platform"
+
+# Wait for user to stop the platform
+wait

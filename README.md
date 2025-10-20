@@ -126,51 +126,6 @@ cd frontend && npm start
 - **Backend API**: http://localhost:5000
 - **Health Check**: http://localhost:5000/health
 
-## Model Deployment
-Currently, this platform supports 1-click model deployment using emd. But the vllm version may not be the latest. To evaluate the model's best performance, it is sugggested to deploy a model on a local EC2 instance using the latest vllm or sglang, then manually input api_url and model_name on the 在线体验 or 性能评测 pages. 
-
-### Local EC2 model deployment
-To use vllm to start a server on an g5.2xlarge instance:
-
-```bash
-# enable-prompt-tokens-details would help to show token usage info in response
-vllm serve Qwen/Qwen3-8B \
-	--gpu-memory-utilization 0.9 \
-	--max-model-len 2048 \
-  --enable-prompt-tokens-details
-
-nohup vllm serve Qwen/Qwen2.5-VL-7B-Instruct \
-     --host 0.0.0.0 --port 8000 \
-     --dtype bfloat16\
-    --gpu-memory-utilization 0.9 \
-    --max-model-len 2048 \
-    --limit-mm-per-prompt '{"images": 1, "videos": 1}' \
-    --enable-prompt-tokens-details \
-    >logs/serve_qwen2.5-vl-7bi.out 2>&1 &
-
-nohup vllm serve /home/ec2-user/SageMaker/efs/Models/Qwen3-8B \
-     --host 0.0.0.0 --port 8000 \
-     --dtype bfloat16\
-    --gpu-memory-utilization 0.9 \
-    --max-model-len 2048 \
-    --enable-prompt-tokens-details \
-    >logs/serve_qwen3-8b.out 2>&1 &
-
-nohup vllm serve /home/ec2-user/SageMaker/efs/Models/Qwen3-Coder-30B-A3B-Instruct \
-    --host 0.0.0.0 --port 8080 \
-    --dtype bfloat16\
-    --gpu-memory-utilization 0.9 \
-    --max-model-len 2048 \
-    --enable-prompt-tokens-details \
-    --tensor-parallel-size 4 \
-    >logs/serve_qwen3-coder-32b-a3b.out 2>&1 &
-    
-```
-You will obtain:
-Api url: http://0.0.0.0:8000/v1/chat/completions
-Model name: /home/ec2-user/SageMaker/efs/Models/Qwen3-8B
-
-Then use the above api url and model name to do stress test.
 
 ## 📖 Platform Overview
 
@@ -209,11 +164,10 @@ Then use the above api url and model name to do stress test.
 
 ### Supported Models
 
-**EMD Local Models** (require deployment):
+**EC2 Local Models** :
 - Qwen2-VL-7B-Instruct
 - Qwen2.5-VL-32B-Instruct  
-- Gemma-3-4B-IT
-- UI-TARS-1.5-7B
+- Qwen-8B
 
 **AWS Bedrock Models** (API-based):
 - Claude 4
@@ -225,106 +179,6 @@ Then use the above api url and model name to do stress test.
 - **Videos**: MP4, AVI, MOV (automatic frame extraction)
 - **Text**: Full Unicode support with context handling
 
-## 🔧 API Endpoints
-
-### Model Management
-- `GET /api/model-list` - Get all available models
-- `GET /api/emd/current-models` - Get deployed EMD models
-- `POST /api/deploy-models` - Deploy EMD models
-- `POST /api/check-model-status` - Check deployment status
-- `GET /api/emd/status` - EMD environment status
-- `POST /api/emd/init` - Initialize EMD environment
-
-### Inference Operations  
-- `POST /api/multi-inference` - Multi-model batch inference (streaming)
-- `POST /api/inference` - Single model inference
-
-### Performance Testing
-- `POST /api/stress-test/start` - Start stress test
-- `GET /api/stress-test/status/<test_id>` - Check test status
-- `GET /api/stress-test/results/<test_id>` - Get test results
-
-### System Health
-- `GET /health` - Health check endpoint
-- `GET /` - API version and status
-
-## 🛠️ Development
-ToDos:
-1. Fix emd multimodal model tokenization error.
-2. Add custom data support.
-3. ...
-
-### Configuration
-
-The platform uses environment-based configuration:
-
-**Backend Configuration** (`backend/config/`):
-- Development, production, and test environments
-- Model registry with EMD and Bedrock definitions
-- Logging configuration with file and console handlers
-- Service endpoints and authentication settings
-
-**Frontend Configuration**:
-- Ant Design UI components
-- Proxy configuration for API calls
-- State management with localStorage persistence
-- Responsive design with collapsible navigation
-
-### Code Structure
-
-**Backend Architecture**:
-- **Service Layer**: Business logic isolation (`backend/services/`)
-- **API Layer**: RESTful endpoints with blueprints (`backend/api/routes/`)
-- **Core Layer**: Model registry and definitions (`backend/core/`)
-- **Configuration**: Environment-specific settings (`backend/config/`)
-
-**Frontend Architecture**:
-- **Page Components**: Main application views (`frontend/src/pages/`)
-- **Shared Components**: Reusable UI elements (`frontend/src/components/`)
-- **State Management**: LocalStorage for persistence
-- **Navigation**: Hash-based routing with browser history support
-
-## 🐛 Troubleshooting
-
-### Common Issues
-
-**1. EMD Model Deployment Fails**
-```bash
-# Check EMD status and logs
-emd status
-python tests/test_deploy_api.py
-
-# Verify AWS credentials
-aws sts get-caller-identity
-```
-
-**2. Frontend Build Issues**
-```bash
-# Clear cache and reinstall
-cd frontend
-rm -rf node_modules package-lock.json
-npm install
-npm start
-```
-
-**3. Backend Service Errors**
-```bash
-# Check system health
-curl http://localhost:5000/health
-
-# Test modular system
-python tests/test_new_system.py
-```
-
-**4. Performance Test Issues**
-```bash
-# Verify model deployment status
-curl -X POST http://localhost:5000/api/check-model-status \
-  -H "Content-Type: application/json" \
-  -d '{"models": ["qwen2-vl-7b"]}'
-```
-
-**Frontend Debugging**: Use browser developer tools
 
 ### System Requirements
 
