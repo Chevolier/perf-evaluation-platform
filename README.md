@@ -1,6 +1,6 @@
 # Model Performance Evaluation Platform
 
-A comprehensive platform for model (LLMs, VLMs, etc.) deployment and performance evaluation. Supports 1-click deployment of various models on Amazon SageMaker Endpoint, SageMaker HyperPod, EKS, and EC2 using vLLM, SGLang, and other inference engines, plus comprehensive performance testing and visualization.
+A comprehensive platform for model (LLMs, VLMs, etc.) deployment and performance evaluation. Supports 1-click deployment of various models on EC2 using vLLM, SGLang, plus comprehensive performance testing and visualization.
 
 ## ✨ Features
 
@@ -52,7 +52,6 @@ A comprehensive platform for model (LLMs, VLMs, etc.) deployment and performance
 - Python 3.10+ (Required)
 - Node.js 16+ 
 - AWS credentials configured
-- EMD CLI for model deployment
 
 <!-- ### Automated Setup
 
@@ -80,12 +79,6 @@ aws configure
 export AWS_ACCESS_KEY_ID=your_key
 export AWS_SECRET_ACCESS_KEY=your_secret
 export AWS_SESSION_TOKEN=your_token  # if using temporary credentials
-```
-
-Configure easy-model-deployer (emd) for 1-click model deployment using emd.
-
-```bash
-emd bootstrap
 ```
 
 **2. Frontend Environment**

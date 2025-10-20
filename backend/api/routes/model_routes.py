@@ -44,8 +44,12 @@ def deploy_models():
         service_type = data.get('service_type', 'vllm_realtime')
 
         # Get TP/DP parameters for EC2 deployment
-        tp_size = data.get('tpSize', 1)
-        dp_size = data.get('dpSize', 1)
+        tp_size = data.get('tp_size', 1)
+        dp_size = data.get('dp_size', 1)
+
+        # Get GPU memory utilization and max model length parameters
+        gpu_memory_utilization = data.get('gpu_memory_utilization', 0.9)
+        max_model_len = data.get('max_model_len', 2048)
 
         logger.info(f"🚀 Deploy request received:")
         logger.info(f"  Models: {models}")
@@ -54,6 +58,8 @@ def deploy_models():
         logger.info(f"  Service type: {service_type}")
         logger.info(f"  TP size: {tp_size}")
         logger.info(f"  DP size: {dp_size}")
+        logger.info(f"  GPU memory utilization: {gpu_memory_utilization}")
+        logger.info(f"  Max model length: {max_model_len}")
 
         results = {}
         for model_key in models:
@@ -68,7 +74,9 @@ def deploy_models():
                 service_type=service_type,
                 port=port,
                 tp_size=tp_size,
-                dp_size=dp_size
+                dp_size=dp_size,
+                gpu_memory_utilization=gpu_memory_utilization,
+                max_model_len=max_model_len
             )
 
             logger.info(f"🚀 Deployment result for {model_key}: {result}")

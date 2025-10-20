@@ -62,7 +62,9 @@ const ModelHubPage = () => {
       serviceType: 'vllm_realtime',
       machineType: 'g5.2xlarge',
       tpSize: 1,
-      dpSize: 1
+      dpSize: 1,
+      gpuMemoryUtilization: 0.9,
+      maxModelLen: 2048
     };
   });
   // Memoized category templates to avoid recreating icons
@@ -97,11 +99,15 @@ const ModelHubPage = () => {
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           models: selectedModels,
           instance_type: deploymentConfig.machineType,
           engine_type: deploymentConfig.framework,
-          service_type: deploymentConfig.serviceType
+          service_type: deploymentConfig.serviceType,
+          tp_size: deploymentConfig.tpSize,
+          dp_size: deploymentConfig.dpSize,
+          gpu_memory_utilization: deploymentConfig.gpuMemoryUtilization,
+          max_model_len: deploymentConfig.maxModelLen
         })
       });
       
@@ -824,6 +830,34 @@ const ModelHubPage = () => {
                         style={{ width: '50%' }}
                       />
                     </Space.Compact>
+                  </Form.Item>
+                </Col>
+              </Row>
+              <Row gutter={16}>
+                <Col span={12}>
+                  <Form.Item label="GPU内存利用率">
+                    <InputNumber
+                      min={0.1}
+                      max={1.0}
+                      step={0.1}
+                      value={deploymentConfig.gpuMemoryUtilization}
+                      onChange={(value) => setDeploymentConfig(prev => ({ ...prev, gpuMemoryUtilization: value }))}
+                      formatter={value => `${(value * 100).toFixed(0)}%`}
+                      parser={value => value.replace('%', '') / 100}
+                      style={{ width: '100%' }}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item label="最大模型长度">
+                    <InputNumber
+                      min={512}
+                      max={32768}
+                      step={512}
+                      value={deploymentConfig.maxModelLen}
+                      onChange={(value) => setDeploymentConfig(prev => ({ ...prev, maxModelLen: value }))}
+                      style={{ width: '100%' }}
+                    />
                   </Form.Item>
                 </Col>
               </Row>

@@ -409,7 +409,8 @@ class ModelService:
 
     def deploy_model_on_ec2(self, model_key: str, instance_type: str = "g5.2xlarge",
                            engine_type: str = "vllm", service_type: str = "vllm_realtime",
-                           port: int = 8000, tp_size: int = 1, dp_size: int = 1) -> Dict[str, Any]:
+                           port: int = 8000, tp_size: int = 1, dp_size: int = 1,
+                           gpu_memory_utilization: float = 0.9, max_model_len: int = 2048) -> Dict[str, Any]:
         """Deploy a model using Docker on EC2.
 
         Args:
@@ -420,6 +421,8 @@ class ModelService:
             port: Port to expose the service
             tp_size: Tensor parallelism size
             dp_size: Data parallelism size
+            gpu_memory_utilization: GPU memory utilization fraction (0.1-1.0)
+            max_model_len: Maximum model sequence length
 
         Returns:
             Deployment result
@@ -518,8 +521,8 @@ class ModelService:
                     "--port", str(port),
                     "--enable-prompt-tokens-details",
                     "--trust-remote-code",
-                    "--gpu-memory-utilization", "0.9",
-                    "--max-model-len", "2048"
+                    "--gpu-memory-utilization", str(gpu_memory_utilization),
+                    "--max-model-len", str(max_model_len)
                 ])
 
                 # Add TP/DP parameters for vLLM
@@ -547,6 +550,8 @@ class ModelService:
                     "engine_type": engine_type,
                     "tp_size": tp_size,
                     "dp_size": dp_size,
+                    "gpu_memory_utilization": gpu_memory_utilization,
+                    "max_model_len": max_model_len,
                     "started_at": datetime.now().isoformat()
                 }
 
@@ -567,6 +572,8 @@ class ModelService:
                     "engine_type": engine_type,
                     "tp_size": tp_size,
                     "dp_size": dp_size,
+                    "gpu_memory_utilization": gpu_memory_utilization,
+                    "max_model_len": max_model_len,
                     "started_at": datetime.now().isoformat()
                 }
 
