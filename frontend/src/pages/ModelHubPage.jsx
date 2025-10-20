@@ -1,36 +1,36 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import {
-  Card,
-  Typography,
-  Tag,
-  Row,
-  Col,
-  Space,
-  Divider,
-  Spin,
-  message,
+import { 
+  Card, 
+  Typography, 
+  Tag, 
+  Row, 
+  Col, 
+  Space, 
+  Divider, 
+  Spin, 
+  message, 
   Button,
   Checkbox,
-  Skeleton
+  Select,
+  Form,
+  InputNumber,
+  Skeleton 
 } from 'antd';
-import {
-  RobotOutlined,
-  CloudOutlined,
+import { 
+  RobotOutlined, 
+  CloudOutlined, 
   ThunderboltOutlined,
   CheckCircleOutlined,
   DeleteOutlined,
-  ReloadOutlined,
-  HistoryOutlined
+  RocketOutlined,
+  ReloadOutlined
 } from '@ant-design/icons';
-import HyperPodPanel from '../components/HyperPodPanel';
-import LaunchPanel from '../components/LaunchPanel';
-import LaunchHistoryDrawer from '../components/LaunchHistoryDrawer';
 
 const { Title, Text, Paragraph } = Typography;
 
 const ModelHubPage = () => {
   const [initialLoading, setInitialLoading] = useState(true);
-  const [launchHistoryVisible, setLaunchHistoryVisible] = useState(false);
+  const [statusLoading, setStatusLoading] = useState(false);
   
   
   // Always start with empty model status to force fresh fetch
@@ -51,74 +51,131 @@ const ModelHubPage = () => {
     }
   });
   
+  const [deploymentConfig, setDeploymentConfig] = useState(() => {
+    try {
+      const saved = localStorage.getItem('modelHub_deploymentConfig');
+      return saved ? JSON.parse(saved) : {
+        method: 'SageMaker Endpoint',
+        framework: 'vllm',
+        serviceType: 'sagemaker_realtime',
+        machineType: 'g5.2xlarge',
+        tpSize: 1,
+        dpSize: 1
+      };
+    } catch (error) {
+      console.error('Failed to load deployment config from localStorage:', error);
+      return {
+        method: 'SageMaker Endpoint',
+        framework: 'vllm',
+        serviceType: 'sagemaker_realtime',
+        machineType: 'g5.2xlarge',
+        tpSize: 1,
+        dpSize: 1
+      };
+    }
+  });
   // Memoized category templates to avoid recreating icons
   const categoryTemplates = useMemo(() => ({
     bedrock: {
       title: 'Bedrock 模型',
       icon: <CloudOutlined />,
       color: '#1890ff',
-      alwaysAvailable: true
+      models: []
     },
     emd: {
       title: '部署模型',
       icon: <ThunderboltOutlined />,
       color: '#52c41a',
-      alwaysAvailable: false
-    },
-    external: {
-      title: '外部部署',
-      icon: <RobotOutlined />,
-      color: '#fa8c16',
-      alwaysAvailable: true
+      models: []
     }
   }), []);
 
-  const [modelCategories, setModelCategories] = useState({});
-
-  const buildCategories = useCallback((modelsData = {}) => {
-    const categories = {};
-    const deployableKeys = [];
-
-    Object.entries(modelsData).forEach(([categoryKey, categoryModels]) => {
-      const preset = categoryTemplates[categoryKey] || {
-        title: categoryKey,
-        icon: <RobotOutlined />,
-        color: '#722ed1',
-        alwaysAvailable: true
-      };
-
-      const models = Object.entries(categoryModels || {}).map(([key, info]) => {
-        const alwaysAvailable = Object.prototype.hasOwnProperty.call(info, 'always_available')
-          ? Boolean(info.always_available)
-          : (preset.alwaysAvailable ?? true);
-
-        if (!alwaysAvailable) {
-          deployableKeys.push(key);
-        }
-
-        return {
-          key,
-          name: info.name || key,
-          description: info.description || '',
-          alwaysAvailable,
-          deployment_method: info.deployment_method,
-          status: info.deployment_status || {},
-          raw: info
-        };
-      });
-
-      categories[categoryKey] = {
-        title: preset.title,
-        icon: preset.icon,
-        color: preset.color,
-        models
-      };
-    });
-
-    return { categories, deployableKeys };
-  }, [categoryTemplates]);
+  const [modelCategories, setModelCategories] = useState(categoryTemplates);
   
 
+  // 批量部署模型 (memoized for performance)
+  const handleBatchDeploy = useCallback(async () => {
+    if (selectedModels.length === 0) {
+      message.warning('请选择要部署的模型');
+      return;
+    }
+    
+    try {
+      const response = await fetch('/api/deploy-models', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ 
+          models: selectedModels,
+          instance_type: deploymentConfig.machineType,
+          engine_type: deploymentConfig.framework,
+          service_type: deploymentConfig.serviceType
+        })
+      });
+      
+      if (response.ok) {
+        const responseData = await response.json();
+        console.log('Deployment response:', responseData);
+        
+        if (responseData.status === 'success') {
+          // Check individual model deployment results
+          const results = responseData.results || {};
+          let successCount = 0;
+          let failedCount = 0;
+          
+          const newStatus = {};
+          selectedModels.forEach(modelKey => {
+            const modelResult = results[modelKey];
+            if (modelResult && modelResult.success) {
+              newStatus[modelKey] = { 
+                status: 'inprogress', 
+                message: '部署中',
+                tag: modelResult.tag
+              };
+              successCount++;
+            } else {
+              newStatus[modelKey] = { 
+                status: 'failed', 
+                message: modelResult?.error || '部署失败'
+              };
+              failedCount++;
+            }
+          });
+          
+          // Batch state updates to reduce re-renders
+          React.startTransition(() => {
+            setModelStatus(prev => ({
+              ...prev,
+              ...newStatus
+            }));
+            
+            // 清空选择
+            setSelectedModels([]);
+          });
+          
+          // Show appropriate message
+          if (failedCount === 0) {
+            message.success(`已开始部署 ${successCount} 个模型`);
+          } else if (successCount === 0) {
+            message.error(`${failedCount} 个模型部署失败`);
+          } else {
+            message.warning(`${successCount} 个模型开始部署，${failedCount} 个模型部署失败`);
+          }
+        } else {
+          message.error(`部署请求失败: ${responseData.message || '未知错误'}`);
+        }
+        
+      } else {
+        const errorText = await response.text();
+        console.error('Deployment failed:', response.status, errorText);
+        message.error(`批量部署请求失败 (${response.status}): ${errorText}`);
+      }
+    } catch (error) {
+      console.error('批量部署模型失败:', error);
+      message.error('部署请求失败');
+    }
+  }, [selectedModels, deploymentConfig]);
 
   // 处理模型选择 (memoized for performance)
   const handleModelSelection = useCallback((modelKey, checked) => {
@@ -137,7 +194,8 @@ const ModelHubPage = () => {
       try {
         // Only save selected models and deployment config, not status (always fetch fresh)
         const batch = {
-          modelHub_selectedModels: JSON.stringify(selectedModels)
+          modelHub_selectedModels: JSON.stringify(selectedModels),
+          modelHub_deploymentConfig: JSON.stringify(deploymentConfig)
         };
         
         // Use requestIdleCallback if available for non-blocking writes
@@ -162,7 +220,7 @@ const ModelHubPage = () => {
     }, 300); // Debounce localStorage writes
     
     return () => clearTimeout(timeoutId);
-  }, [selectedModels]);
+  }, [selectedModels, deploymentConfig]);
 
   // Always fetch fresh data - no caching to ensure correct status
   const fetchModelData = useCallback(async () => {
@@ -183,19 +241,52 @@ const ModelHubPage = () => {
       console.log('🔍 DEBUG: Fetching model list first...');
       const modelListResponse = await fetchWithTimeout('/api/model-list', {}, 15000);
       
+      let modelListData = null;
       let deployableModelKeys = [];
-
+      
       // Process model list response
       if (modelListResponse.ok) {
         const data = await modelListResponse.json();
-
+        
         if (data.status === 'success' && data.models) {
-          const { categories, deployableKeys } = buildCategories(data.models);
-          deployableModelKeys = deployableKeys;
-
+          modelListData = data.models;
+          
+          // Process models with memoized transformation
+          const bedrockModels = data.models.bedrock ? 
+            Object.entries(data.models.bedrock).map(([key, info]) => ({
+              key,
+              name: info.name,
+              description: info.description,
+              alwaysAvailable: true
+            })) : [];
+            
+          const emdModels = data.models.emd ? 
+            Object.entries(data.models.emd).map(([key, info]) => ({
+              key,
+              name: info.name,
+              description: info.description,
+              alwaysAvailable: false
+            })) : [];
+            
+          // Extract deployable model keys for status check
+          deployableModelKeys = emdModels.map(m => m.key);
+          console.log('🔍 DEBUG: deployableModelKeys extracted:', deployableModelKeys);
+            
+          // Batch UI updates to reduce re-renders
           React.startTransition(() => {
-            setModelCategories(categories);
-            setModelStatus({});
+            setModelCategories({
+              bedrock: {
+                ...categoryTemplates.bedrock,
+                models: bedrockModels
+              },
+              emd: {
+                ...categoryTemplates.emd,
+                models: emdModels
+              }
+            });
+            
+            // Keep loading state until status is fetched
+            // setInitialLoading(false); // Don't stop loading yet
           });
         }
       }
@@ -569,8 +660,6 @@ const ModelHubPage = () => {
         </div>
       </div>
 
-      <HyperPodPanel />
-
       {/* Show UI structure immediately, even during initial loading */}
       {Object.entries(modelCategories).map(([categoryKey, category]) => (
         <div key={categoryKey} style={{ marginBottom: 32 }}>
@@ -584,6 +673,9 @@ const ModelHubPage = () => {
               <Title level={3} style={{ margin: 0, color: category.color }}>
                 {category.title}
               </Title>
+              {statusLoading && categoryKey === 'emd' && (
+                <Spin size="small" />
+              )}
             </Space>
           </div>
           
@@ -663,41 +755,113 @@ const ModelHubPage = () => {
         if (!hasDeployableModels) return null;
 
         return (
-          <div>
-            <LaunchPanel
-              selectedModels={selectedModels}
-              onLaunchStart={(jobId) => {
-                message.success(`Launch started! Job ID: ${jobId}`);
-                // Refresh model status to show launch status
-                fetchModelData();
-              }}
-            />
-            
-            <div style={{ marginTop: 16, textAlign: 'center' }}>
+          <Card 
+            title={
               <Space>
-                <Button 
-                  onClick={() => setSelectedModels([])}
-                  disabled={selectedModels.length === 0}
-                >
-                  清空选择
-                </Button>
-                <Button 
-                  icon={<HistoryOutlined />}
-                  onClick={() => setLaunchHistoryVisible(true)}
-                >
-                  查看启动历史
-                </Button>
+                <RocketOutlined />
+                <span>部署配置</span>
               </Space>
-            </div>
-          </div>
+            }
+            style={{ marginTop: 24 }}
+          >
+            <Form layout="vertical">
+              <Row gutter={16}>
+                <Col span={6}>
+                  <Form.Item label="部署方式">
+                    <Select
+                      value={deploymentConfig.method}
+                      onChange={(value) => setDeploymentConfig(prev => ({ ...prev, method: value }))}
+                      options={[
+                        { value: 'SageMaker Endpoint', label: 'SageMaker Endpoint' },
+                        { value: 'SageMaker HyperPod', label: 'SageMaker HyperPod' },
+                        { value: 'EKS', label: 'EKS' },
+                        { value: 'EC2', label: 'EC2' }
+                      ]}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={6}>
+                  <Form.Item label="推理框架">
+                    <Select
+                      value={deploymentConfig.framework}
+                      onChange={(value) => setDeploymentConfig(prev => ({ ...prev, framework: value }))}
+                      options={[
+                        { value: 'vllm', label: 'vLLM' },
+                        { value: 'sglang', label: 'SGLang' },
+                        { value: 'tgi', label: 'Text Generation Inference' },
+                        { value: 'transformers', label: 'Transformers' }
+                      ]}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={6}>
+                  <Form.Item label="机型选择">
+                    <Select
+                      value={deploymentConfig.machineType}
+                      onChange={(value) => setDeploymentConfig(prev => ({ ...prev, machineType: value }))}
+                      options={[
+                        { value: 'g5.xlarge', label: 'g5.xlarge (1 A10G, 24GB RAM)' },
+                        { value: 'g5.2xlarge', label: 'g5.2xlarge (1 A10G, 24GB RAM)' },
+                        { value: 'g5.4xlarge', label: 'g5.4xlarge (1 A10G, 24GB RAM)' },
+                        { value: 'g5.12xlarge', label: 'g5.12xlarge (4 A10G, 96GB RAM)' },
+                        { value: 'g5.24xlarge', label: 'g5.48xlarge (4 A10G, 192GB RAM)' },
+                        { value: 'g6e.xlarge', label: 'g6e.xlarge (1 L40S, 48GB RAM)' },
+                        { value: 'p4d.24xlarge', label: 'p4d.24xlarge (8 A100, 320GB RAM)' },
+                        { value: 'p4de.24xlarge', label: 'p4d.24xlarge (8 A100, 640GB RAM)' },
+                        { value: 'p5.48xlarge', label: 'p5.48xlarge (8 A100, 640GB RAM)' },
+                        { value: 'p5e.48xlarge', label: 'p5e.48xlarge (8 H100, 1128GB RAM)' },
+                        { value: 'p5en.48xlarge', label: 'p5en.48xlarge (8 H100, 1128GB RAM)' },
+                      ]}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={6}>
+                  <Form.Item label="推理参数">
+                    <Space.Compact style={{ width: '100%' }}>
+                      <InputNumber
+                        addonBefore="TP"
+                        min={1}
+                        max={8}
+                        value={deploymentConfig.tpSize}
+                        onChange={(value) => setDeploymentConfig(prev => ({ ...prev, tpSize: value }))}
+                        style={{ width: '50%' }}
+                      />
+                      <InputNumber
+                        addonBefore="DP"
+                        min={1}
+                        max={8}
+                        value={deploymentConfig.dpSize}
+                        onChange={(value) => setDeploymentConfig(prev => ({ ...prev, dpSize: value }))}
+                        style={{ width: '50%' }}
+                      />
+                    </Space.Compact>
+                  </Form.Item>
+                </Col>
+              </Row>
+              <Row>
+                <Col span={24}>
+                  <Space>
+                    <Button 
+                      type="primary" 
+                      onClick={handleBatchDeploy}
+                      disabled={selectedModels.length === 0}
+                      size="large"
+                    >
+                      部署选中模型 ({selectedModels.length})
+                    </Button>
+                    <Button 
+                      onClick={() => setSelectedModels([])}
+                      disabled={selectedModels.length === 0}
+                    >
+                      清空选择
+                    </Button>
+                  </Space>
+                </Col>
+              </Row>
+            </Form>
+          </Card>
         );
-      }, [modelCategories, modelStatus, selectedModels])}
-      
-      {/* Launch History Drawer */}
-      <LaunchHistoryDrawer
-        visible={launchHistoryVisible}
-        onClose={() => setLaunchHistoryVisible(false)}
-      />
+      }, [modelCategories, modelStatus, selectedModels, deploymentConfig, handleBatchDeploy])}
     </div>
   );
 };

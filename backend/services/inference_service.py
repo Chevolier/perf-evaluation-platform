@@ -52,9 +52,12 @@ class InferenceService:
         if not models and not manual_config:
             yield f"data: {json.dumps({'error': 'No models or manual configuration specified', 'status': 'error'})}\n\n"
             return
-        
+
         result_queue = queue.Queue()
         threads = []
+
+        total_workers = len(models) + (1 if manual_config else 0)
+        yield f"data: {json.dumps({'type': 'status', 'status': 'initializing', 'total': total_workers}, ensure_ascii=False)}\n\n"
         
         # Handle manual configuration
         if manual_config:

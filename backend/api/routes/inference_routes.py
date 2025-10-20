@@ -1,6 +1,6 @@
 """API routes for model inference."""
 
-from flask import Blueprint, request, Response
+from flask import Blueprint, request, Response, stream_with_context
 from ...services.inference_service import InferenceService
 from ...utils import get_logger
 
@@ -24,7 +24,7 @@ def multi_inference():
         # Stream results back to client using Server-Sent Events
         logger.info("Starting streaming response for multi-inference")
         return Response(
-            inference_service.multi_inference(data),
+            stream_with_context(inference_service.multi_inference(data)),
             mimetype='text/event-stream',
             headers={
                 'Cache-Control': 'no-cache',
