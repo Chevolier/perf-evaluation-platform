@@ -487,7 +487,9 @@ class ModelService:
                     "python3", "-m", "sglang.launch_server",
                     "--model-path", huggingface_repo,
                     "--host", "0.0.0.0",
-                    "--port", str(port)
+                    "--port", str(port),
+                    "--mem-fraction-static", str(gpu_memory_utilization),
+                    "--max-total-tokens", str(max_model_len)
                 ])
 
                 # Add TP/DP parameters for SGLang
