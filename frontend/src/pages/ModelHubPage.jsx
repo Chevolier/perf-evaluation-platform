@@ -834,7 +834,7 @@ const ModelHubPage = () => {
                 </Col>
               </Row>
               <Row gutter={16}>
-                <Col span={12}>
+                <Col span={6}>
                   <Form.Item label="GPU内存利用率">
                     <InputNumber
                       min={0.1}
@@ -848,7 +848,7 @@ const ModelHubPage = () => {
                     />
                   </Form.Item>
                 </Col>
-                <Col span={12}>
+                <Col span={6}>
                   <Form.Item label="最大模型长度">
                     <InputNumber
                       min={512}
