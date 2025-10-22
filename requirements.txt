@@ -1,11 +1,12 @@
 flask==3.0.0
 flask-cors==4.0.0
 boto3
+sagemaker
 openai
 pillow==10.2.0
 requests
 ffmpeg-python==0.2.0
-evalscope
+evalscope==2.0.0
 kubernetes
 vllm
 litellm
