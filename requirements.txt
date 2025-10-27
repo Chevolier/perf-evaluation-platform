@@ -7,7 +7,7 @@ openai==2.3.0
 pillow==10.3.0
 
 ffmpeg-python==0.2.0
-evalscope==2.0.0
+# evalscope==2.0.0
 kubernetes==33.1.0
 vllm==0.10.2
 litellm==1.78.0

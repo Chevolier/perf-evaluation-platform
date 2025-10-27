@@ -7,6 +7,8 @@ import json
 import subprocess
 import time
 import os
+import boto3
+import tempfile
 from datetime import datetime
 from typing import Dict, Any, Optional
 from pathlib import Path
@@ -987,14 +989,39 @@ class StressTestService:
             logger.info(f"EVALSCOPE_LOG: Token config - min_prompt_length={min_prompt_length}, max_prompt_length={max_prompt_length}")
             logger.info(f"EVALSCOPE_LOG: Token config - min_tokens={min_tokens}, max_tokens={max_tokens}")
             logger.info(f"EVALSCOPE_LOG: Tokenizer path - {tokenizer_path}")
-            
-            # Create a simple Python script that uses evalscope SDK directly (original approach)
-            dataset_param = f"'{dataset_path}'" if dataset == 'custom' and dataset_path else f"'{dataset}'"
-            
+
+            # Handle custom dataset with S3 download if needed
+            local_dataset_path = None
+            if dataset == 'custom' and dataset_path:
+                if dataset_path.startswith('s3://'):
+                    # Download from S3
+                    self._update_session(session_id, {
+                        "current_message": "从S3下载自定义数据集..."
+                    })
+                    try:
+                        local_dataset_path = self._download_s3_dataset(dataset_path, session_id)
+                        logger.info(f"Successfully downloaded S3 dataset to: {local_dataset_path}")
+                    except Exception as e:
+                        logger.error(f"Failed to download S3 dataset: {e}")
+                        raise Exception(f"下载S3数据集失败: {str(e)}")
+                else:
+                    # Use local path as-is
+                    local_dataset_path = dataset_path
+                    if not os.path.exists(local_dataset_path):
+                        raise Exception(f"本地数据集文件不存在: {local_dataset_path}")
+
+                # For custom datasets, use flexible prompt length limits to avoid filtering out user prompts
+                min_prompt_length = 1  # Allow very short prompts
+                max_prompt_length = 50000  # Allow very long prompts
+                logger.info(f"[CUSTOM DATASET] Updated prompt lengths: min={min_prompt_length}, max={max_prompt_length}")
+
             # Check if VLM parameters should be included (when image parameters are provided)
             has_vlm_params = 'image_width' in test_params and 'image_height' in test_params and 'image_num' in test_params
-            
-            script_content = f'''#!/usr/bin/env python
+
+            # Create appropriate script content based on dataset type
+            if dataset == 'custom' and local_dataset_path:
+                # Use dataset_path for custom datasets
+                script_content = f'''#!/usr/bin/env python
 import sys
 import json
 
@@ -1004,15 +1031,16 @@ sys.path.insert(0, '/home/ec2-user/SageMaker/efs/conda_envs/evalscope/lib/python
 try:
     from evalscope.perf.main import run_perf_benchmark
     from evalscope.perf.arguments import Arguments
-    
-    # Create evalscope configuration (this will create cartesian product and subfolders)
+
+    # Create evalscope configuration for custom dataset (this will create cartesian product and subfolders)
     task_cfg = Arguments(
         parallel={concurrency_list},
         number={num_requests_list},
         model='{model_name}',
         url='{api_url}',
         api='openai',
-        dataset={dataset_param},
+        dataset_path='{local_dataset_path}',
+        dataset='custom',
         min_tokens={min_tokens},
         max_tokens={max_tokens},
         prefix_length={prefix_length},
@@ -1027,15 +1055,65 @@ try:
         read_timeout={read_timeout},
         seed=42{', image_width=' + str(image_width) + ', image_height=' + str(image_height) + ', image_format="' + image_format + '", image_num=' + str(image_num) if has_vlm_params else ''}
     )
-    
+
     # Run the benchmark (this creates the subfolder structure)
     results = run_perf_benchmark(task_cfg)
-    
+
     # Output results as JSON
     print("EVALSCOPE_RESULTS_START")
     print(json.dumps(results, default=str, ensure_ascii=False))
     print("EVALSCOPE_RESULTS_END")
-    
+
+except Exception as e:
+    print("EVALSCOPE_ERROR:", str(e))
+    import traceback
+    traceback.print_exc()
+    sys.exit(1)
+'''
+            else:
+                # Use standard dataset parameter for non-custom datasets
+                script_content = f'''#!/usr/bin/env python
+import sys
+import json
+
+# Add evalscope to path
+sys.path.insert(0, '/home/ec2-user/SageMaker/efs/conda_envs/evalscope/lib/python3.10/site-packages')
+
+try:
+    from evalscope.perf.main import run_perf_benchmark
+    from evalscope.perf.arguments import Arguments
+
+    # Create evalscope configuration (this will create cartesian product and subfolders)
+    task_cfg = Arguments(
+        parallel={concurrency_list},
+        number={num_requests_list},
+        model='{model_name}',
+        url='{api_url}',
+        api='openai',
+        dataset='{dataset}',
+        min_tokens={min_tokens},
+        max_tokens={max_tokens},
+        prefix_length={prefix_length},
+        min_prompt_length={min_prompt_length},
+        max_prompt_length={max_prompt_length},
+        extra_args={{'ignore_eos': True}},
+        tokenizer_path='{tokenizer_path}',
+        temperature={temperature},
+        outputs_dir='{output_dir}',
+        stream=True,
+        connect_timeout={connect_timeout},
+        read_timeout={read_timeout},
+        seed=42{', image_width=' + str(image_width) + ', image_height=' + str(image_height) + ', image_format="' + image_format + '", image_num=' + str(image_num) if has_vlm_params else ''}
+    )
+
+    # Run the benchmark (this creates the subfolder structure)
+    results = run_perf_benchmark(task_cfg)
+
+    # Output results as JSON
+    print("EVALSCOPE_RESULTS_START")
+    print(json.dumps(results, default=str, ensure_ascii=False))
+    print("EVALSCOPE_RESULTS_END")
+
 except Exception as e:
     print("EVALSCOPE_ERROR:", str(e))
     import traceback
@@ -2274,6 +2352,31 @@ except Exception as e:
             
             # Store output directory in session
             self.test_sessions[session_id]["output_directory"] = output_dir
+
+            # Handle custom dataset with S3 download if needed
+            local_dataset_path = None
+            if dataset == 'custom' and dataset_path:
+                if dataset_path.startswith('s3://'):
+                    # Download from S3
+                    self._update_session(session_id, {
+                        "current_message": "从S3下载自定义数据集..."
+                    })
+                    try:
+                        local_dataset_path = self._download_s3_dataset(dataset_path, session_id)
+                        logger.info(f"Successfully downloaded S3 dataset to: {local_dataset_path}")
+                    except Exception as e:
+                        logger.error(f"Failed to download S3 dataset: {e}")
+                        raise Exception(f"下载S3数据集失败: {str(e)}")
+                else:
+                    # Use local path as-is
+                    local_dataset_path = dataset_path
+                    if not os.path.exists(local_dataset_path):
+                        raise Exception(f"本地数据集文件不存在: {local_dataset_path}")
+
+                # For custom datasets, use flexible prompt length limits to avoid filtering out user prompts
+                min_prompt_length = 1  # Allow very short prompts
+                max_prompt_length = 50000  # Allow very long prompts
+                logger.info(f"[CUSTOM DATASET] Updated prompt lengths: min={min_prompt_length}, max={max_prompt_length}")
             
             # Let real-time polling handle all progress updates - no hardcoded progress here
             self._update_session(session_id, {
@@ -2281,12 +2384,15 @@ except Exception as e:
             })
             
             # Create Python script to run evalscope programmatically using the same approach as original implementation
-            dataset_param = f"'{dataset_path}'" if dataset == 'custom' and dataset_path else f"'{dataset}'"
+            # For custom datasets, we need to use dataset_path instead of dataset parameter
             
             # Check if VLM parameters should be included (when image parameters are provided)
             has_vlm_params = 'image_width' in test_params and 'image_height' in test_params and 'image_num' in test_params
-            
-            script_content = f'''#!/usr/bin/env python
+
+            # Create appropriate script content based on dataset type
+            if dataset == 'custom' and local_dataset_path:
+                # Use dataset_path for custom datasets
+                script_content = f'''#!/usr/bin/env python
 import sys
 import json
 
@@ -2296,15 +2402,16 @@ sys.path.insert(0, '/home/ec2-user/SageMaker/efs/conda_envs/evalscope/lib/python
 try:
     from evalscope.perf.main import run_perf_benchmark
     from evalscope.perf.arguments import Arguments
-    
-    # Create evalscope configuration (this will create cartesian product and subfolders)
+
+    # Create evalscope configuration for custom dataset (this will create cartesian product and subfolders)
     task_cfg = Arguments(
         parallel={concurrency_list},
         number={num_requests_list},
         model='{model_name}',
         url='{api_url}',
         api='openai',
-        dataset={dataset_param},
+        dataset_path='{local_dataset_path}',
+        dataset='custom',
         min_tokens={min_tokens},
         max_tokens={max_tokens},
         prefix_length={prefix_length},
@@ -2319,15 +2426,65 @@ try:
         read_timeout={read_timeout},
         seed=42{', image_width=' + str(image_width) + ', image_height=' + str(image_height) + ', image_format="' + image_format + '", image_num=' + str(image_num) if has_vlm_params else ''}
     )
-    
+
     # Run the benchmark (this creates the subfolder structure)
     results = run_perf_benchmark(task_cfg)
-    
+
     # Output results as JSON
     print("EVALSCOPE_RESULTS_START")
     print(json.dumps(results, default=str, ensure_ascii=False))
     print("EVALSCOPE_RESULTS_END")
-    
+
+except Exception as e:
+    print("EVALSCOPE_ERROR:", str(e))
+    import traceback
+    traceback.print_exc()
+    sys.exit(1)
+'''
+            else:
+                # Use standard dataset parameter for non-custom datasets
+                script_content = f'''#!/usr/bin/env python
+import sys
+import json
+
+# Add evalscope to path
+sys.path.insert(0, '/home/ec2-user/SageMaker/efs/conda_envs/evalscope/lib/python3.10/site-packages')
+
+try:
+    from evalscope.perf.main import run_perf_benchmark
+    from evalscope.perf.arguments import Arguments
+
+    # Create evalscope configuration (this will create cartesian product and subfolders)
+    task_cfg = Arguments(
+        parallel={concurrency_list},
+        number={num_requests_list},
+        model='{model_name}',
+        url='{api_url}',
+        api='openai',
+        dataset='{dataset}',
+        min_tokens={min_tokens},
+        max_tokens={max_tokens},
+        prefix_length={prefix_length},
+        min_prompt_length={min_prompt_length},
+        max_prompt_length={max_prompt_length},
+        extra_args={{'ignore_eos': True}},
+        tokenizer_path='{tokenizer_path}',
+        temperature={temperature},
+        outputs_dir='{output_dir}',
+        stream=True,
+        connect_timeout={connect_timeout},
+        read_timeout={read_timeout},
+        seed=42{', image_width=' + str(image_width) + ', image_height=' + str(image_height) + ', image_format="' + image_format + '", image_num=' + str(image_num) if has_vlm_params else ''}
+    )
+
+    # Run the benchmark (this creates the subfolder structure)
+    results = run_perf_benchmark(task_cfg)
+
+    # Output results as JSON
+    print("EVALSCOPE_RESULTS_START")
+    print(json.dumps(results, default=str, ensure_ascii=False))
+    print("EVALSCOPE_RESULTS_END")
+
 except Exception as e:
     print("EVALSCOPE_ERROR:", str(e))
     import traceback
@@ -2750,6 +2907,31 @@ except Exception as e:
             
             # Store output directory in session
             self.test_sessions[session_id]["output_directory"] = output_dir
+
+            # Handle custom dataset with S3 download if needed
+            local_dataset_path = None
+            if dataset == 'custom' and dataset_path:
+                if dataset_path.startswith('s3://'):
+                    # Download from S3
+                    self._update_session(session_id, {
+                        "current_message": "从S3下载自定义数据集..."
+                    })
+                    try:
+                        local_dataset_path = self._download_s3_dataset(dataset_path, session_id)
+                        logger.info(f"Successfully downloaded S3 dataset to: {local_dataset_path}")
+                    except Exception as e:
+                        logger.error(f"Failed to download S3 dataset: {e}")
+                        raise Exception(f"下载S3数据集失败: {str(e)}")
+                else:
+                    # Use local path as-is
+                    local_dataset_path = dataset_path
+                    if not os.path.exists(local_dataset_path):
+                        raise Exception(f"本地数据集文件不存在: {local_dataset_path}")
+
+                # For custom datasets, use flexible prompt length limits to avoid filtering out user prompts
+                min_prompt_length = 1  # Allow very short prompts
+                max_prompt_length = 50000  # Allow very long prompts
+                logger.info(f"[CUSTOM DATASET] Updated prompt lengths: min={min_prompt_length}, max={max_prompt_length}")
             
             # Let real-time polling handle all progress updates - no hardcoded progress here
             self._update_session(session_id, {
@@ -2757,12 +2939,15 @@ except Exception as e:
             })
             
             # Create Python script to run evalscope programmatically using the same approach as original implementation
-            dataset_param = f"'{dataset_path}'" if dataset == 'custom' and dataset_path else f"'{dataset}'"
+            # For custom datasets, we need to use dataset_path instead of dataset parameter
             
             # Check if VLM parameters should be included (when image parameters are provided)
             has_vlm_params = 'image_width' in test_params and 'image_height' in test_params and 'image_num' in test_params
-            
-            script_content = f'''#!/usr/bin/env python
+
+            # Create appropriate script content based on dataset type
+            if dataset == 'custom' and local_dataset_path:
+                # Use dataset_path for custom datasets
+                script_content = f'''#!/usr/bin/env python
 import sys
 import json
 
@@ -2772,15 +2957,16 @@ sys.path.insert(0, '/home/ec2-user/SageMaker/efs/conda_envs/evalscope/lib/python
 try:
     from evalscope.perf.main import run_perf_benchmark
     from evalscope.perf.arguments import Arguments
-    
-    # Create evalscope configuration (this will create cartesian product and subfolders)
+
+    # Create evalscope configuration for custom dataset (this will create cartesian product and subfolders)
     task_cfg = Arguments(
         parallel={concurrency_list},
         number={num_requests_list},
         model='{sm_model_name}',
         url='{api_url}',
         api='openai',
-        dataset={dataset_param},
+        dataset_path='{local_dataset_path}',
+        dataset='custom',
         min_tokens={min_tokens},
         max_tokens={max_tokens},
         prefix_length={prefix_length},
@@ -2795,15 +2981,65 @@ try:
         read_timeout={read_timeout},
         seed=42{', image_width=' + str(image_width) + ', image_height=' + str(image_height) + ', image_format="' + image_format + '", image_num=' + str(image_num) if has_vlm_params else ''}
     )
-    
+
     # Run the benchmark (this creates the subfolder structure)
     results = run_perf_benchmark(task_cfg)
-    
+
     # Output results as JSON
     print("EVALSCOPE_RESULTS_START")
     print(json.dumps(results, default=str, ensure_ascii=False))
     print("EVALSCOPE_RESULTS_END")
-    
+
+except Exception as e:
+    print("EVALSCOPE_ERROR:", str(e))
+    import traceback
+    traceback.print_exc()
+    sys.exit(1)
+'''
+            else:
+                # Use standard dataset parameter for non-custom datasets
+                script_content = f'''#!/usr/bin/env python
+import sys
+import json
+
+# Add evalscope to path
+sys.path.insert(0, '/home/ec2-user/SageMaker/efs/conda_envs/evalscope/lib/python3.10/site-packages')
+
+try:
+    from evalscope.perf.main import run_perf_benchmark
+    from evalscope.perf.arguments import Arguments
+
+    # Create evalscope configuration (this will create cartesian product and subfolders)
+    task_cfg = Arguments(
+        parallel={concurrency_list},
+        number={num_requests_list},
+        model='{sm_model_name}',
+        url='{api_url}',
+        api='openai',
+        dataset='{dataset}',
+        min_tokens={min_tokens},
+        max_tokens={max_tokens},
+        prefix_length={prefix_length},
+        min_prompt_length={min_prompt_length},
+        max_prompt_length={max_prompt_length},
+        extra_args={{'ignore_eos': True}},
+        tokenizer_path='{tokenizer_path}',
+        temperature={temperature},
+        outputs_dir='{output_dir}',
+        stream=True,
+        connect_timeout={connect_timeout},
+        read_timeout={read_timeout},
+        seed=42{', image_width=' + str(image_width) + ', image_height=' + str(image_height) + ', image_format="' + image_format + '", image_num=' + str(image_num) if has_vlm_params else ''}
+    )
+
+    # Run the benchmark (this creates the subfolder structure)
+    results = run_perf_benchmark(task_cfg)
+
+    # Output results as JSON
+    print("EVALSCOPE_RESULTS_START")
+    print(json.dumps(results, default=str, ensure_ascii=False))
+    print("EVALSCOPE_RESULTS_END")
+
 except Exception as e:
     print("EVALSCOPE_ERROR:", str(e))
     import traceback
@@ -3164,6 +3400,110 @@ except Exception as e:
             # For unknown models, try the base model name as-is
             logger.warning(f"Unknown model family for {model_name}, using base model name as tokenizer path")
             return base_model
+
+    def _download_s3_dataset(self, s3_path: str, session_id: str) -> str:
+        """Download dataset from S3 and return local path.
+
+        Args:
+            s3_path: S3 path in format s3://bucket/key
+            session_id: Session ID for logging and temporary file naming
+
+        Returns:
+            Local file path to downloaded dataset
+
+        Raises:
+            Exception: If S3 download fails
+        """
+        try:
+            logger.info(f"Downloading custom dataset from S3: {s3_path}")
+
+            # Parse S3 path
+            if not s3_path.startswith('s3://'):
+                raise Exception(f"Invalid S3 path format: {s3_path}. Must start with 's3://'")
+
+            s3_parts = s3_path[5:].split('/', 1)  # Remove 's3://' and split
+            if len(s3_parts) != 2:
+                raise Exception(f"Invalid S3 path format: {s3_path}. Expected format: s3://bucket/key")
+
+            bucket_name = s3_parts[0]
+            object_key = s3_parts[1]
+
+            logger.info(f"Parsed S3 path - Bucket: {bucket_name}, Key: {object_key}")
+
+            # Create S3 client
+            try:
+                s3_client = boto3.client('s3')
+                logger.info("S3 client created successfully")
+            except Exception as e:
+                logger.error(f"Failed to create S3 client: {e}")
+                raise Exception(f"无法创建S3客户端，请检查AWS凭据配置: {str(e)}")
+
+            # Get file extension from S3 key
+            file_extension = os.path.splitext(object_key)[1]
+            if not file_extension:
+                file_extension = '.jsonl'  # Default to .jsonl for datasets
+
+            # Create temporary file with appropriate extension
+            temp_file = tempfile.NamedTemporaryFile(
+                mode='wb',
+                suffix=f'_{session_id}_dataset{file_extension}',
+                delete=False
+            )
+            temp_file_path = temp_file.name
+            temp_file.close()
+
+            logger.info(f"Created temporary file: {temp_file_path}")
+
+            # Download file from S3
+            try:
+                logger.info(f"Starting S3 download from s3://{bucket_name}/{object_key}")
+                s3_client.download_file(bucket_name, object_key, temp_file_path)
+                logger.info(f"Successfully downloaded dataset to: {temp_file_path}")
+
+                # Verify file exists and has content
+                if not os.path.exists(temp_file_path):
+                    raise Exception("Downloaded file does not exist")
+
+                file_size = os.path.getsize(temp_file_path)
+                if file_size == 0:
+                    raise Exception("Downloaded file is empty")
+
+                logger.info(f"Downloaded dataset file size: {file_size} bytes")
+
+                # Verify it's a valid JSON Lines file by reading first few lines
+                try:
+                    with open(temp_file_path, 'r', encoding='utf-8') as f:
+                        first_line = f.readline().strip()
+                        if first_line:
+                            json.loads(first_line)  # Validate JSON format
+                            logger.info("Dataset file format validation successful")
+                        else:
+                            logger.warning("Dataset file appears to be empty")
+                except json.JSONDecodeError as e:
+                    logger.warning(f"Dataset file may not be valid JSON Lines format: {e}")
+                    # Continue anyway, let evalscope handle format validation
+                except Exception as e:
+                    logger.warning(f"Could not validate dataset file format: {e}")
+                    # Continue anyway
+
+                return temp_file_path
+
+            except s3_client.exceptions.NoSuchBucket:
+                raise Exception(f"S3存储桶不存在: {bucket_name}")
+            except s3_client.exceptions.NoSuchKey:
+                raise Exception(f"S3文件不存在: s3://{bucket_name}/{object_key}")
+            except Exception as e:
+                logger.error(f"S3 download failed: {e}")
+                # Clean up temp file on error
+                try:
+                    os.unlink(temp_file_path)
+                except:
+                    pass
+                raise Exception(f"S3下载失败: {str(e)}")
+
+        except Exception as e:
+            logger.error(f"Error downloading S3 dataset {s3_path}: {e}")
+            raise
     
     def _parse_benchmark_log_progress(self, output_dir: str, session_id: str) -> Dict[str, Any]:
         """Parse benchmark.log files to extract real progress information.
