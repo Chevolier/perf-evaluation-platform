@@ -1041,19 +1041,14 @@ try:
         api='openai',
         dataset_path='{local_dataset_path}',
         dataset='custom',
-        min_tokens={min_tokens},
-        max_tokens={max_tokens},
-        prefix_length={prefix_length},
-        min_prompt_length={min_prompt_length},
-        max_prompt_length={max_prompt_length},
-        extra_args={{'ignore_eos': True}},
+        extra_args={{'ignore_eos': False}},
         tokenizer_path='{tokenizer_path}',
         temperature={temperature},
         outputs_dir='{output_dir}',
         stream=True,
         connect_timeout={connect_timeout},
         read_timeout={read_timeout},
-        seed=42{', image_width=' + str(image_width) + ', image_height=' + str(image_height) + ', image_format="' + image_format + '", image_num=' + str(image_num) if has_vlm_params else ''}
+        seed=42
     )
 
     # Run the benchmark (this creates the subfolder structure)
@@ -2412,19 +2407,14 @@ try:
         api='openai',
         dataset_path='{local_dataset_path}',
         dataset='custom',
-        min_tokens={min_tokens},
-        max_tokens={max_tokens},
-        prefix_length={prefix_length},
-        min_prompt_length={min_prompt_length},
-        max_prompt_length={max_prompt_length},
-        extra_args={{'ignore_eos': True}},
+        extra_args={{'ignore_eos': False}},
         tokenizer_path='{tokenizer_path}',
         temperature={temperature},
         outputs_dir='{output_dir}',
         stream=True,
         connect_timeout={connect_timeout},
         read_timeout={read_timeout},
-        seed=42{', image_width=' + str(image_width) + ', image_height=' + str(image_height) + ', image_format="' + image_format + '", image_num=' + str(image_num) if has_vlm_params else ''}
+        seed=42
     )
 
     # Run the benchmark (this creates the subfolder structure)
@@ -2967,19 +2957,14 @@ try:
         api='openai',
         dataset_path='{local_dataset_path}',
         dataset='custom',
-        min_tokens={min_tokens},
-        max_tokens={max_tokens},
-        prefix_length={prefix_length},
-        min_prompt_length={min_prompt_length},
-        max_prompt_length={max_prompt_length},
-        extra_args={{'ignore_eos': True}},
+        extra_args={{'ignore_eos': False}},
         tokenizer_path='{tokenizer_path}',
         temperature={temperature},
         outputs_dir='{output_dir}',
         stream=True,
         connect_timeout={connect_timeout},
         read_timeout={read_timeout},
-        seed=42{', image_width=' + str(image_width) + ', image_height=' + str(image_height) + ', image_format="' + image_format + '", image_num=' + str(image_num) if has_vlm_params else ''}
+        seed=42
     )
 
     # Run the benchmark (this creates the subfolder structure)
