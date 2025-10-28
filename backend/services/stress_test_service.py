@@ -2266,7 +2266,14 @@ except Exception as e:
         # Validate that both lists have the same length for paired combinations
         if len(num_requests_list) != len(concurrency_list):
             raise Exception(f"请求总数和并发数的值数量必须相同。当前请求总数有 {len(num_requests_list)} 个值，并发数有 {len(concurrency_list)} 个值。")
-        
+
+        # Create output directory first (needed for logs)
+        output_dir = self._create_custom_api_output_dir(model_name, session_id)
+        logger.info(f"Created output directory for custom API test: {output_dir}")
+
+        # Store output directory in session
+        self.test_sessions[session_id]["output_directory"] = output_dir
+
         logger.info(f"Starting evalscope stress test with custom API: {num_requests_list} requests, {concurrency_list} concurrent")
         
         self._update_session(session_id, {
@@ -2342,11 +2349,7 @@ except Exception as e:
             logger.info(f"[DEBUG] Using tokenizer path: {tokenizer_path}")
             
             print(f"custom_api, model_name: {model_name}")
-            # Create output directory using the same structure as regular model tests
-            output_dir = self._create_custom_api_output_dir(model_name, session_id)
-            
-            # Store output directory in session
-            self.test_sessions[session_id]["output_directory"] = output_dir
+            # Note: output_dir already created at the beginning of this function
 
             # Handle custom dataset with S3 download if needed
             local_dataset_path = None
@@ -2697,6 +2700,13 @@ except Exception as e:
         api_url = "http://localhost:4000/chat/completions"
         sm_model_name = f"sagemaker/{endpoint_name}"
 
+        # Create output directory first (needed for litellm logs)
+        output_dir = self._create_custom_api_output_dir(model_name, session_id)
+        logger.info(f"Created output directory for SageMaker endpoint test: {output_dir}")
+
+        # Store output directory in session
+        self.test_sessions[session_id]["output_directory"] = output_dir
+
         # Create config.yaml file for litellm
         config_dir = Path(__file__).parent.parent.parent / 'config'
         config_dir.mkdir(exist_ok=True)
@@ -2734,10 +2744,23 @@ except Exception as e:
             except (requests.RequestException, requests.ConnectionError):
                 logger.info("Starting litellm server...")
 
-                # Start litellm server in background
+                # Create log file path for litellm server
+                litellm_log_file = os.path.join(output_dir, f'litellm_server_{session_id}.log')
+                logger.info(f"Litellm logs will be saved to: {litellm_log_file}")
+
+                # Start litellm server in background with l og file
+                # Use unbuffered output to ensure logs are written immediately
+                log_file_handle = open(litellm_log_file, 'w', buffering=1)  # Line buffered
                 litellm_process = subprocess.Popen([
                     'litellm', '--config', str(config_file), '--port', '4000'
-                ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                ], stdout=log_file_handle, stderr=subprocess.STDOUT, text=True)
+
+                # Update session with litellm log path and file handle for cleanup
+                self._update_session(session_id, {
+                    "litellm_log_file": litellm_log_file,
+                    "litellm_log_handle": log_file_handle,
+                    "current_message": "正在启动litellm服务器..."
+                })
 
                 # Wait a few seconds for server to start
                 time.sleep(5)
@@ -2749,20 +2772,54 @@ except Exception as e:
                         test_response = requests.get("http://localhost:4000/health", timeout=2)
                         if test_response.status_code == 200:
                             logger.info("Litellm server started successfully")
+                            self._update_session(session_id, {
+                                "current_message": "litellm服务器启动成功，准备开始测试..."
+                            })
                             break
                     except (requests.RequestException, requests.ConnectionError):
                         if retry < max_retries - 1:
                             logger.info(f"Waiting for litellm server to start... (attempt {retry + 1}/{max_retries})")
+
+                            # Update session with current status and show current log snippet
+                            try:
+                                if os.path.exists(litellm_log_file):
+                                    with open(litellm_log_file, 'r') as f:
+                                        log_content = f.read()
+                                    if log_content.strip():
+                                        # Show last few lines of log for progress
+                                        log_lines = log_content.strip().split('\n')
+                                        recent_lines = log_lines[-3:] if len(log_lines) >= 3 else log_lines
+                                        recent_log = '\n'.join(recent_lines)
+                                        logger.info(f"Recent litellm log output:\n{recent_log}")
+                            except Exception:
+                                pass  # Don't fail on log reading errors
+
+                            self._update_session(session_id, {
+                                "current_message": f"等待litellm服务器启动... (尝试 {retry + 1}/{max_retries})"
+                            })
                             time.sleep(5)
                         else:
                             logger.error("Failed to start litellm server after 60 seconds")
+
+                            # Try to read and log litellm error output
+                            try:
+                                if os.path.exists(litellm_log_file):
+                                    with open(litellm_log_file, 'r') as f:
+                                        litellm_output = f.read()
+                                    if litellm_output.strip():
+                                        logger.error(f"Litellm server output:\n{litellm_output}")
+                                        self._update_session(session_id, {
+                                            "current_message": f"litellm服务器启动失败，请查看日志文件: {litellm_log_file}"
+                                        })
+                                    else:
+                                        logger.error("Litellm log file is empty")
+                                else:
+                                    logger.error(f"Litellm log file not found: {litellm_log_file}")
+                            except Exception as log_error:
+                                logger.error(f"Could not read litellm log file: {log_error}")
+
                             # Clean up failed process
-                            if litellm_process:
-                                try:
-                                    litellm_process.terminate()
-                                    litellm_process.wait(timeout=10)
-                                except:
-                                    pass
+                            cleanup_litellm_process()
                             raise Exception("无法启动litellm服务器")
 
         except ImportError:
@@ -2770,8 +2827,22 @@ except Exception as e:
             raise Exception("litellm未安装，请运行: pip install litellm")
         except Exception as e:
             logger.error(f"Error starting litellm server: {e}")
+
+            # Try to read litellm logs if they exist
+            if 'litellm_log_file' in locals():
+                try:
+                    if os.path.exists(litellm_log_file):
+                        with open(litellm_log_file, 'r') as f:
+                            litellm_output = f.read()
+                        if litellm_output.strip():
+                            logger.error(f"Litellm server startup error output:\n{litellm_output}")
+                except Exception as log_error:
+                    logger.error(f"Could not read litellm error log: {log_error}")
+
             # Clean up failed process
-            if litellm_process:
+            if 'cleanup_litellm_process' in locals():
+                cleanup_litellm_process()
+            elif litellm_process:
                 try:
                     litellm_process.terminate()
                     litellm_process.wait(timeout=10)
@@ -2816,6 +2887,17 @@ except Exception as e:
                     litellm_process.wait()
                 except Exception as cleanup_error:
                     logger.error(f"Error stopping litellm server process: {cleanup_error}")
+
+            # Close log file handle if it exists
+            session = self.test_sessions.get(session_id, {})
+            log_handle = session.get('litellm_log_handle')
+            if log_handle:
+                try:
+                    log_handle.flush()
+                    log_handle.close()
+                    logger.info("Closed litellm log file handle")
+                except Exception as e:
+                    logger.error(f"Error closing litellm log handle: {e}")
 
         logger.info(f"Starting evalscope stress test with custom API: {num_requests_list} requests, {concurrency_list} concurrent")
 
@@ -2892,11 +2974,7 @@ except Exception as e:
             logger.info(f"[DEBUG] Using tokenizer path: {tokenizer_path}")
             
             print(f"custom_api, model_name: {model_name}")
-            # Create output directory using the same structure as regular model tests
-            output_dir = self._create_custom_api_output_dir(model_name, session_id)
-            
-            # Store output directory in session
-            self.test_sessions[session_id]["output_directory"] = output_dir
+            # Note: output_dir already created at the beginning of this function
 
             # Handle custom dataset with S3 download if needed
             local_dataset_path = None
@@ -3809,13 +3887,47 @@ except Exception as e:
 
     def _update_session(self, session_id: str, updates: Dict[str, Any]):
         """Update session data.
-        
+
         Args:
             session_id: Session ID
             updates: Dictionary of updates to apply
         """
         if session_id in self.test_sessions:
             self.test_sessions[session_id].update(updates)
+
+    def get_litellm_logs(self, session_id: str) -> Optional[str]:
+        """Get litellm server logs for a session.
+
+        Args:
+            session_id: Session ID
+
+        Returns:
+            Litellm log content as string or None if not available
+        """
+        try:
+            session = self.test_sessions.get(session_id)
+            if not session:
+                logger.warning(f"Session {session_id} not found")
+                return None
+
+            litellm_log_file = session.get('litellm_log_file')
+            if not litellm_log_file:
+                logger.info(f"No litellm log file found for session {session_id}")
+                return None
+
+            if not os.path.exists(litellm_log_file):
+                logger.warning(f"Litellm log file does not exist: {litellm_log_file}")
+                return None
+
+            with open(litellm_log_file, 'r') as f:
+                log_content = f.read()
+
+            logger.info(f"Retrieved litellm logs for session {session_id}, size: {len(log_content)} characters")
+            return log_content
+
+        except Exception as e:
+            logger.error(f"Error reading litellm logs for session {session_id}: {e}")
+            return None
     
     def delete_session_folder(self, session_id: str) -> bool:
         """Delete a session folder and all its contents from disk.

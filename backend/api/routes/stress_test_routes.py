@@ -239,3 +239,29 @@ def download_session_zip(session_id):
     except Exception as e:
         logger.error(f"Error creating session ZIP: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@stress_test_bp.route('/stress-test/litellm-logs/<session_id>', methods=['GET'])
+def get_litellm_logs(session_id):
+    """Get litellm server logs for a session."""
+    try:
+        logger.info(f"Litellm logs request for session: {session_id}")
+
+        log_content = stress_test_service.get_litellm_logs(session_id)
+
+        if log_content is None:
+            return jsonify({
+                "status": "error",
+                "message": f"No litellm logs found for session {session_id}"
+            }), 404
+
+        return jsonify({
+            "status": "success",
+            "session_id": session_id,
+            "logs": log_content,
+            "log_size": len(log_content)
+        })
+
+    except Exception as e:
+        logger.error(f"Error retrieving litellm logs for session {session_id}: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
