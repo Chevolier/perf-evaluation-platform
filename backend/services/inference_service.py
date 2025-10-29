@@ -332,10 +332,18 @@ class InferenceService:
                         }
                     })
 
-            messages.append({
-                "role": "user",
-                "content": content_parts if len(content_parts) > 1 else text_prompt
-            })
+            # For multimodal models with images, always use content_parts array format
+            # For text-only, use simple string format
+            if frames and model_info.get('supports_multimodal', False):
+                messages.append({
+                    "role": "user",
+                    "content": content_parts
+                })
+            else:
+                messages.append({
+                    "role": "user",
+                    "content": text_prompt
+                })
 
             # Prepare vLLM request payload
             vllm_payload = {
@@ -346,7 +354,9 @@ class InferenceService:
                 "stream": False
             }
 
-            logger.info(f"Calling EC2 vLLM model {model} ({huggingface_repo}) at {endpoint} with payload: {vllm_payload}")
+            logger.info(f"Calling EC2 vLLM model {model} ({huggingface_repo}) at {endpoint}")
+            logger.info(f"Multimodal support: {model_info.get('supports_multimodal', False)}, Frames count: {len(frames)}")
+            logger.debug(f"Full vLLM payload: {vllm_payload}")
             
             # Make HTTP request to local vLLM server
             vllm_url = f"{endpoint}/v1/chat/completions"
@@ -407,7 +417,7 @@ class InferenceService:
                 raise ValueError(f"Response parsing failed: {parse_error}")
             
         except Exception as e:
-            logger.error(f"Error processing EMD model {model}: {e}")
+            logger.error(f"Error processing EC2 model {model}: {e}")
             result_queue.put({
                 'model': model,
                 'status': 'error',
