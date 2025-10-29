@@ -2998,7 +2998,7 @@ except Exception as e:
 
                 # For custom datasets, use flexible prompt length limits to avoid filtering out user prompts
                 min_prompt_length = 1  # Allow very short prompts
-                max_prompt_length = 50000  # Allow very long prompts
+                max_prompt_length = 500000  # Allow very long prompts
                 logger.info(f"[CUSTOM DATASET] Updated prompt lengths: min={min_prompt_length}, max={max_prompt_length}")
             
             # Let real-time polling handle all progress updates - no hardcoded progress here
@@ -3127,7 +3127,7 @@ except Exception as e:
             
             # Calculate timeout based on cartesian product (evalscope runs all combinations)
             num_combinations = len(num_requests_list) * len(concurrency_list)
-            base_timeout = 120  # 2 minutes per combination
+            base_timeout = 1200  # 20 minutes per combination
             total_timeout = max(7200, num_combinations * base_timeout)  # At least 1 hour
             
             logger.info(f"[DEBUG] Custom API - Running {num_combinations} combinations ({len(concurrency_list)} concurrency × {len(num_requests_list)} requests)")

@@ -53,12 +53,16 @@ A comprehensive platform for model (LLMs, VLMs, etc.) deployment and performance
 - Node.js 16+ 
 - AWS credentials configured
 
-### Automated Setup
+Recommended instance g5.2xlarge.
+
+### Automated Setup (Recommended)
 
 ```bash
-# Run the setup script (recommended)
-./scripts/setup.sh
+# Run the setup script 
+./scripts/start.sh
 ```
+
+This will automatically install backend and frontend packages and start the service.
 
 ### Manual Setup
 
