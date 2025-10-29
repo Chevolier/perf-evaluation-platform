@@ -7,6 +7,7 @@ import json
 import subprocess
 import time
 import os
+import sys
 import boto3
 import tempfile
 from datetime import datetime
@@ -19,8 +20,21 @@ from .model_service import ModelService
 
 logger = get_logger(__name__)
 
+# Calculate venv site-packages path relative to this file
+import glob
+backend_dir = os.path.dirname(os.path.dirname(__file__))
+venv_lib_dir = os.path.join(backend_dir, 'venv', 'lib')
+python_dirs = glob.glob(os.path.join(venv_lib_dir, 'python*'))
+if python_dirs:
+    python_dir = os.path.basename(python_dirs[0])
+    VENV_SITE_PACKAGES = os.path.join(venv_lib_dir, python_dir, 'site-packages')
+else:
+    # Fallback to a reasonable default
+    VENV_SITE_PACKAGES = os.path.join(venv_lib_dir, 'python3.10', 'site-packages')
+
 # Test logging immediately when module loads
 logger.info("🔧 StressTestService module loaded - testing logger functionality")
+logger.info(f"📦 Using venv site-packages: {VENV_SITE_PACKAGES}")
 logger.debug("🧪 DEBUG: StressTestService module debug logging test")
 logger.warning("⚠️ WARNING: StressTestService module warning logging test")
 
@@ -1018,6 +1032,7 @@ class StressTestService:
             # Check if VLM parameters should be included (when image parameters are provided)
             has_vlm_params = 'image_width' in test_params and 'image_height' in test_params and 'image_num' in test_params
 
+
             # Create appropriate script content based on dataset type
             if dataset == 'custom' and local_dataset_path:
                 # Use dataset_path for custom datasets
@@ -1026,7 +1041,7 @@ import sys
 import json
 
 # Add evalscope to path
-sys.path.insert(0, '/home/ec2-user/SageMaker/efs/conda_envs/evalscope/lib/python3.10/site-packages')
+sys.path.insert(0, '{VENV_SITE_PACKAGES}')
 
 try:
     from evalscope.perf.main import run_perf_benchmark
@@ -1072,7 +1087,7 @@ import sys
 import json
 
 # Add evalscope to path
-sys.path.insert(0, '/home/ec2-user/SageMaker/efs/conda_envs/evalscope/lib/python3.10/site-packages')
+sys.path.insert(0, '{VENV_SITE_PACKAGES}')
 
 try:
     from evalscope.perf.main import run_perf_benchmark
@@ -2395,7 +2410,7 @@ import sys
 import json
 
 # Add evalscope to path
-sys.path.insert(0, '/home/ec2-user/SageMaker/efs/conda_envs/evalscope/lib/python3.10/site-packages')
+sys.path.insert(0, '{VENV_SITE_PACKAGES}')
 
 try:
     from evalscope.perf.main import run_perf_benchmark
@@ -2441,7 +2456,7 @@ import sys
 import json
 
 # Add evalscope to path
-sys.path.insert(0, '/home/ec2-user/SageMaker/efs/conda_envs/evalscope/lib/python3.10/site-packages')
+sys.path.insert(0, '{VENV_SITE_PACKAGES}')
 
 try:
     from evalscope.perf.main import run_perf_benchmark
@@ -3020,7 +3035,7 @@ import sys
 import json
 
 # Add evalscope to path
-sys.path.insert(0, '/home/ec2-user/SageMaker/efs/conda_envs/evalscope/lib/python3.10/site-packages')
+sys.path.insert(0, '{VENV_SITE_PACKAGES}')
 
 try:
     from evalscope.perf.main import run_perf_benchmark
@@ -3066,7 +3081,7 @@ import sys
 import json
 
 # Add evalscope to path
-sys.path.insert(0, '/home/ec2-user/SageMaker/efs/conda_envs/evalscope/lib/python3.10/site-packages')
+sys.path.insert(0, '{VENV_SITE_PACKAGES}')
 
 try:
     from evalscope.perf.main import run_perf_benchmark
