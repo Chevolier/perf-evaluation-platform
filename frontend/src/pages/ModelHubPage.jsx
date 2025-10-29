@@ -31,6 +31,7 @@ const { Title, Text, Paragraph } = Typography;
 const ModelHubPage = () => {
   const [initialLoading, setInitialLoading] = useState(true);
   const [statusLoading, setStatusLoading] = useState(false);
+  const [deploymentLoading, setDeploymentLoading] = useState(false);
   
   
   // Always start with empty model status to force fresh fetch
@@ -92,7 +93,28 @@ const ModelHubPage = () => {
       message.warning('请选择要部署的模型');
       return;
     }
-    
+
+    // Set deployment loading state
+    setDeploymentLoading(true);
+
+    // Immediately update status to show deployment in progress
+    const immediateStatus = {};
+    selectedModels.forEach(modelKey => {
+      immediateStatus[modelKey] = {
+        status: 'inprogress',
+        message: '开始部署...',
+        tag: null
+      };
+    });
+
+    // Update UI immediately to show deployment started
+    React.startTransition(() => {
+      setModelStatus(prev => ({
+        ...prev,
+        ...immediateStatus
+      }));
+    });
+
     try {
       const response = await fetch('/api/deploy-models', {
         method: 'POST',
@@ -162,7 +184,7 @@ const ModelHubPage = () => {
         } else {
           message.error(`部署请求失败: ${responseData.message || '未知错误'}`);
         }
-        
+
       } else {
         const errorText = await response.text();
         console.error('Deployment failed:', response.status, errorText);
@@ -171,6 +193,9 @@ const ModelHubPage = () => {
     } catch (error) {
       console.error('批量部署模型失败:', error);
       message.error('部署请求失败');
+    } finally {
+      // Always clear deployment loading state
+      setDeploymentLoading(false);
     }
   }, [selectedModels, deploymentConfig]);
 
@@ -896,10 +921,11 @@ const ModelHubPage = () => {
               <Row>
                 <Col span={24}>
                   <Space>
-                    <Button 
-                      type="primary" 
+                    <Button
+                      type="primary"
                       onClick={handleBatchDeploy}
                       disabled={selectedModels.length === 0}
+                      loading={deploymentLoading}
                       size="large"
                     >
                       部署选中模型 ({selectedModels.length})

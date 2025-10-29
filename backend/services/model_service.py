@@ -335,8 +335,6 @@ class ModelService:
             logger.error(f"Failed to get current EC2 models: {e}")
             return []
     
-    
-    
     def check_multiple_model_status(self, models: List[str]) -> Dict[str, Any]:
         """Check deployment status for multiple models.
 
@@ -605,7 +603,7 @@ class ModelService:
             logger.info(f"🐳 Running Docker command: {' '.join(docker_cmd)}")
 
             # Start Docker container
-            result = subprocess.run(docker_cmd, capture_output=True, text=True, timeout=30)
+            result = subprocess.run(docker_cmd, capture_output=True, text=True, timeout=1200)
 
             if result.returncode == 0:
                 container_id = result.stdout.strip()
