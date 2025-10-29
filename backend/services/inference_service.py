@@ -3,6 +3,7 @@
 import json
 import queue
 import threading
+import base64
 from typing import Dict, Any, List, Generator
 from datetime import datetime
 
@@ -16,10 +17,42 @@ logger = get_logger(__name__)
 
 class InferenceService:
     """Service for handling model inference requests."""
-    
+
     def __init__(self):
         """Initialize inference service."""
         self.registry = model_registry
+
+    def _detect_image_format(self, base64_data: str) -> str:
+        """Detect image format from base64 data.
+
+        Args:
+            base64_data: Base64 encoded image data
+
+        Returns:
+            MIME type (e.g., 'image/jpeg', 'image/png')
+        """
+        try:
+            # Decode first few bytes to check magic numbers
+            decoded_bytes = base64.b64decode(base64_data[:100])  # First ~75 bytes should be enough
+
+            # Check for common image format signatures
+            if decoded_bytes.startswith(b'\xff\xd8\xff'):
+                return 'image/jpeg'
+            elif decoded_bytes.startswith(b'\x89PNG\r\n\x1a\n'):
+                return 'image/png'
+            elif decoded_bytes.startswith(b'GIF87a') or decoded_bytes.startswith(b'GIF89a'):
+                return 'image/gif'
+            elif decoded_bytes.startswith(b'RIFF') and b'WEBP' in decoded_bytes[:12]:
+                return 'image/webp'
+            elif decoded_bytes.startswith(b'BM'):
+                return 'image/bmp'
+            else:
+                # Default to JPEG if we can't detect
+                return 'image/jpeg'
+
+        except Exception:
+            # If anything goes wrong, default to JPEG
+            return 'image/jpeg'
     
     def multi_inference(self, data: Dict[str, Any]) -> Generator[str, None, None]:
         """Run inference on multiple models simultaneously.
@@ -279,6 +312,7 @@ class InferenceService:
         """
         try:
             import requests
+            import json
             from ..api.routes.model_routes import model_service
 
             # Check if model is deployed
@@ -325,10 +359,13 @@ class InferenceService:
             # Add image content for multimodal models
             if frames and model_info.get('supports_multimodal', False):
                 for frame_base64 in frames:
+                    # Detect the actual image format
+                    image_format = self._detect_image_format(frame_base64)
+
                     content_parts.append({
                         "type": "image_url",
                         "image_url": {
-                            "url": f"data:image/jpeg;base64,{frame_base64}"
+                            "url": f"data:{image_format};base64,{frame_base64}"
                         }
                     })
 
@@ -356,18 +393,64 @@ class InferenceService:
 
             logger.info(f"Calling EC2 vLLM model {model} ({huggingface_repo}) at {endpoint}")
             logger.info(f"Multimodal support: {model_info.get('supports_multimodal', False)}, Frames count: {len(frames)}")
-            logger.debug(f"Full vLLM payload: {vllm_payload}")
+
+            # Log detailed payload structure for debugging
+            logger.info(f"🔍 Payload structure:")
+            logger.info(f"  Model: {vllm_payload['model']}")
+            logger.info(f"  Messages count: {len(vllm_payload['messages'])}")
+            logger.info(f"  Content type: {type(vllm_payload['messages'][0]['content'])}")
+
+            if isinstance(vllm_payload['messages'][0]['content'], list):
+                logger.info(f"  Content parts: {len(vllm_payload['messages'][0]['content'])}")
+                for i, part in enumerate(vllm_payload['messages'][0]['content']):
+                    if part.get('type') == 'text':
+                        logger.info(f"    Part {i}: text = '{part.get('text', '')[:50]}...'")
+                    elif part.get('type') == 'image_url':
+                        image_url = part.get('image_url', {}).get('url', '')
+                        if image_url.startswith('data:'):
+                            # Extract just the format info, not the full base64
+                            prefix = image_url.split(',')[0] if ',' in image_url else image_url
+                            base64_length = len(image_url.split(',')[1]) if ',' in image_url else 0
+                            logger.info(f"    Part {i}: image_url = '{prefix}...' (base64 length: {base64_length})")
+                        else:
+                            logger.info(f"    Part {i}: image_url = '{image_url[:50]}...'")
+            else:
+                logger.info(f"  Content: '{str(vllm_payload['messages'][0]['content'])[:100]}...'")
+
+            # Only log full payload in debug mode to avoid huge logs
+            logger.debug(f"Full vLLM payload: {json.dumps(vllm_payload, indent=2)}")
             
             # Make HTTP request to local vLLM server
             vllm_url = f"{endpoint}/v1/chat/completions"
 
             try:
+                logger.info(f"🔥 Making POST request to: {vllm_url}")
+
                 response = requests.post(
                     vllm_url,
                     json=vllm_payload,
                     headers={'Content-Type': 'application/json'},
                     timeout=60  # 60 second timeout
                 )
+
+                logger.info(f"📥 Response status: {response.status_code}")
+                logger.info(f"📥 Response headers: {dict(response.headers)}")
+
+                if not response.ok:
+                    logger.error(f"❌ HTTP error {response.status_code}: {response.text}")
+                    logger.error(f"❌ Response content type: {response.headers.get('content-type', 'unknown')}")
+
+                    # Try to parse error response if it's JSON
+                    try:
+                        error_json = response.json()
+                        logger.error(f"❌ Error JSON: {json.dumps(error_json, indent=2)}")
+                    except:
+                        logger.error(f"❌ Raw error response: {response.text}")
+
+                    logger.error(f"❌ Our request payload was:")
+                    logger.error(f"❌   Model: {vllm_payload['model']}")
+                    logger.error(f"❌   Messages: {json.dumps(vllm_payload['messages'], indent=4)}")
+                    logger.error(f"❌   Other params: max_tokens={vllm_payload['max_tokens']}, temp={vllm_payload['temperature']}")
 
                 response.raise_for_status()  # Raise exception for HTTP errors
                 response_body = response.json()
