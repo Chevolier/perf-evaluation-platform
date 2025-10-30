@@ -74,7 +74,7 @@ const ModelHubPage = () => {
       tpSize: 1,
       dpSize: 1,
       gpuMemoryUtilization: 0.9,
-      maxModelLen: 2048
+      maxModelLen: 4096
     };
   });
   // Memoized category templates to avoid recreating icons
