@@ -21,6 +21,9 @@ class InferenceService:
     def __init__(self):
         """Initialize inference service."""
         self.registry = model_registry
+        # Import ModelService to check deployment status for custom models
+        from .model_service import ModelService
+        self.model_service = ModelService()
 
     def _detect_image_format(self, base64_data: str) -> str:
         """Detect image format from base64 data.
@@ -105,13 +108,24 @@ class InferenceService:
                     args=(model, data, result_queue)
                 )
             else:
-                # Unknown model
-                result_queue.put({
-                    'model': model,
-                    'status': 'error',
-                    'message': f'Unknown model: {model}'
-                })
-                continue
+                # Check if this is a deployed custom model (not in registry but deployed via model service)
+                custom_model_status = self.model_service.get_ec2_deployment_status(model)
+                if custom_model_status.get('status') in ['deployed', 'inprogress']:
+                    # Treat deployed custom model as EC2 model
+                    logger.info(f"🤖 Processing custom deployed model as EC2: {model}")
+                    thread = threading.Thread(
+                        target=self._process_ec2_model,
+                        args=(model, data, result_queue)
+                    )
+                else:
+                    # Truly unknown model
+                    logger.warning(f"❌ Unknown model type: {model}")
+                    result_queue.put({
+                        'model': model,
+                        'status': 'error',
+                        'message': f'未知模型类型: {model}'
+                    })
+                    continue
             
             threads.append(thread)
             thread.start()
@@ -328,10 +342,17 @@ class InferenceService:
 
             start_time = datetime.now()
 
-            # Get model information
+            # Get model information from registry if available, otherwise use defaults for custom models
             model_info = self.registry.get_model_info(model)
             if not model_info:
-                raise ValueError(f"Model {model} not found in registry")
+                # This is likely a custom model not in registry
+                logger.info(f"🤖 Model {model} not in registry, treating as custom model")
+                model_info = {
+                    "name": model,
+                    "supports_multimodal": True,  # Assume custom models support multimodal
+                    "supports_streaming": True,
+                    "model_path": model  # Use model name as path for custom models
+                }
 
             # Get the actual HuggingFace repo name for vLLM API call
             huggingface_repo = model_info.get('huggingface_repo', model)

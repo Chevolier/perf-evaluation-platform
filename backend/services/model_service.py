@@ -190,12 +190,57 @@ class ModelService:
         """
         all_models = self.get_all_models()
 
-        # Add deployment status for EC2 models
+        # Add deployment status for EC2 models from registry
         ec2_models_with_status = {}
         for key, model_info in all_models.get("ec2", {}).items():
             ec2_model_info = model_info.copy()
             ec2_model_info["deployment_status"] = self.get_ec2_deployment_status(key)
             ec2_models_with_status[key] = ec2_model_info
+
+        # Add deployed custom models that aren't in registry
+        # Check both _ec2_deployments and _deployment_status for deployed custom models
+        all_potential_custom_models = set()
+
+        # Add models from _ec2_deployments
+        all_potential_custom_models.update(self._ec2_deployments.keys())
+
+        # Add models from _deployment_status that are deployed/inprogress
+        for model_key, status_info in self._deployment_status.items():
+            if status_info.get("status") in ["deployed", "inprogress"]:
+                all_potential_custom_models.add(model_key)
+
+        for model_key in all_potential_custom_models:
+            # Only add if not already in registry models and not a Bedrock model
+            if (model_key not in ec2_models_with_status and
+                not self.registry.is_bedrock_model(model_key)):
+
+                # Get deployment info from _ec2_deployments if available
+                deployment_info = self._ec2_deployments.get(model_key, {})
+
+                # Get status - either from get_ec2_deployment_status or directly from _deployment_status
+                status = self.get_ec2_deployment_status(model_key)
+
+                # If get_ec2_deployment_status says not_deployed, but we know it's in _deployment_status as deployed/inprogress,
+                # trust the _deployment_status (this handles cases where container check fails but model is conceptually deployed)
+                if (status.get("status") == "not_deployed" and
+                    model_key in self._deployment_status and
+                    self._deployment_status[model_key].get("status") in ["deployed", "inprogress"]):
+                    status = self._deployment_status[model_key]
+
+                if status.get("status") in ["deployed", "inprogress"]:
+                    # Create model info for deployed custom model
+                    custom_model_info = {
+                        "name": model_key,  # Use model_key as name for custom models
+                        "description": f"Custom model: {model_key}",
+                        "model_path": deployment_info.get("model_path", model_key),
+                        "huggingface_repo": deployment_info.get("model_path", model_key),
+                        "supports_multimodal": True,  # Assume custom models support multimodal
+                        "supports_streaming": True,
+                        "is_custom": True,  # Flag to indicate this is a custom model
+                        "deployment_status": status
+                    }
+                    ec2_models_with_status[model_key] = custom_model_info
+                    logger.info(f"📋 Added deployed custom model to list: {model_key}")
 
         return {
             "status": "success",

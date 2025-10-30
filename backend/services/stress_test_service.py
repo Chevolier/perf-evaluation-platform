@@ -943,14 +943,39 @@ class StressTestService:
             model_name = model_path
             # Use appropriate tokenizer path based on model
             tokenizer_path = self._get_tokenizer_path(model_name)
-            
+
         elif model_registry.is_bedrock_model(model_key):
             # Bedrock models don't support direct stress testing via evalscope
             # This matches the limitation in the original backend
             raise Exception(f"Bedrock模型 {model_key} 暂不支持直接压力测试，请使用EMD模型进行性能测试。Bedrock模型为无服务器架构，性能会根据负载自动调整。")
-            
+
         else:
-            raise Exception(f"未知模型类型: {model_key}")
+            # Check if this is a deployed custom model (not in registry but deployed via model service)
+            custom_model_status = model_service.get_ec2_deployment_status(model_key)
+            if custom_model_status.get('status') in ['deployed', 'inprogress']:
+                # Treat deployed custom model as EC2 model
+                logger.info(f"🤖 Processing custom deployed model for stress test: {model_key}")
+
+                # Check deployment status
+                status_result = model_service.check_multiple_model_status([model_key])
+                model_status = status_result.get('model_status', {}).get(model_key)
+
+                if not model_status or model_status.get('status') != 'deployed':
+                    raise Exception(f"自定义模型 {model_key} 未部署或不可用: {model_status.get('message', 'Model not deployed') if model_status else 'Model not found'}")
+
+                # For custom models, use model_key as model_path since they're not in registry
+                model_path = model_key
+                deployment_tag = model_status.get('tag')
+
+                # Get dynamic EC2 API URL from deployment status
+                api_url = self._get_ec2_api_url(model_path, deployment_tag, model_status.get('endpoint'))
+
+                # For custom models, use the model_key as the model name
+                model_name = model_path
+                # Use appropriate tokenizer path based on model
+                tokenizer_path = self._get_tokenizer_path(model_name)
+            else:
+                raise Exception(f"未知模型类型: {model_key}")
         
         self._update_session(session_id, {
             "current_message": "测试模型端点连接..."
@@ -1417,9 +1442,13 @@ except Exception as e:
         from ..core.models import model_registry
         import os
         
-        # Get model information
+        # Get model information from registry if available, otherwise use model_key for custom models
         model_info = model_registry.get_model_info(model_key)
-        model_name = model_info.get('model_path', model_key).replace('/', '-')
+        if model_info:
+            model_name = model_info.get('model_path', model_key).replace('/', '-')
+        else:
+            # Custom model not in registry, use model_key as path
+            model_name = model_key.replace('/', '-')
         
         # Create directory path with session_id: outputs/model_name/session_id
         project_root = Path(__file__).parent.parent.parent  # Go up 3 levels to inference-platform directory
@@ -1898,8 +1927,15 @@ except Exception as e:
         from ..core.models import model_registry
         
         try:
-            # Get model information
+            # Get model information from registry if available, otherwise use defaults for custom models
             model_info = model_registry.get_model_info(model_key)
+            if not model_info:
+                # Custom model not in registry, create default info
+                model_info = {
+                    "name": model_key,
+                    "model_path": model_key,
+                    "huggingface_repo": model_key
+                }
             
             # Create eval_config.json with all deployment and test parameters
             eval_config = {
