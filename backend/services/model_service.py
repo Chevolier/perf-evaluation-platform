@@ -214,8 +214,10 @@ class ModelService:
         Returns:
             Deployment status information
         """
-        if not self.registry.is_ec2_model(model_key):
-            return {"status": "unknown", "message": "Model not found"}
+        # Allow both registry EC2 models and custom models
+        # Only reject Bedrock models since they don't use EC2 deployment
+        if self.registry.is_bedrock_model(model_key):
+            return {"status": "unknown", "message": "Bedrock models don't use EC2 deployment"}
 
         # Check if model is in EC2 deployments
         if model_key in self._ec2_deployments:
@@ -346,8 +348,9 @@ class ModelService:
         """
         model_status = {}
 
-        # Get all EC2 model statuses
-        ec2_models = [model_key for model_key in models if self.registry.is_ec2_model(model_key)]
+        # Get all models (both registry EC2 models and custom models)
+        # Consider any model that's not a bedrock model as a potential EC2/custom model
+        ec2_models = [model_key for model_key in models if not self.registry.is_bedrock_model(model_key)]
         ec2_status_cache = {}
 
         if ec2_models:
@@ -402,7 +405,8 @@ class ModelService:
 
         # Process all models using the cached EC2 data
         for model_key in models:
-            if self.registry.is_ec2_model(model_key):
+            if not self.registry.is_bedrock_model(model_key):
+                # Handle both registry EC2 models and custom models
                 if model_key in ec2_status_cache:
                     status_info = ec2_status_cache[model_key]
                 else:
@@ -440,10 +444,17 @@ class ModelService:
             # Return partial results for known models
             fallback_status = {}
             for model_key in models:
-                fallback_status[model_key] = {
-                    "status": "not_deployed" if self.registry.is_ec2_model(model_key) else ("available" if self.registry.is_bedrock_model(model_key) else "unknown"),
-                    "message": "Status check failed - refresh may help" if self.registry.is_ec2_model(model_key) else ("Bedrock model is always available" if self.registry.is_bedrock_model(model_key) else "Model not found")
-                }
+                if self.registry.is_bedrock_model(model_key):
+                    fallback_status[model_key] = {
+                        "status": "available",
+                        "message": "Bedrock model is always available"
+                    }
+                else:
+                    # Treat any non-Bedrock model as EC2/custom model
+                    fallback_status[model_key] = {
+                        "status": "not_deployed",
+                        "message": "Status check failed - refresh may help"
+                    }
 
             return {
                 "status": "partial_success",
@@ -494,19 +505,23 @@ class ModelService:
         Returns:
             Deployment result
         """
-        if not self.registry.is_ec2_model(model_key):
-            return {
-                "success": False,
-                "error": f"Model {model_key} not found in registry"
-            }
-
-        model_config = self.registry.get_model_info(model_key, "ec2")
-        huggingface_repo = model_config.get("huggingface_repo", model_key)
-        model_path = model_config.get("model_path", model_key)
+        # Check if model is in registry, if not treat as custom model
+        if self.registry.is_ec2_model(model_key):
+            # Model is in registry, use registry configuration
+            model_config = self.registry.get_model_info(model_key, "ec2")
+            huggingface_repo = model_config.get("huggingface_repo", model_key)
+            model_path = model_config.get("model_path", model_key)
+        else:
+            # Custom model - use model_key as Hugging Face repo name directly
+            huggingface_repo = model_key
+            model_path = model_key
+            logger.info(f"🤗 Deploying custom model: {model_key} (not in registry)")
 
         # Generate deployment tag
         deployment_tag = f"{model_key}-{int(time.time())}"
-        container_name = f"{model_key.replace('_', '-')}-{deployment_tag}"
+        # Sanitize model_key for container name (replace slashes and underscores)
+        safe_model_name = model_key.replace('/', '-').replace('_', '-').lower()
+        container_name = f"{safe_model_name}-{int(time.time())}"
 
         # Check if model is already deployed
         if model_key in self._ec2_deployments:
@@ -529,6 +544,8 @@ class ModelService:
 
         try:
             logger.info(f"🚀 Starting Docker deployment for {model_key} with model path {model_path} using {engine_type}")
+            logger.info(f"📊 Deployment config: instance_type={instance_type}, service_type={service_type}, port={port}")
+            logger.info(f"🔧 Resource config: tp_size={tp_size}, dp_size={dp_size}, gpu_memory_utilization={gpu_memory_utilization}, max_model_len={max_model_len}")
 
             # Construct Docker command based on framework
             if engine_type.lower() == "sglang":
@@ -886,11 +903,12 @@ class ModelService:
             Success/failure result
         """
         try:
-            # Verify model exists in registry
-            if not self.registry.is_ec2_model(model_key):
+            # Allow both registry EC2 models and custom models
+            # Only reject Bedrock models since they don't use EC2 deployment
+            if self.registry.is_bedrock_model(model_key):
                 return {
                     "success": False,
-                    "error": f"Model {model_key} not found in EC2 model registry"
+                    "error": f"Model {model_key} is a Bedrock model and doesn't use EC2 deployment"
                 }
 
             # Check if container is actually running
@@ -930,12 +948,19 @@ class ModelService:
                 container_id = "unknown"
 
             # Register the deployment
-            model_info = self.registry.get_model_info(model_key)
+            # Get model info from registry if available, otherwise use model_key as path
+            if self.registry.is_ec2_model(model_key):
+                model_info = self.registry.get_model_info(model_key)
+                model_path = model_info.get("model_path", model_key)
+            else:
+                # Custom model - use model_key as path
+                model_path = model_key
+
             self._ec2_deployments[model_key] = {
                 "container_name": container_name,
                 "container_id": container_id,
                 "port": port,
-                "model_path": model_info.get("model_path", model_key),
+                "model_path": model_path,
                 "tag": tag,
                 "deployment_time": time.time(),
                 "registered_manually": True
