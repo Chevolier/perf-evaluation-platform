@@ -8,7 +8,7 @@ EC2_MODELS = {
     "qwen2.5-7b-instruct": {
         "name": "Qwen2.5-7B-Instruct",
         "huggingface_repo": "Qwen/Qwen2.5-7B-Instruct",
-        "description": "Qwen2.5模型",
+        "description": "Qwen2.5语言模型，比较均衡的版本，7B参数",
         "model_path": "Qwen/Qwen2.5-7B-Instruct",  # Match vLLM served model name
         "supports_multimodal": False,
         "supports_streaming": True

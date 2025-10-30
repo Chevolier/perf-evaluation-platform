@@ -1,20 +1,21 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { 
-  Card, 
-  Typography, 
-  Tag, 
-  Row, 
-  Col, 
-  Space, 
-  Divider, 
-  Spin, 
-  message, 
+import {
+  Card,
+  Typography,
+  Tag,
+  Row,
+  Col,
+  Space,
+  Divider,
+  Spin,
+  message,
   Button,
-  Checkbox,
+  Radio,
   Select,
   Form,
+  Input,
   InputNumber,
-  Skeleton 
+  Skeleton
 } from 'antd';
 import { 
   RobotOutlined, 
@@ -42,13 +43,23 @@ const ModelHubPage = () => {
     return {};
   });
   
-  const [selectedModels, setSelectedModels] = useState(() => {
+  const [selectedModel, setSelectedModel] = useState(() => {
     try {
-      const saved = localStorage.getItem('modelHub_selectedModels');
-      return saved ? JSON.parse(saved) : [];
+      const saved = localStorage.getItem('modelHub_selectedModel');
+      return saved ? JSON.parse(saved) : null;
     } catch (error) {
-      console.error('Failed to load selected models from localStorage:', error);
-      return [];
+      console.error('Failed to load selected model from localStorage:', error);
+      return null;
+    }
+  });
+
+  const [customModelName, setCustomModelName] = useState(() => {
+    try {
+      const saved = localStorage.getItem('modelHub_customModelName');
+      return saved ? JSON.parse(saved) : '';
+    } catch (error) {
+      console.error('Failed to load custom model name from localStorage:', error);
+      return '';
     }
   });
   
@@ -87,10 +98,12 @@ const ModelHubPage = () => {
   const [modelCategories, setModelCategories] = useState(categoryTemplates);
   
 
-  // 批量部署模型 (memoized for performance)
-  const handleBatchDeploy = useCallback(async () => {
-    if (selectedModels.length === 0) {
-      message.warning('请选择要部署的模型');
+  // 部署单个模型 (memoized for performance)
+  const handleModelDeploy = useCallback(async () => {
+    const modelTodeploy = customModelName.trim() || selectedModel;
+
+    if (!modelTodeploy) {
+      message.warning('请选择要部署的模型或输入自定义模型名称');
       return;
     }
 
@@ -98,14 +111,13 @@ const ModelHubPage = () => {
     setDeploymentLoading(true);
 
     // Immediately update status to show deployment in progress
-    const immediateStatus = {};
-    selectedModels.forEach(modelKey => {
-      immediateStatus[modelKey] = {
+    const immediateStatus = {
+      [modelTodeploy]: {
         status: 'inprogress',
         message: '开始部署...',
         tag: null
-      };
-    });
+      }
+    };
 
     // Update UI immediately to show deployment started
     React.startTransition(() => {
@@ -122,7 +134,7 @@ const ModelHubPage = () => {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          models: selectedModels,
+          models: [modelTodeploy],
           instance_type: deploymentConfig.machineType,
           engine_type: deploymentConfig.framework,
           service_type: deploymentConfig.serviceType,
@@ -138,48 +150,48 @@ const ModelHubPage = () => {
         console.log('Deployment response:', responseData);
         
         if (responseData.status === 'success') {
-          // Check individual model deployment results
+          // Check model deployment result
           const results = responseData.results || {};
-          let successCount = 0;
-          let failedCount = 0;
-          
-          const newStatus = {};
-          selectedModels.forEach(modelKey => {
-            const modelResult = results[modelKey];
-            if (modelResult && modelResult.success) {
-              newStatus[modelKey] = { 
-                status: 'inprogress', 
+          const modelResult = results[modelTodeploy];
+
+          if (modelResult && modelResult.success) {
+            const newStatus = {
+              [modelTodeploy]: {
+                status: 'inprogress',
                 message: '部署中',
                 tag: modelResult.tag
-              };
-              successCount++;
-            } else {
-              newStatus[modelKey] = { 
-                status: 'failed', 
-                message: modelResult?.error || '部署失败'
-              };
-              failedCount++;
-            }
-          });
-          
-          // Batch state updates to reduce re-renders
-          React.startTransition(() => {
-            setModelStatus(prev => ({
-              ...prev,
-              ...newStatus
-            }));
-            
-            // 清空选择
-            setSelectedModels([]);
-          });
-          
-          // Show appropriate message
-          if (failedCount === 0) {
-            message.success(`已开始部署 ${successCount} 个模型`);
-          } else if (successCount === 0) {
-            message.error(`${failedCount} 个模型部署失败`);
+              }
+            };
+
+            // Batch state updates to reduce re-renders
+            React.startTransition(() => {
+              setModelStatus(prev => ({
+                ...prev,
+                ...newStatus
+              }));
+
+              // 清空选择
+              setSelectedModel(null);
+              setCustomModelName('');
+            });
+
+            message.success(`模型 ${modelTodeploy} 已开始部署`);
           } else {
-            message.warning(`${successCount} 个模型开始部署，${failedCount} 个模型部署失败`);
+            const failureStatus = {
+              [modelTodeploy]: {
+                status: 'failed',
+                message: modelResult?.error || '部署失败'
+              }
+            };
+
+            React.startTransition(() => {
+              setModelStatus(prev => ({
+                ...prev,
+                ...failureStatus
+              }));
+            });
+
+            message.error(`模型 ${modelTodeploy} 部署失败: ${modelResult?.error || '未知错误'}`);
           }
         } else {
           message.error(`部署请求失败: ${responseData.message || '未知错误'}`);
@@ -197,17 +209,23 @@ const ModelHubPage = () => {
       // Always clear deployment loading state
       setDeploymentLoading(false);
     }
-  }, [selectedModels, deploymentConfig]);
+  }, [selectedModel, customModelName, deploymentConfig]);
 
   // 处理模型选择 (memoized for performance)
-  const handleModelSelection = useCallback((modelKey, checked) => {
-    setSelectedModels(prev => {
-      if (checked) {
-        return [...prev, modelKey];
-      } else {
-        return prev.filter(key => key !== modelKey);
-      }
-    });
+  const handleModelSelection = useCallback((modelKey) => {
+    setSelectedModel(modelKey);
+    // Clear custom model name when selecting from list to ensure mutual exclusivity
+    setCustomModelName('');
+  }, []);
+
+  // 处理自定义模型名称输入
+  const handleCustomModelNameChange = useCallback((e) => {
+    const value = e.target.value;
+    setCustomModelName(value);
+    // Clear selected model when typing custom name to ensure mutual exclusivity
+    if (value.trim()) {
+      setSelectedModel(null);
+    }
   }, []);
 
   // Handle clearing stale deployment statuses
@@ -246,9 +264,10 @@ const ModelHubPage = () => {
   useEffect(() => {
     const timeoutId = setTimeout(() => {
       try {
-        // Only save selected models and deployment config, not status (always fetch fresh)
+        // Only save selected model, custom model name and deployment config, not status (always fetch fresh)
         const batch = {
-          modelHub_selectedModels: JSON.stringify(selectedModels),
+          modelHub_selectedModel: JSON.stringify(selectedModel),
+          modelHub_customModelName: JSON.stringify(customModelName),
           modelHub_deploymentConfig: JSON.stringify(deploymentConfig)
         };
         
@@ -274,7 +293,7 @@ const ModelHubPage = () => {
     }, 300); // Debounce localStorage writes
     
     return () => clearTimeout(timeoutId);
-  }, [selectedModels, deploymentConfig]);
+  }, [selectedModel, customModelName, deploymentConfig]);
 
   // Always fetch fresh data - no caching to ensure correct status
   const fetchModelData = useCallback(async () => {
@@ -294,8 +313,7 @@ const ModelHubPage = () => {
       // First fetch model list to get the available models
       console.log('🔍 DEBUG: Fetching model list first...');
       const modelListResponse = await fetchWithTimeout('/api/model-list', {}, 15000);
-      
-      let modelListData = null;
+
       let deployableModelKeys = [];
       
       // Process model list response
@@ -303,7 +321,6 @@ const ModelHubPage = () => {
         const data = await modelListResponse.json();
         
         if (data.status === 'success' && data.models) {
-          modelListData = data.models;
           
           // Process models with memoized transformation
           const bedrockModels = data.models.bedrock ? 
@@ -567,27 +584,28 @@ const ModelHubPage = () => {
     }
   }, [modelStatus, initialLoading]);
 
-  const getModelCheckbox = useCallback((model) => {
+  const getModelRadio = useCallback((model) => {
     if (model.alwaysAvailable) return null;
-    
+
     const status = modelStatus[model.key];
-    
-    // 如果已部署或正在部署中或正在删除中，不显示复选框
-    if (status?.status === 'available' || status?.status === 'deployed' || 
-        status?.status === 'inprogress' || status?.status === 'init' || 
+
+    // 如果已部署或正在部署中或正在删除中，不显示单选按钮
+    if (status?.status === 'available' || status?.status === 'deployed' ||
+        status?.status === 'inprogress' || status?.status === 'init' ||
         status?.status === 'deleting') {
       return null;
     }
-    
+
     return (
-      <Checkbox
-        checked={selectedModels.includes(model.key)}
-        onChange={(e) => handleModelSelection(model.key, e.target.checked)}
+      <Radio
+        checked={selectedModel === model.key}
+        onChange={() => handleModelSelection(model.key)}
+        disabled={!!customModelName.trim()}
       >
         选择部署
-      </Checkbox>
+      </Radio>
     );
-  }, [modelStatus, selectedModels, handleModelSelection]);
+  }, [modelStatus, selectedModel, customModelName, handleModelSelection]);
 
   const getCleanupButton = useCallback((model) => {
     if (model.alwaysAvailable) return null;
@@ -673,13 +691,13 @@ const ModelHubPage = () => {
         </div>
         <div style={{ marginLeft: 2 }}>
           <Space direction="vertical" size="small">
-            {getModelCheckbox(model)}
+            {getModelRadio(model)}
             {!model.alwaysAvailable && getCleanupButton(model)}
           </Space>
         </div>
       </div>
     </Card>
-  ), [getStatusTag, getModelCheckbox, getCleanupButton]);
+  ), [getStatusTag, getModelRadio, getCleanupButton]);
 
   return (
     <div style={{ padding: '24px', background: '#f5f5f5', minHeight: '100vh' }}>
@@ -798,10 +816,10 @@ const ModelHubPage = () => {
       )}
       {/* 部署配置面板 - 只有在有可部署模型时显示 */}
       {useMemo(() => {
-        const hasDeployableModels = Object.values(modelCategories).some(category => 
-          category.models.some(model => 
-            !model.alwaysAvailable && 
-            (!modelStatus[model.key] || 
+        const hasDeployableModels = Object.values(modelCategories).some(category =>
+          category.models.some(model =>
+            !model.alwaysAvailable &&
+            (!modelStatus[model.key] ||
              ['not_deployed', 'failed'].includes(modelStatus[model.key]?.status))
           )
         );
@@ -819,6 +837,28 @@ const ModelHubPage = () => {
             style={{ marginTop: 24 }}
           >
             <Form layout="vertical">
+              <Row gutter={16}>
+                <Col span={24}>
+                  <Form.Item label="自定义模型名称 (Hugging Face Hub)">
+                    <Input
+                      placeholder="输入 Hugging Face 模型名称，例如: Qwen/Qwen3-8B"
+                      value={customModelName}
+                      onChange={handleCustomModelNameChange}
+                      disabled={!!selectedModel}
+                      style={{ width: '100%' }}
+                    />
+                    <div style={{ marginTop: 4, fontSize: '12px', color: '#666' }}>
+                      {selectedModel ?
+                        `已选择预设模型: ${selectedModel}` :
+                        (customModelName.trim() ?
+                          `将部署自定义模型: ${customModelName.trim()}` :
+                          '请选择预设模型或输入自定义模型名称'
+                        )
+                      }
+                    </div>
+                  </Form.Item>
+                </Col>
+              </Row>
               <Row gutter={16}>
                 <Col span={6}>
                   <Form.Item label="部署方式">
@@ -923,16 +963,19 @@ const ModelHubPage = () => {
                   <Space>
                     <Button
                       type="primary"
-                      onClick={handleBatchDeploy}
-                      disabled={selectedModels.length === 0}
+                      onClick={handleModelDeploy}
+                      disabled={!selectedModel && !customModelName.trim()}
                       loading={deploymentLoading}
                       size="large"
                     >
-                      部署选中模型 ({selectedModels.length})
+                      部署模型 {(customModelName.trim() || selectedModel) && `(${customModelName.trim() || selectedModel})`}
                     </Button>
                     <Button
-                      onClick={() => setSelectedModels([])}
-                      disabled={selectedModels.length === 0}
+                      onClick={() => {
+                        setSelectedModel(null);
+                        setCustomModelName('');
+                      }}
+                      disabled={!selectedModel && !customModelName.trim()}
                     >
                       清空选择
                     </Button>
@@ -949,7 +992,7 @@ const ModelHubPage = () => {
             </Form>
           </Card>
         );
-      }, [modelCategories, modelStatus, selectedModels, deploymentConfig, handleBatchDeploy])}
+      }, [modelCategories, modelStatus, selectedModel, customModelName, deploymentConfig, handleModelDeploy])}
     </div>
   );
 };
