@@ -7,8 +7,8 @@ from ...utils import get_logger
 logger = get_logger(__name__)
 inference_bp = Blueprint('inference', __name__)
 
-# Initialize service
-inference_service = InferenceService()
+# Note: Creating InferenceService instance per request to ensure latest code is used
+# This is necessary because the module-level instance would be cached with old code
 
 @inference_bp.route('/multi-inference', methods=['POST'])
 def multi_inference():
@@ -16,11 +16,14 @@ def multi_inference():
     try:
         data = request.get_json()
         logger.info(f"Multi-inference request received with data: {data}")
-        
+
         if not data:
             logger.error("No JSON data provided in multi-inference request")
             return {"status": "error", "message": "No JSON data provided"}, 400
-        
+
+        # Create fresh InferenceService instance to ensure latest code is used
+        inference_service = InferenceService()
+
         # Stream results back to client using Server-Sent Events
         logger.info("Starting streaming response for multi-inference")
         return Response(
@@ -49,7 +52,8 @@ def single_inference():
         if not model:
             return {"status": "error", "message": "No model specified"}, 400
         
-        # Use multi-inference with single model for consistency
+        # Create fresh InferenceService instance and use multi-inference with single model for consistency
+        inference_service = InferenceService()
         results = list(inference_service.multi_inference({**data, 'models': [model]}))
         
         # Return the first (and only) result
