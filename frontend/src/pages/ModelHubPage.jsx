@@ -13,13 +13,16 @@ import {
   Form,
   Input,
   InputNumber,
-  Skeleton
+  Skeleton,
+  List,
+  Alert
 } from 'antd';
 import {
   RobotOutlined,
   CloudOutlined,
   ThunderboltOutlined,
   CheckCircleOutlined,
+  DeleteOutlined,
   ReloadOutlined
 } from '@ant-design/icons';
 
@@ -508,6 +511,88 @@ const ModelHubPage = () => {
     </Card>
   ), [getStatusTag]);
 
+  const handleCleanup = useCallback(async (modelKey) => {
+    try {
+      console.log(`Starting cleanup for model: ${modelKey}`);
+
+      // Show loading state immediately
+      setModelStatus(prev => ({
+        ...prev,
+        [modelKey]: {
+          ...prev[modelKey],
+          status: 'deleting',
+          message: '正在停止模型...'
+        }
+      }));
+
+      const response = await fetch('/api/stop-model', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model_key: modelKey
+        })
+      });
+
+      if (response.ok) {
+        const responseData = await response.json();
+        console.log('Deletion response:', responseData);
+
+        if (responseData.success) {
+          message.success(`${modelKey} 停止成功`);
+
+          // Update status to not_deployed
+          setModelStatus(prev => ({
+            ...prev,
+            [modelKey]: {
+              status: 'not_deployed',
+              message: '模型已停止',
+              tag: null
+            }
+          }));
+
+        } else {
+          message.error(`停止失败: ${responseData.error || '未知错误'}`);
+
+          // Revert status on failure
+          setModelStatus(prev => ({
+            ...prev,
+            [modelKey]: {
+              ...prev[modelKey],
+              message: `停止失败: ${responseData.error || '未知错误'}`
+            }
+          }));
+        }
+
+      } else {
+        const errorText = await response.text();
+        console.error('Deletion failed:', response.status, errorText);
+        message.error(`停止请求失败 (${response.status}): ${errorText}`);
+
+        // Revert status on failure
+        setModelStatus(prev => ({
+          ...prev,
+          [modelKey]: {
+            ...prev[modelKey],
+            message: `停止请求失败: ${errorText}`
+          }
+        }));
+      }
+    } catch (error) {
+      console.error('停止模型失败:', error);
+      message.error('停止请求失败');
+
+      // Revert status on error
+      setModelStatus(prev => ({
+        ...prev,
+        [modelKey]: {
+          ...prev[modelKey],
+          message: '停止请求失败'
+        }
+      }));
+    }
+  }, []);
 
   return (
     <div style={{ padding: '24px', background: '#f5f5f5', minHeight: '100vh' }}>
@@ -839,6 +924,99 @@ const ModelHubPage = () => {
           </Card>
         );
       }, [modelCategories, modelStatus, selectedModel, customModelName, deploymentConfig, handleModelDeploy])}
+
+      {/* 部署状态监控 */}
+      {useMemo(() => {
+        // Get all models that have been deployed or are being deployed
+        const deployedModels = Object.entries(modelStatus).filter(([, status]) =>
+          status && ['inprogress', 'deployed', 'deleting', 'init', 'failed'].includes(status.status)
+        );
+
+        if (deployedModels.length === 0) return null;
+
+        return (
+          <Card
+            title={
+              <Space>
+                <ThunderboltOutlined />
+                <span>部署状态</span>
+              </Space>
+            }
+            style={{ marginTop: 24 }}
+          >
+            <List
+              itemLayout="horizontal"
+              dataSource={deployedModels}
+              renderItem={([modelKey, status]) => {
+                const getStatusTag = () => {
+                  switch (status.status) {
+                    case 'deployed':
+                      return <Tag color="success" icon={<CheckCircleOutlined />}>已部署</Tag>;
+                    case 'inprogress':
+                    case 'init':
+                      return <Tag color="processing">部署中</Tag>;
+                    case 'deleting':
+                      return <Tag color="processing">停止中</Tag>;
+                    case 'failed':
+                      return <Tag color="error">部署失败</Tag>;
+                    default:
+                      return <Tag color="default">未知状态</Tag>;
+                  }
+                };
+
+                const getActions = () => {
+                  if (status.status === 'deployed') {
+                    return [
+                      <Button
+                        key="stop"
+                        danger
+                        size="small"
+                        icon={<DeleteOutlined />}
+                        onClick={() => handleCleanup(modelKey)}
+                      >
+                        停止
+                      </Button>
+                    ];
+                  } else if (status.status === 'deleting') {
+                    return [
+                      <Button
+                        key="stopping"
+                        danger
+                        size="small"
+                        icon={<DeleteOutlined />}
+                        loading
+                        disabled
+                      >
+                        停止中
+                      </Button>
+                    ];
+                  }
+                  return [];
+                };
+
+                return (
+                  <List.Item actions={getActions()}>
+                    <List.Item.Meta
+                      title={
+                        <Space>
+                          <Text strong>{modelKey}</Text>
+                          {getStatusTag()}
+                        </Space>
+                      }
+                      description={status.message}
+                    />
+                    {status.endpoint && status.status === 'deployed' && (
+                      <Text type="secondary" style={{ fontSize: '12px' }}>
+                        端点: {status.endpoint}
+                      </Text>
+                    )}
+                  </List.Item>
+                );
+              }}
+            />
+          </Card>
+        );
+      }, [modelStatus, handleCleanup])}
     </div>
   );
 };
