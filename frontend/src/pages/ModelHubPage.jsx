@@ -776,7 +776,7 @@ const ModelHubPage = () => {
                 <Col span={12}>
                   <Form.Item label="🤗 自定义模型">
                     <Input
-                      placeholder="例如: Qwen/Qwen2.5-7B-Instruct"
+                      placeholder="例如: Qwen/Qwen3-8B"
                       value={customModelName}
                       onChange={handleCustomModelNameChange}
                       disabled={!!selectedModel}

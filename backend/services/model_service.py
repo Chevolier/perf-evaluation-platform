@@ -620,7 +620,7 @@ class ModelService:
             logger.info(f"🐳 Running Docker command: {' '.join(docker_cmd)}")
 
             # Start Docker container
-            result = subprocess.run(docker_cmd, capture_output=True, text=True, timeout=1200)
+            result = subprocess.run(docker_cmd, capture_output=True, text=True, timeout=1800)
 
             if result.returncode == 0:
                 container_id = result.stdout.strip()
