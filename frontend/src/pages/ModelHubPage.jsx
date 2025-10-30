@@ -20,7 +20,6 @@ import {
   CloudOutlined,
   ThunderboltOutlined,
   CheckCircleOutlined,
-  RocketOutlined,
   ReloadOutlined
 } from '@ant-design/icons';
 
@@ -592,9 +591,6 @@ const ModelHubPage = () => {
             </Title>
           </Space>
         </div>
-        <Text type="secondary">
-          EC2 模型可以在下方部署配置中选择并部署
-        </Text>
       </div>
 
       {/* 部署配置面板 - 只有在有可部署模型时显示 */}
@@ -610,21 +606,30 @@ const ModelHubPage = () => {
         if (!hasDeployableModels) return null;
 
         return (
-          <Card 
-            title={
-              <Space>
-                <RocketOutlined />
-                <span>部署配置</span>
-              </Space>
-            }
+          <Card
             style={{ marginTop: 24 }}
           >
             <Form layout="vertical">
+              {/* Model Selection Header */}
+              <div style={{
+                marginBottom: 20,
+                textAlign: 'center',
+                padding: '10px 16px',
+                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                borderRadius: '8px',
+                color: 'white'
+              }}>
+                <Text style={{ color: 'white', fontSize: '15px', fontWeight: '500' }}>
+                  选择部署模型 - 从预设列表中选择或手动输入 Hugging Face 模型名称
+                </Text>
+              </div>
+
+              {/* Selection Options */}
               <Row gutter={16}>
                 <Col span={12}>
-                  <Form.Item label="EC2 预设模型选择">
+                  <Form.Item label="📋 预设模型">
                     <Select
-                      placeholder="选择 EC2 预设模型"
+                      placeholder="选择 EC2 预设模型..."
                       value={selectedModel}
                       onChange={(value) => {
                         setSelectedModel(value);
@@ -635,33 +640,68 @@ const ModelHubPage = () => {
                       onClear={() => setSelectedModel(null)}
                       style={{ width: '100%' }}
                       options={
-                        // Only EC2 models in dropdown
-                        Object.values(modelCategories).find(cat => cat.title === 'EC2 部署模型')?.models.map(model => ({
-                          label: `${model.name} (${model.key})`,
-                          value: model.key,
-                        })) || []
+                        // Only EC2 models in dropdown, ordered as specified
+                        (() => {
+                          const ec2Models = Object.values(modelCategories).find(cat => cat.title === 'EC2 部署模型')?.models || [];
+
+                          // Define the exact order as requested
+                          const orderedKeys = [
+                            'qwen3-0.6b',
+                            'qwen3-8b',
+                            'qwen3-32b',
+                            'qwen3-vl-8b-thinking',
+                            'qwen3-vl-30b-a3b-instruct',
+                            'qwen2.5-7b-instruct',
+                            'qwen2.5-vl-7b-instruct',
+                            'llama-3.1-8b-instruct',
+                            'deepseek-r1-distill-qwen-7b'
+                          ];
+
+                          // Create ordered array based on specified order
+                          const orderedModels = [];
+                          orderedKeys.forEach(key => {
+                            const model = ec2Models.find(m => m.key === key);
+                            if (model) {
+                              orderedModels.push(model);
+                            }
+                          });
+
+                          // Add any remaining models not in the ordered list (fallback)
+                          ec2Models.forEach(model => {
+                            if (!orderedKeys.includes(model.key)) {
+                              orderedModels.push(model);
+                            }
+                          });
+
+                          return orderedModels.map(model => ({
+                            label: `${model.name}`,
+                            value: model.key,
+                          }));
+                        })()
                       }
                     />
+                    {selectedModel && (
+                      <div style={{ marginTop: 4, fontSize: '12px', color: '#52c41a', fontWeight: '500' }}>
+                        ✓ 已选择: {selectedModel}
+                      </div>
+                    )}
                   </Form.Item>
                 </Col>
+
                 <Col span={12}>
-                  <Form.Item label="自定义模型名称 (Hugging Face Hub)">
+                  <Form.Item label="🤗 自定义模型">
                     <Input
-                      placeholder="输入 Hugging Face 模型名称，例如: Qwen/Qwen3-8B"
+                      placeholder="例如: Qwen/Qwen2.5-7B-Instruct"
                       value={customModelName}
                       onChange={handleCustomModelNameChange}
                       disabled={!!selectedModel}
                       style={{ width: '100%' }}
                     />
-                    <div style={{ marginTop: 4, fontSize: '12px', color: '#666' }}>
-                      {selectedModel ?
-                        `已选择预设模型: ${selectedModel}` :
-                        (customModelName.trim() ?
-                          `将部署自定义模型: ${customModelName.trim()}` :
-                          '请选择预设模型或输入自定义模型名称'
-                        )
-                      }
-                    </div>
+                    {customModelName.trim() && (
+                      <div style={{ marginTop: 4, fontSize: '12px', color: '#52c41a', fontWeight: '500' }}>
+                        ✓ 将部署: {customModelName.trim()}
+                      </div>
+                    )}
                   </Form.Item>
                 </Col>
               </Row>

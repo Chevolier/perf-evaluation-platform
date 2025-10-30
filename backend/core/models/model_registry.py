@@ -4,20 +4,14 @@ from typing import Dict, Any
 
 
 # EC2 Models Configuration (formerly EMD models)
+# Order: Qwen3 series → Qwen3-VL series → Qwen2.5 series → Llama series → DeepSeek series
 EC2_MODELS = {
-    "qwen2.5-7b-instruct": {
-        "name": "Qwen2.5-7B-Instruct",
-        "huggingface_repo": "Qwen/Qwen2.5-7B-Instruct",
-        "description": "Qwen2.5语言模型，比较均衡的版本，7B参数",
-        "model_path": "Qwen/Qwen2.5-7B-Instruct",  # Match vLLM served model name
-        "supports_multimodal": False,
-        "supports_streaming": True
-    },
+    # Qwen3 series
     "qwen3-0.6b": {
         "name": "Qwen3-0.6B",
         "huggingface_repo": "Qwen/Qwen3-0.6B",
         "description": "最新Qwen3模型，0.6B参数，高效轻量",
-        "model_path": "Qwen/Qwen3-0.6B",  # Match vLLM served model name
+        "model_path": "Qwen/Qwen3-0.6B",
         "supports_multimodal": False,
         "supports_streaming": True
     },
@@ -25,40 +19,70 @@ EC2_MODELS = {
         "name": "Qwen3-8B",
         "huggingface_repo": "Qwen/Qwen3-8B",
         "description": "最新Qwen3模型，8B参数，强大性能",
-        "model_path": "Qwen/Qwen3-8B",  # Match vLLM served model name
+        "model_path": "Qwen/Qwen3-8B",
         "supports_multimodal": False,
         "supports_streaming": True
     },
-    "qwen2-vl-7b": {
-        "name": "Qwen2-VL-7B-Instruct",
-        "huggingface_repo": "Qwen/Qwen2-VL-7B-Instruct",
-        "description": "通义千问视觉语言模型，7B参数",
-        "model_path": "Qwen/Qwen2-VL-7B-Instruct",  # Match vLLM served model name
+    "qwen3-32b": {
+        "name": "Qwen3-32B",
+        "huggingface_repo": "Qwen/Qwen3-32B",
+        "description": "最新Qwen3模型，32B参数，顶级性能",
+        "model_path": "Qwen/Qwen3-32B",
+        "supports_multimodal": False,
+        "supports_streaming": True
+    },
+    # Qwen3-VL series
+    "qwen3-vl-8b-thinking": {
+        "name": "Qwen3-VL-8B-Thinking",
+        "huggingface_repo": "Qwen/Qwen3-VL-8B-Thinking",
+        "description": "Qwen3视觉语言模型，8B参数，具备思维链推理能力",
+        "model_path": "Qwen/Qwen3-VL-8B-Thinking",
         "supports_multimodal": True,
         "supports_streaming": True
     },
-    "qwen2.5-vl-32b": {
-        "name": "Qwen2.5-VL-32B-Instruct",
-        "huggingface_repo": "Qwen/Qwen2.5-VL-32B-Instruct",
-        "description": "通义千问视觉语言模型，32B参数",
-        "model_path": "Qwen/Qwen2.5-VL-32B-Instruct",  # Match vLLM served model name
+    "qwen3-vl-30b-a3b-instruct": {
+        "name": "Qwen3-VL-30B-A3B-Instruct",
+        "huggingface_repo": "Qwen/Qwen3-VL-30B-A3B-Instruct",
+        "description": "Qwen3视觉语言模型，30B参数，指令优化版本",
+        "model_path": "Qwen/Qwen3-VL-30B-A3B-Instruct",
         "supports_multimodal": True,
         "supports_streaming": True
     },
-    # "gemma-3-4b": {
-    #     "name": "Gemma-3-4B-IT",
-    #     "description": "Google开源语言模型",
-    #     "model_path": "gemma-3-4b-it",  # Use EMD supported model ID
-    #     "supports_multimodal": False,
-    #     "supports_streaming": True
-    # },
-    # "ui-tars-1.5-7b": {
-    #     "name": "UI-TARS-1.5-7B",
-    #     "description": "用户界面理解专用模型",
-    #     "model_path": "UI-TARS-1.5-7B",  # Use EMD supported model ID
-    #     "supports_multimodal": True,
-    #     "supports_streaming": False
-    # },
+    # Qwen2.5 series
+    "qwen2.5-7b-instruct": {
+        "name": "Qwen2.5-7B-Instruct",
+        "huggingface_repo": "Qwen/Qwen2.5-7B-Instruct",
+        "description": "Qwen2.5语言模型，7B参数，均衡性能",
+        "model_path": "Qwen/Qwen2.5-7B-Instruct",
+        "supports_multimodal": False,
+        "supports_streaming": True
+    },
+    "qwen2.5-vl-7b-instruct": {
+        "name": "Qwen2.5-VL-7B-Instruct",
+        "huggingface_repo": "Qwen/Qwen2.5-VL-7B-Instruct",
+        "description": "Qwen2.5视觉语言模型，7B参数",
+        "model_path": "Qwen/Qwen2.5-VL-7B-Instruct",
+        "supports_multimodal": True,
+        "supports_streaming": True
+    },
+    # Llama series
+    "llama-3.1-8b-instruct": {
+        "name": "Llama-3.1-8B-Instruct",
+        "huggingface_repo": "meta-llama/Llama-3.1-8B-Instruct",
+        "description": "Meta Llama 3.1模型，8B参数，指令优化版本",
+        "model_path": "meta-llama/Llama-3.1-8B-Instruct",
+        "supports_multimodal": False,
+        "supports_streaming": True
+    },
+    # DeepSeek series
+    "deepseek-r1-distill-qwen-7b": {
+        "name": "DeepSeek-R1-Distill-Qwen-7B",
+        "huggingface_repo": "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
+        "description": "DeepSeek R1蒸馏模型，基于Qwen，7B参数",
+        "model_path": "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
+        "supports_multimodal": False,
+        "supports_streaming": True
+    }
 }
 
 
