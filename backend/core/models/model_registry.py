@@ -70,20 +70,6 @@ EMD_MODELS = {
             "recommended_instance_types": ["ml.g5.4xlarge", "ml.g5.8xlarge", "ml.p4d.24xlarge"]
         }
     },
-    # "gemma-3-4b": {
-    #     "name": "Gemma-3-4B-IT",
-    #     "description": "Google开源语言模型",
-    #     "model_path": "gemma-3-4b-it",  # Use EMD supported model ID
-    #     "supports_multimodal": False,
-    #     "supports_streaming": True
-    # },
-    # "ui-tars-1.5-7b": {
-    #     "name": "UI-TARS-1.5-7B",
-    #     "description": "用户界面理解专用模型",
-    #     "model_path": "UI-TARS-1.5-7B",  # Use EMD supported model ID
-    #     "supports_multimodal": True,
-    #     "supports_streaming": False
-    # },
 }
 
 
@@ -154,7 +140,7 @@ BEDROCK_MODELS = {
         "max_tokens": 4096
     },
     "nova-pro": {
-        "name": "Nova Pro", 
+        "name": "Nova Pro",
         "description": "Amazon Nova Pro - US inference profile",
         "model_id": "us.amazon.nova-pro-v1:0",
         "supports_multimodal": True,
@@ -162,7 +148,7 @@ BEDROCK_MODELS = {
         "max_tokens": 5000
     },
     "nova-premier": {
-        "name": "Nova Premier", 
+        "name": "Nova Premier",
         "description": "Amazon Nova Premier - US inference profile",
         "model_id": "us.amazon.nova-premier-v1:0",
         "supports_multimodal": True,
@@ -174,16 +160,16 @@ BEDROCK_MODELS = {
 
 class ModelRegistry:
     """Registry for managing all available models."""
-    
+
     def __init__(self):
         """Initialize the model registry."""
         self._emd_models = EMD_MODELS.copy()
         self._bedrock_models = BEDROCK_MODELS.copy()
         self._external_models: Dict[str, Dict[str, Any]] = {}
-    
+
     def get_all_models(self) -> Dict[str, Dict[str, Any]]:
         """Get all available models organized by type.
-        
+
         Returns:
             Dictionary containing all models organized by type
         """
@@ -192,18 +178,18 @@ class ModelRegistry:
             "emd": self._emd_models,
             "external": self._external_models
         }
-    
+
     def get_emd_models(self) -> Dict[str, Dict[str, Any]]:
         """Get all EMD models.
-        
+
         Returns:
             Dictionary of EMD models
         """
         return self._emd_models.copy()
-    
+
     def get_bedrock_models(self) -> Dict[str, Dict[str, Any]]:
         """Get all Bedrock models.
-        
+
         Returns:
             Dictionary of Bedrock models
         """
@@ -212,7 +198,7 @@ class ModelRegistry:
     def get_external_models(self) -> Dict[str, Dict[str, Any]]:
         """Get all externally registered deployments."""
         return self._external_models.copy()
-    
+
     def get_model_info(self, model_key: str, model_type: str = None) -> Dict[str, Any]:
         """Get information about a specific model.
 
@@ -239,7 +225,7 @@ class ModelRegistry:
                 return self._external_models[resolved_key].copy()
 
         return {}
-    
+
     def is_emd_model(self, model_key: str) -> bool:
         """Check if a model is an EMD model.
 
@@ -252,7 +238,7 @@ class ModelRegistry:
         # Resolve the key first in case it's a model_path
         resolved_key = self.resolve_model_key(model_key)
         return resolved_key in self._emd_models
-    
+
     def resolve_model_key(self, model_identifier: str) -> str:
         """Resolve a model identifier to its registry key.
 
@@ -302,13 +288,13 @@ class ModelRegistry:
     def set_external_models(self, models: Dict[str, Dict[str, Any]]) -> None:
         """Replace the external deployment registry."""
         self._external_models = models.copy()
-    
+
     def get_model_path(self, model_key: str) -> str:
         """Get the model path for EMD models or model ID for Bedrock models.
-        
+
         Args:
             model_key: Model key
-            
+
         Returns:
             Model path or ID, empty string if not found
         """
@@ -320,61 +306,61 @@ class ModelRegistry:
             model_info = self._external_models[model_key]
             return model_info.get("model_path") or model_info.get("model_name") or ""
         return ""
-    
+
     def supports_multimodal(self, model_key: str) -> bool:
         """Check if a model supports multimodal input.
-        
+
         Args:
             model_key: Model key to check
-            
+
         Returns:
             True if model supports multimodal input
         """
         model_info = self.get_model_info(model_key)
         return model_info.get("supports_multimodal", False)
-    
+
     def supports_streaming(self, model_key: str) -> bool:
         """Check if a model supports streaming output.
-        
+
         Args:
             model_key: Model key to check
-            
+
         Returns:
             True if model supports streaming
         """
         model_info = self.get_model_info(model_key)
         return model_info.get("supports_streaming", False)
-    
+
     def get_supported_methods(self, model_key: str) -> List[str]:
         """Get supported launch methods for a model.
-        
+
         Args:
             model_key: Model key to check
-            
+
         Returns:
             List of supported launch methods
         """
         model_info = self.get_model_info(model_key)
         return model_info.get("supported_methods", [])
-    
+
     def get_supported_engines(self, model_key: str) -> List[str]:
         """Get supported inference engines for a model.
-        
+
         Args:
             model_key: Model key to check
-            
+
         Returns:
             List of supported inference engines
         """
         model_info = self.get_model_info(model_key)
         return model_info.get("supported_engines", [])
-    
+
     def get_constraints(self, model_key: str) -> Dict[str, Any]:
         """Get launch constraints for a model.
-        
+
         Args:
             model_key: Model key to check
-            
+
         Returns:
             Dictionary of launch constraints
         """

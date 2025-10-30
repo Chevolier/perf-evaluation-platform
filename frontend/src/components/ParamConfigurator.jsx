@@ -6,7 +6,7 @@ const ParamConfigurator = ({ value = {}, onChange }) => {
   
   const defaultValues = {
     max_tokens: 1024,
-    temperature: 0.1,
+    temperature: 0.6,
     ...value
   };
 
@@ -34,7 +34,7 @@ const ParamConfigurator = ({ value = {}, onChange }) => {
           min={0} 
           max={1} 
           step={0.01} 
-          placeholder="0.1"
+          placeholder="0.6"
           style={{ width: '100%' }} 
         />
       </Form.Item>

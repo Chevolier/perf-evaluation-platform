@@ -1,44 +1,61 @@
 #!/bin/bash
-# Startup script for the new Inference Platform
 
-set -e  # Exit on any error
+echo "🚀 Starting Performance Evaluation Platform..."
 
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$PROJECT_ROOT"
-
-echo "🚀 Starting New Inference Platform"
-echo "📁 Project root: $PROJECT_ROOT"
-
-# Set environment (default to development)
-ENVIRONMENT="${ENVIRONMENT:-development}"
-echo "📊 Environment: $ENVIRONMENT"
-
-# Check if Python is available
-if ! command -v python3 &> /dev/null; then
-    echo "❌ Python3 is not available"
-    exit 1
+# Check if frontend dependencies are installed
+if [ ! -d "frontend/node_modules" ] || [ ! -f "frontend/node_modules/react/package.json" ]; then
+    echo "⚠️  Frontend dependencies not found. Run setup first:"
+    echo "  ./scripts/setup.sh"
+    ./scripts/setup.sh
 fi
 
-# Check if required dependencies are installed
-echo "🔍 Checking dependencies..."
-python3 -c "import flask" 2>/dev/null || {
-    echo "⚠️  Flask not found. Installing dependencies..."
-    pip3 install -r requirements_new.txt
+# Function to cleanup background processes on script exit
+cleanup() {
+    echo ""
+    echo "🛑 Shutting down platform..."
+    if [ ! -z "$BACKEND_PID" ]; then
+        kill $BACKEND_PID 2>/dev/null
+        echo "✓ Backend stopped"
+    fi
+    if [ ! -z "$FRONTEND_PID" ]; then
+        kill $FRONTEND_PID 2>/dev/null
+        echo "✓ Frontend stopped"
+    fi
+    exit 0
 }
 
-# Create necessary directories
-echo "📁 Creating directories..."
-mkdir -p data/logs
-mkdir -p data/benchmarks/by_model
-mkdir -p data/benchmarks/by_timestamp
-mkdir -p data/temp
+# Set up trap to cleanup on script exit
+trap cleanup SIGINT SIGTERM EXIT
 
-# Set Python path
-export PYTHONPATH="$PROJECT_ROOT/src:$PYTHONPATH"
-export ENVIRONMENT="$ENVIRONMENT"
+# Start backend in background
+echo "1. Starting backend..."
+cd backend
+source venv/bin/activate
+cd ..
+python run_backend.py > logs/backend.out 2>&1 &
+BACKEND_PID=$!
+echo "✓ Backend started (PID: $BACKEND_PID)"
 
-echo "▶️  Starting server..."
-echo "-" | head -c 50
+# Wait a moment for backend to initialize
+sleep 3
 
-# Run the new application
-python3 run_new.py "$ENVIRONMENT"
+# Start frontend in background
+echo "2. Starting frontend..."
+cd frontend
+npm start > ../logs/frontend.out 2>&1 &
+FRONTEND_PID=$!
+echo "✓ Frontend started (PID: $FRONTEND_PID)"
+
+echo ""
+echo "🌐 Platform is starting up..."
+echo "📊 Backend: http://localhost:5000"
+echo "🖥️  Frontend: http://localhost:3000"
+echo ""
+echo "📋 Logs:"
+echo "   Backend: logs/backend.out"
+echo "   Frontend: logs/frontend.out"
+echo ""
+echo "Press Ctrl+C to stop the platform"
+
+# Wait for user to stop the platform
+wait

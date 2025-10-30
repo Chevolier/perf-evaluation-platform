@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo "🚀 Setting up Model Inference Platform"
+echo "🚀 Setting up Performance Evaluation Platform"
 echo "=========================================="
 
 # Check Python version
@@ -11,6 +11,23 @@ else
     echo "❌ Python 3 not found. Please install Python 3.8+"
     exit 1
 fi
+
+# Install Node.js
+# Download and install nvm:
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+
+# in lieu of restarting the shell
+\. "$HOME/.nvm/nvm.sh"
+
+# Download and install Node.js:
+nvm install 22
+
+# Verify the Node.js version:
+node -v # Should print "v22.19.0".
+nvm current # Should print "v22.19.0".
+
+# Verify npm version:
+npm -v # Should print "10.9.3".
 
 # Check Node.js version
 node_version=$(node --version 2>&1)
@@ -38,7 +55,8 @@ source venv/bin/activate
 # Install Python dependencies
 echo "Installing Python dependencies..."
 pip install --upgrade pip
-pip install -r requirements.txt
+pip install -r ../requirements.txt
+pip install -e evalscope
 
 echo "✓ Backend setup complete!"
 
@@ -68,22 +86,13 @@ else
     echo "   export AWS_SECRET_ACCESS_KEY=your_secret"
 fi
 
-# EMD setup
-echo ""
-echo "🤖 EMD setup..."
-if command -v emd >/dev/null 2>&1; then
-    echo "✓ EMD CLI installed"
-    echo "To initialize EMD, run: emd bootstrap"
-else
-    echo "⚠️  EMD CLI not found in PATH. Make sure to activate the virtual environment."
-fi
 
 echo ""
 echo "🎉 Setup complete!"
 echo ""
-echo "To start the platform:"
-echo "1. Backend:"
-echo "  source venv/bin/activate && python run_backend.py"
-echo "2. Frontend (in another terminal):"
-echo "   cd frontend && npm start"
-echo "3. Access: http://localhost:3000"
+echo "🚀 Starting the platform..."
+
+# Create logs directory if it doesn't exist
+mkdir -p logs
+
+echo "Start the platform by running scripts/start.sh"

@@ -120,3 +120,5 @@ pyproject.toml
 
 data/
 .claude/
+
+config/sm_config.yaml

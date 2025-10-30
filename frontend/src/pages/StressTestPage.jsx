@@ -29,7 +29,8 @@ import {
   DashboardOutlined,
   CloudOutlined,
   LinkOutlined,
-  SettingOutlined
+  SettingOutlined,
+  RobotOutlined
 } from '@ant-design/icons';
 import { Line } from '@ant-design/plots';
 
@@ -57,9 +58,16 @@ const StressTestPage = () => {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [models, setModels] = useState([]);
-  const [inputMode, setInputMode] = useState('dropdown'); // 'dropdown' or 'manual'
+  const [inputMode, setInputMode] = useState('dropdown'); // 'dropdown', 'manual', or 'sagemaker'
   const [datasetType, setDatasetType] = useState('random');
   const [isMultimodal, setIsMultimodal] = useState(false);
+
+  // Manual configuration state for manual API and SageMaker endpoint modes
+  const [manualConfig, setManualConfig] = useState({
+    api_url: '',
+    model_name: '',
+    endpoint_name: ''
+  });
   
   // Model type mapping - maps model names to LLM or VLM
   const MODEL_TYPE_MAP = {
@@ -188,13 +196,13 @@ const StressTestPage = () => {
   
   // Determine if parameters should be enabled based on model type and dataset
   const shouldEnableTokenParams = () => {
-    const currentModelType = inputMode === 'dropdown' 
+    const currentModelType = inputMode === 'dropdown'
       ? (() => {
           const modelKey = form.getFieldValue('model');
           const selectedModel = models.find(model => model.key === modelKey);
           return getModelType(selectedModel?.name || modelKey);
         })()
-      : getModelType(form.getFieldValue('model_name'));
+      : getModelType(form.getFieldValue('model_name') || manualConfig.model_name);
     
     const currentDataset = form.getFieldValue('dataset') || datasetType;
     
@@ -206,13 +214,13 @@ const StressTestPage = () => {
   };
   
   const shouldEnableImageParams = () => {
-    const currentModelType = inputMode === 'dropdown' 
+    const currentModelType = inputMode === 'dropdown'
       ? (() => {
           const modelKey = form.getFieldValue('model');
           const selectedModel = models.find(model => model.key === modelKey);
           return getModelType(selectedModel?.name || modelKey);
         })()
-      : getModelType(form.getFieldValue('model_name'));
+      : getModelType(form.getFieldValue('model_name') || manualConfig.model_name);
     
     const currentDataset = form.getFieldValue('dataset') || datasetType;
     
@@ -263,18 +271,18 @@ const StressTestPage = () => {
             });
           }
           
-          // 检查EMD模型状态
-          if (data.models.emd) {
-            const emdModelKeys = Object.keys(data.models.emd);
+          // 检查EC2模型状态
+          if (data.models.ec2) {
+            const ec2ModelKeys = Object.keys(data.models.ec2);
             const statusResponse = await fetch('/api/check-model-status', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ models: emdModelKeys })
+              body: JSON.stringify({ models: ec2ModelKeys })
             });
-            
+
             if (statusResponse.ok) {
               const statusData = await statusResponse.json();
-              Object.entries(data.models.emd).forEach(([key, info]) => {
+              Object.entries(data.models.ec2).forEach(([key, info]) => {
                 const status = statusData.model_status?.[key];
                 if (status && (status.status === 'deployed' || status.status === 'available')) {
                   availableModels.push({
@@ -325,7 +333,7 @@ const StressTestPage = () => {
           prefix_length: values.prefix_length || 0,
           input_tokens: values.input_tokens,
           output_tokens: values.output_tokens,
-          temperature: 0.1,
+          temperature: 0.6,
           dataset: values.dataset,
           dataset_path: values.dataset_path,
           deployment_method: values.deployment_method
@@ -349,6 +357,11 @@ const StressTestPage = () => {
         requestBody.params.inference_framework = values.framework;
         requestBody.params.tp_size = values.tp_size;
         requestBody.params.dp_size = values.dp_size;
+      } else if (inputMode === 'sagemaker') {
+        requestBody.sagemaker_config = {
+          endpoint_name: values.endpoint_name || manualConfig.endpoint_name,
+          model_name: values.model_name || manualConfig.model_name
+        };
       } else {
         requestBody.model = values.model;
       }
@@ -368,7 +381,9 @@ const StressTestPage = () => {
             ...prev,
             [sessionId]: {
               status: 'running',
-              model: inputMode === 'manual' ? values.model_name : values.model,
+              model: inputMode === 'manual' ? values.model_name :
+                     inputMode === 'sagemaker' ? (values.model_name || manualConfig.model_name) :
+                     values.model,
               params: values,
               startTime: new Date().toISOString()
             }
@@ -1691,7 +1706,8 @@ const StressTestPage = () => {
                 prefix_length: 0,
                 input_tokens: 32,
                 output_tokens: 32,
-                deployment_method: inputMode === 'dropdown' ? "SageMaker Endpoint" : "EC2",
+                deployment_method: inputMode === 'dropdown' ? "EC2" :
+                                  inputMode === 'sagemaker' ? "EC2": "SageMaker Endpoint",
                 dataset: "random",
                 image_width: 512,
                 image_height: 512,
@@ -1713,12 +1729,16 @@ const StressTestPage = () => {
                       const newMode = e.target.value;
                       setInputMode(newMode);
                       // Clear form fields when switching modes
-                      form.resetFields(['model', 'deployment_method', 'dataset', 'dataset_path', 'api_url', 'model_name', 'instance_type', 'framework', 'tp_size', 'dp_size', 'prefix_length', 'input_tokens', 'output_tokens', 'image_width', 'image_height', 'image_num']);
-                      // Set default deployment method based on input mode
-                      if (newMode === 'dropdown') {
-                        form.setFieldsValue({ deployment_method: 'SageMaker Endpoint' });
-                      } else if (newMode === 'manual') {
+                      form.resetFields(['model', 'deployment_method', 'dataset', 'dataset_path', 'api_url', 'model_name', 'endpoint_name', 'instance_type', 'framework', 'tp_size', 'dp_size', 'prefix_length', 'input_tokens', 'output_tokens', 'image_width', 'image_height', 'image_num']);
+                      // Clear manual config when switching modes
+                      if (newMode === 'manual') {
+                        setManualConfig({ api_url: '', model_name: '', endpoint_name: '' });
                         form.setFieldsValue({ deployment_method: 'EC2' });
+                      } else if (newMode === 'sagemaker') {
+                        setManualConfig({ api_url: '', model_name: '', endpoint_name: '' });
+                        form.setFieldsValue({ deployment_method: 'SageMaker Endpoint' });
+                      } else if (newMode === 'dropdown') {
+                        form.setFieldsValue({ deployment_method: 'SageMaker Endpoint' });
                       }
                     }}
                   >
@@ -1731,7 +1751,13 @@ const StressTestPage = () => {
                     <Radio value="manual">
                       <Space>
                         <LinkOutlined />
-                        <span>手动输入</span>
+                        <span>手动输入API</span>
+                      </Space>
+                    </Radio>
+                    <Radio value="sagemaker">
+                      <Space>
+                        <RobotOutlined />
+                        <span>SageMaker端点</span>
                       </Space>
                     </Radio>
                   </Radio.Group>
@@ -1758,7 +1784,7 @@ const StressTestPage = () => {
                               <Space>
                                 {model.type === 'bedrock' ? <CloudOutlined /> : <RocketOutlined />}
                                 {model.name}
-                                {model.tag && <Text type="secondary">({model.tag})</Text>}
+                                {/* Don't show deployment tags for EC2 models as they are internal tracking info */}
                                 {model.supports_multimodal && <Text type="success" style={{ fontSize: '12px' }}>[VLM]</Text>}
                               </Space>
                             </Option>
@@ -1774,9 +1800,9 @@ const StressTestPage = () => {
                         style={{ marginBottom: 16 }}
                       >
                         <Select placeholder="选择部署方式">
-                          <Option value="SageMaker Endpoint">Endpoint</Option>
+                          {/* <Option value="SageMaker Endpoint">Endpoint</Option>
                           <Option value="SageMaker HyperPod">HyperPod</Option>
-                          <Option value="EKS">EKS</Option>
+                          <Option value="EKS">EKS</Option> */}
                           <Option value="EC2">EC2</Option>
                         </Select>
                       </Form.Item>
@@ -1912,7 +1938,7 @@ const StressTestPage = () => {
                     </Row>
                   )}
                 </>
-              ) : (
+              ) : inputMode === 'manual' ? (
                 <>
                   <Form.Item
                     name="api_url"
@@ -1923,7 +1949,7 @@ const StressTestPage = () => {
                     ]}
                     extra="请输入完整的chat completions端点URL，必须包含 /v1/chat/completions 路径"
                   >
-                    <Input 
+                    <Input
                       placeholder="http://your-api-host.com/v1/chat/completions"
                       prefix={<LinkOutlined />}
                     />
@@ -1934,7 +1960,7 @@ const StressTestPage = () => {
                     rules={[{ required: true, message: '请输入模型名称' }]}
                     extra="请输入准确的模型名称，如: gpt-3.5-turbo, claude-3-sonnet-20240229, Qwen2.5-VL-7B-Instruct"
                   >
-                    <Input 
+                    <Input
                       placeholder="gpt-3.5-turbo"
                       prefix={<RocketOutlined />}
                       onChange={(e) => handleManualModelNameChange(e.target.value)}
@@ -1951,9 +1977,9 @@ const StressTestPage = () => {
                         style={{ marginBottom: 16 }}
                       >
                         <Select placeholder="选择部署方式">
-                          <Option value="SageMaker Endpoint">Endpoint</Option>
+                          {/* <Option value="SageMaker Endpoint">Endpoint</Option>
                           <Option value="SageMaker HyperPod">HyperPod</Option>
-                          <Option value="EKS">EKS</Option>
+                          <Option value="EKS">EKS</Option> */}
                           <Option value="EC2">EC2</Option>
                         </Select>
                       </Form.Item>
@@ -2157,6 +2183,192 @@ const StressTestPage = () => {
                       </Form.Item>
                     </Col>
                   </Row>
+                </>
+              ) : (
+                <>
+                  {/* SageMaker Endpoint Configuration */}
+                  <Row gutter={8} justify="space-between">
+                    <Col flex="1">
+                      <Form.Item
+                        name="endpoint_name"
+                        label="SageMaker端点名称"
+                        rules={[{ required: true, message: '请输入SageMaker端点名称' }]}
+                        extra="请输入SageMaker端点名称，支持vLLM、TGI等推理框架部署的端点"
+                        style={{ marginBottom: 16 }}
+                      >
+                        <Input
+                          placeholder="Qwen3-Coder-30B-A3B-Instruct-2025-10-13-05-30-15-995"
+                          prefix={<RobotOutlined />}
+                          onChange={(e) => setManualConfig({ ...manualConfig, endpoint_name: e.target.value })}
+                          value={manualConfig.endpoint_name}
+                        />
+                      </Form.Item>
+                    </Col>
+                    <Col flex="1">
+                      <Form.Item
+                        name="model_name"
+                        label={<span>模型显示名称：<Text type="danger">*</Text></span>}
+                        rules={[{ required: true, message: '请填写模型显示名称（Huggingface模型名称）' }]}
+                        extra={<span><Text type="danger">必填：</Text>原始模型在Huggingface上的完整名称，例如 Qwen/Qwen2.5-Coder-32B-Instruct</span>}
+                        style={{ marginBottom: 16 }}
+                      >
+                        <Input
+                          placeholder="例如：Qwen/Qwen2.5-Coder-32B-Instruct （必填）"
+                          prefix={<RocketOutlined />}
+                          onChange={(e) => {
+                            setManualConfig({ ...manualConfig, model_name: e.target.value });
+                            handleManualModelNameChange(e.target.value);
+                          }}
+                          value={manualConfig.model_name}
+                          required
+                        />
+                      </Form.Item>
+                    </Col>
+                    <Col flex="1">
+                      <Form.Item
+                        name="deployment_method"
+                        label="部署方式"
+                        rules={[{ required: true, message: '请选择部署方式' }]}
+                        initialValue="EC2"
+                        style={{ marginBottom: 16 }}
+                      >
+                        <Select placeholder="选择部署方式">
+                          {/* <Option value="SageMaker Endpoint">Endpoint</Option>
+                          <Option value="SageMaker HyperPod">HyperPod</Option>
+                          <Option value="EKS">EKS</Option> */}
+                          <Option value="EC2">EC2</Option>
+                        </Select>
+                      </Form.Item>
+                    </Col>
+                    <Col flex="1">
+                      <Form.Item
+                        name="dataset"
+                        label="数据集"
+                        rules={[{ required: true, message: '请选择数据集' }]}
+                        initialValue="random"
+                        style={{ marginBottom: 16 }}
+                      >
+                        <Select
+                          placeholder="选择数据集"
+                          onChange={(value) => {
+                            setDatasetType(value);
+                            // Force form to re-render to update conditional validation
+                            setTimeout(() => {
+                              form.validateFields(['prefix_length', 'input_tokens', 'output_tokens', 'image_width', 'image_height', 'image_num']);
+                            }, 0);
+                          }}
+                        >
+                          <Option value="random">random</Option>
+                          <Option value="random_vl">random_vl</Option>
+                          <Option value="openqa">openqa</Option>
+                          <Option value="longalpaca">longalpaca</Option>
+                          <Option value="flickr8k">flickr8k</Option>
+                          <Option value="custom">custom</Option>
+                        </Select>
+                      </Form.Item>
+                    </Col>
+                  </Row>
+
+                  <Row gutter={8} justify="space-between">
+                    <Col flex="1">
+                      <Form.Item
+                        name="concurrency"
+                        label="并发数"
+                        rules={[
+                          { required: true, message: '请输入并发数' },
+                          {
+                            validator: (_, value) => {
+                              if (!value) return Promise.reject(new Error('请输入并发数'));
+
+                              // Parse comma-separated values
+                              const numbers = value.split(',').map(v => v.trim()).filter(v => v);
+                              const invalidNumbers = numbers.filter(n => isNaN(n) || parseInt(n) <= 0);
+
+                              if (invalidNumbers.length > 0) {
+                                return Promise.reject(new Error('请输入有效的正整数，用逗号分隔'));
+                              }
+
+                              // Cross-field validation
+                              const crossFieldError = validateFieldCount();
+                              if (crossFieldError) {
+                                return Promise.reject(new Error(crossFieldError));
+                              }
+
+                              return Promise.resolve();
+                            }
+                          }
+                        ]}
+                        style={{ marginBottom: 16 }}
+                      >
+                        <Input
+                          placeholder="1, 5, 10"
+                          style={{ width: '100%' }}
+                          onChange={() => {
+                            // Trigger validation for both fields when either changes
+                            setTimeout(() => {
+                              form.validateFields(['concurrency', 'num_requests']);
+                            }, 0);
+                          }}
+                        />
+                      </Form.Item>
+                    </Col>
+                    <Col flex="1">
+                      <Form.Item
+                        name="num_requests"
+                        label="请求总数"
+                        rules={[
+                          { required: true, message: '请输入请求总数' },
+                          {
+                            validator: (_, value) => {
+                              if (!value) return Promise.reject(new Error('请输入请求总数'));
+
+                              // Parse comma-separated values
+                              const numbers = value.split(',').map(v => v.trim()).filter(v => v);
+                              const invalidNumbers = numbers.filter(n => isNaN(n) || parseInt(n) <= 0);
+
+                              if (invalidNumbers.length > 0) {
+                                return Promise.reject(new Error('请输入有效的正整数，用逗号分隔'));
+                              }
+
+                              // Cross-field validation
+                              const crossFieldError = validateFieldCount();
+                              if (crossFieldError) {
+                                return Promise.reject(new Error(crossFieldError));
+                              }
+
+                              return Promise.resolve();
+                            }
+                          }
+                        ]}
+                        style={{ marginBottom: 16 }}
+                      >
+                        <Input
+                          placeholder="20, 100, 200"
+                          style={{ width: '100%' }}
+                          onChange={() => {
+                            // Trigger validation for both fields when either changes
+                            setTimeout(() => {
+                              form.validateFields(['concurrency', 'num_requests']);
+                            }, 0);
+                          }}
+                        />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+
+                  {datasetType === 'custom' && (
+                    <Form.Item
+                      name="dataset_path"
+                      label="数据集路径"
+                      rules={[{ required: true, message: '请输入数据集路径' }]}
+                      extra="请输入自定义数据集的完整路径"
+                    >
+                      <Input
+                        placeholder="/path/to/your/dataset"
+                        prefix={<LinkOutlined />}
+                      />
+                    </Form.Item>
+                  )}
                 </>
               )}
 

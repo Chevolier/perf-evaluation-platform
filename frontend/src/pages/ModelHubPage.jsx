@@ -31,6 +31,7 @@ const { Title, Text, Paragraph } = Typography;
 const ModelHubPage = () => {
   const [initialLoading, setInitialLoading] = useState(true);
   const [statusLoading, setStatusLoading] = useState(false);
+  const [deploymentLoading, setDeploymentLoading] = useState(false);
   
   
   // Always start with empty model status to force fresh fetch
@@ -52,27 +53,20 @@ const ModelHubPage = () => {
   });
   
   const [deploymentConfig, setDeploymentConfig] = useState(() => {
-    try {
-      const saved = localStorage.getItem('modelHub_deploymentConfig');
-      return saved ? JSON.parse(saved) : {
-        method: 'SageMaker Endpoint',
-        framework: 'vllm',
-        serviceType: 'sagemaker_realtime',
-        machineType: 'g5.2xlarge',
-        tpSize: 1,
-        dpSize: 1
-      };
-    } catch (error) {
-      console.error('Failed to load deployment config from localStorage:', error);
-      return {
-        method: 'SageMaker Endpoint',
-        framework: 'vllm',
-        serviceType: 'sagemaker_realtime',
-        machineType: 'g5.2xlarge',
-        tpSize: 1,
-        dpSize: 1
-      };
-    }
+    // Clear the old localStorage data first to ensure fresh defaults
+    localStorage.removeItem('modelHub_deploymentConfig');
+
+    // Return the default config
+    return {
+      method: 'EC2',
+      framework: 'vllm',
+      serviceType: 'vllm_realtime',
+      machineType: 'g5.2xlarge',
+      tpSize: 1,
+      dpSize: 1,
+      gpuMemoryUtilization: 0.9,
+      maxModelLen: 2048
+    };
   });
   // Memoized category templates to avoid recreating icons
   const categoryTemplates = useMemo(() => ({
@@ -82,8 +76,8 @@ const ModelHubPage = () => {
       color: '#1890ff',
       models: []
     },
-    emd: {
-      title: '部署模型',
+    ec2: {
+      title: 'EC2 部署模型',
       icon: <ThunderboltOutlined />,
       color: '#52c41a',
       models: []
@@ -99,18 +93,43 @@ const ModelHubPage = () => {
       message.warning('请选择要部署的模型');
       return;
     }
-    
+
+    // Set deployment loading state
+    setDeploymentLoading(true);
+
+    // Immediately update status to show deployment in progress
+    const immediateStatus = {};
+    selectedModels.forEach(modelKey => {
+      immediateStatus[modelKey] = {
+        status: 'inprogress',
+        message: '开始部署...',
+        tag: null
+      };
+    });
+
+    // Update UI immediately to show deployment started
+    React.startTransition(() => {
+      setModelStatus(prev => ({
+        ...prev,
+        ...immediateStatus
+      }));
+    });
+
     try {
       const response = await fetch('/api/deploy-models', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           models: selectedModels,
           instance_type: deploymentConfig.machineType,
           engine_type: deploymentConfig.framework,
-          service_type: deploymentConfig.serviceType
+          service_type: deploymentConfig.serviceType,
+          tp_size: deploymentConfig.tpSize,
+          dp_size: deploymentConfig.dpSize,
+          gpu_memory_utilization: deploymentConfig.gpuMemoryUtilization,
+          max_model_len: deploymentConfig.maxModelLen
         })
       });
       
@@ -165,7 +184,7 @@ const ModelHubPage = () => {
         } else {
           message.error(`部署请求失败: ${responseData.message || '未知错误'}`);
         }
-        
+
       } else {
         const errorText = await response.text();
         console.error('Deployment failed:', response.status, errorText);
@@ -174,6 +193,9 @@ const ModelHubPage = () => {
     } catch (error) {
       console.error('批量部署模型失败:', error);
       message.error('部署请求失败');
+    } finally {
+      // Always clear deployment loading state
+      setDeploymentLoading(false);
     }
   }, [selectedModels, deploymentConfig]);
 
@@ -186,6 +208,38 @@ const ModelHubPage = () => {
         return prev.filter(key => key !== modelKey);
       }
     });
+  }, []);
+
+  // Handle clearing stale deployment statuses
+  const handleClearStaleStatus = useCallback(async () => {
+    try {
+      const response = await fetch('/api/clear-stale-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          message.success(`已清理 ${data.cleared_count} 个过期的部署状态`);
+
+          // Refresh model status after clearing
+          if (data.cleared_count > 0) {
+            // Force refresh by reloading the page
+            setTimeout(() => {
+              window.location.reload();
+            }, 1000);
+          }
+        } else {
+          message.error(`清理失败: ${data.error}`);
+        }
+      } else {
+        message.error('清理请求失败');
+      }
+    } catch (error) {
+      console.error('清理过期状态失败:', error);
+      message.error('清理过期状态失败');
+    }
   }, []);
 
   // Save only non-status data to localStorage (keep selected models and config)
@@ -260,8 +314,8 @@ const ModelHubPage = () => {
               alwaysAvailable: true
             })) : [];
             
-          const emdModels = data.models.emd ? 
-            Object.entries(data.models.emd).map(([key, info]) => ({
+          const ec2Models = data.models.ec2 ?
+            Object.entries(data.models.ec2).map(([key, info]) => ({
               key,
               name: info.name,
               description: info.description,
@@ -269,7 +323,7 @@ const ModelHubPage = () => {
             })) : [];
             
           // Extract deployable model keys for status check
-          deployableModelKeys = emdModels.map(m => m.key);
+          deployableModelKeys = ec2Models.map(m => m.key);
           console.log('🔍 DEBUG: deployableModelKeys extracted:', deployableModelKeys);
             
           // Batch UI updates to reduce re-renders
@@ -279,9 +333,9 @@ const ModelHubPage = () => {
                 ...categoryTemplates.bedrock,
                 models: bedrockModels
               },
-              emd: {
-                ...categoryTemplates.emd,
-                models: emdModels
+              ec2: {
+                ...categoryTemplates.ec2,
+                models: ec2Models
               }
             });
             
@@ -406,12 +460,12 @@ const ModelHubPage = () => {
         }
       }));
       
-      const response = await fetch('/api/delete-model', {
+      const response = await fetch('/api/stop-model', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           model_key: modelKey
         })
       });
@@ -772,9 +826,9 @@ const ModelHubPage = () => {
                       value={deploymentConfig.method}
                       onChange={(value) => setDeploymentConfig(prev => ({ ...prev, method: value }))}
                       options={[
-                        { value: 'SageMaker Endpoint', label: 'SageMaker Endpoint' },
-                        { value: 'SageMaker HyperPod', label: 'SageMaker HyperPod' },
-                        { value: 'EKS', label: 'EKS' },
+                        // { value: 'SageMaker Endpoint', label: 'SageMaker Endpoint' },
+                        // { value: 'SageMaker HyperPod', label: 'SageMaker HyperPod' },
+                        // { value: 'EKS', label: 'EKS' },
                         { value: 'EC2', label: 'EC2' }
                       ]}
                     />
@@ -788,8 +842,6 @@ const ModelHubPage = () => {
                       options={[
                         { value: 'vllm', label: 'vLLM' },
                         { value: 'sglang', label: 'SGLang' },
-                        { value: 'tgi', label: 'Text Generation Inference' },
-                        { value: 'transformers', label: 'Transformers' }
                       ]}
                     />
                   </Form.Item>
@@ -838,22 +890,58 @@ const ModelHubPage = () => {
                   </Form.Item>
                 </Col>
               </Row>
+              <Row gutter={16}>
+                <Col span={6}>
+                  <Form.Item label="GPU内存利用率">
+                    <InputNumber
+                      min={0.1}
+                      max={1.0}
+                      step={0.1}
+                      value={deploymentConfig.gpuMemoryUtilization}
+                      onChange={(value) => setDeploymentConfig(prev => ({ ...prev, gpuMemoryUtilization: value }))}
+                      formatter={value => `${(value * 100).toFixed(0)}%`}
+                      parser={value => value.replace('%', '') / 100}
+                      style={{ width: '100%' }}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={6}>
+                  <Form.Item label="最大模型长度">
+                    <InputNumber
+                      min={512}
+                      max={32768}
+                      step={512}
+                      value={deploymentConfig.maxModelLen}
+                      onChange={(value) => setDeploymentConfig(prev => ({ ...prev, maxModelLen: value }))}
+                      style={{ width: '100%' }}
+                    />
+                  </Form.Item>
+                </Col>
+              </Row>
               <Row>
                 <Col span={24}>
                   <Space>
-                    <Button 
-                      type="primary" 
+                    <Button
+                      type="primary"
                       onClick={handleBatchDeploy}
                       disabled={selectedModels.length === 0}
+                      loading={deploymentLoading}
                       size="large"
                     >
                       部署选中模型 ({selectedModels.length})
                     </Button>
-                    <Button 
+                    <Button
                       onClick={() => setSelectedModels([])}
                       disabled={selectedModels.length === 0}
                     >
                       清空选择
+                    </Button>
+                    <Button
+                      onClick={handleClearStaleStatus}
+                      type="default"
+                      icon={<ReloadOutlined />}
+                    >
+                      清理过期状态
                     </Button>
                   </Space>
                 </Col>

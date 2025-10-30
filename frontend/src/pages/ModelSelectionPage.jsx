@@ -8,14 +8,14 @@ const { Title, Paragraph, Text } = Typography;
 const ModelSelectionPage = ({ selectedModels, onModelChange, onNext }) => {
   const [deploymentStatus, setDeploymentStatus] = useState({});
 
-  // EMD local models that need deployment
-  const emdModels = ['qwen2-vl-7b', 'qwen2.5-vl-7b', 'qwen2.5-vl-32b', 'qwen2.5-0.5b', 'gemma-3-4b', 'ui-tars-1.5-7b'];
+  // EC2 local models that need deployment
+  const ec2Models = ['qwen2-vl-7b', 'qwen2.5-vl-7b', 'qwen2.5-vl-32b', 'qwen2.5-0.5b', 'gemma-3-4b', 'ui-tars-1.5-7b'];
 
   // Removed unused triggerEMDDeployment function
 
   const startDeploymentStatusStream = (models) => {
-    const eventSource = new EventSource(`/api/emd/deployment-stream?models=${models.join(',')}`);
-    
+    const eventSource = new EventSource(`/api/ec2/deployment-stream?models=${models.join(',')}`);
+
     eventSource.onmessage = (event) => {
       const data = JSON.parse(event.data);
       

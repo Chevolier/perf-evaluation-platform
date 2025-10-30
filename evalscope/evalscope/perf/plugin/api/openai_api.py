@@ -151,15 +151,19 @@ class OpenaiPlugin(DefaultApiPlugin):
 
     def __process_no_object(self, js, delta_contents):
         #  assume the response is a single choice
-        for choice in js['choices']:
-            if 'delta' in choice:
-                delta = choice['delta']
-                idx = choice['index']
-                if 'content' in delta:
-                    delta_content = delta['content']
-                    delta_contents.setdefault(idx, []).append(delta_content)
-            else:
-                delta_contents[choice['index']] = [choice['message']['content']]
+        try: 
+            for choice in js['choices']:
+                if 'delta' in choice:
+                    delta = choice['delta']
+                    idx = choice['index']
+                    if 'content' in delta:
+                        delta_content = delta['content']
+                        delta_contents.setdefault(idx, []).append(delta_content)
+                else:
+                    delta_contents[choice['index']] = [choice['message']['content']]
+        except Exception as e:
+            print(f"js in __process_no_object: {js}")
+            raise KeyError
 
     def __calculate_tokens_from_content(self, request, delta_contents):
         input_tokens = output_tokens = 0

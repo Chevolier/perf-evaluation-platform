@@ -55,12 +55,16 @@ A comprehensive platform for model (LLMs, VLMs, etc.) deployment and performance
 - AWS credentials configured
 - EMD CLI for model deployment
 
-<!-- ### Automated Setup
+Recommended instance g5.2xlarge.
+
+### Automated Setup (Recommended)
 
 ```bash
-# Run the setup script (recommended)
-./scripts/setup.sh
-``` -->
+# Run the setup script 
+./scripts/start.sh
+```
+
+This will automatically install backend and frontend packages and start the service.
 
 ### Manual Setup
 
@@ -74,6 +78,7 @@ pip install -r requirements.txt
 
 cd evalscope/
 pip install -e .
+cd ..
 
 # Configure AWS credentials
 aws configure
@@ -81,12 +86,6 @@ aws configure
 export AWS_ACCESS_KEY_ID=your_key
 export AWS_SECRET_ACCESS_KEY=your_secret
 export AWS_SESSION_TOKEN=your_token  # if using temporary credentials
-```
-
-Configure easy-model-deployer (emd) for 1-click model deployment using emd.
-
-```bash
-emd bootstrap
 ```
 
 **2. Frontend Environment**
@@ -116,6 +115,12 @@ npm -v # Should print "10.9.3".
 cd frontend
 npm install jszip
 npm install
+```
+
+Configure easy-model-deployer (emd) for 1-click model deployment using emd.
+
+```bash
+emd bootstrap
 ```
 
 **3. Start the Platform**
@@ -184,10 +189,10 @@ Then use the above api url and model name to do stress test.
 ## 📖 Platform Overview
 
 ### The frontend has 4 pages:
-1. 模型部署: Supports 1-click model deployment on Amazon SageMaker Endpoint, standalone deployment on Amazon SageMaker HyperPod, EKS, and EC2, supports selecting among different instances like g5.xlarge, g6e.xlarge, p4d.xlarge, etc., different inference frameworks like vllm, sglang, etc.
-2. 在线体验: Supports two ways to test the model: a. If you deployed the model using step 1, you'll find the model in the list, and you can choose the model to test. b. If you deployed a model manually, you can input your OpenAI-compatible api url and model name and test it directly.
+1. 模型部署: Supports 1-click model deployment on local EC2, supports selecting among different instances like g5.xlarge, g6e.xlarge, p4d.xlarge, etc., different inference frameworks like vllm, sglang.
+2. 在线体验: Supports three ways to test the model: a. If you deployed the model using step 1, you'll find the model in the list, and you can choose the model to test. b. If you deployed a model manually, you can input your OpenAI-compatible api url and model name and test it directly. c. If you deploy using SageMaker Endpoint, you can input your Endpoint name and model name.  
 3. 性能评测: Similarly, you can stress test on both the deployed model on this platform and manually-deployed model elsewhere by inputting your api url and model name. After stress test, you can click the button download to download the detailed evaluation results.
-4. 结果展示: You can select your previous results and compare them together. You can also click the download button to download a pdf file of the comparison results.
+4. 结果展示: You can select your previous results and compare them together. You can also click the download button to download a html file of the comparison results.
 
 
 ### Core Modules
@@ -218,11 +223,10 @@ Then use the above api url and model name to do stress test.
 
 ### Supported Models
 
-**EMD Local Models** (require deployment):
+**EC2 Local Models** :
 - Qwen2-VL-7B-Instruct
 - Qwen2.5-VL-32B-Instruct  
-- Gemma-3-4B-IT
-- UI-TARS-1.5-7B
+- Qwen-8B
 
 **AWS Bedrock Models** (API-based):
 - Claude 4
@@ -234,106 +238,6 @@ Then use the above api url and model name to do stress test.
 - **Videos**: MP4, AVI, MOV (automatic frame extraction)
 - **Text**: Full Unicode support with context handling
 
-## 🔧 API Endpoints
-
-### Model Management
-- `GET /api/model-list` - Get all available models
-- `GET /api/emd/current-models` - Get deployed EMD models
-- `POST /api/deploy-models` - Deploy EMD models
-- `POST /api/check-model-status` - Check deployment status
-- `GET /api/emd/status` - EMD environment status
-- `POST /api/emd/init` - Initialize EMD environment
-
-### Inference Operations  
-- `POST /api/multi-inference` - Multi-model batch inference (streaming)
-- `POST /api/inference` - Single model inference
-
-### Performance Testing
-- `POST /api/stress-test/start` - Start stress test
-- `GET /api/stress-test/status/<test_id>` - Check test status
-- `GET /api/stress-test/results/<test_id>` - Get test results
-
-### System Health
-- `GET /health` - Health check endpoint
-- `GET /` - API version and status
-
-## 🛠️ Development
-ToDos:
-1. Fix emd multimodal model tokenization error.
-2. Add custom data support.
-3. ...
-
-### Configuration
-
-The platform uses environment-based configuration:
-
-**Backend Configuration** (`backend/config/`):
-- Development, production, and test environments
-- Model registry with EMD and Bedrock definitions
-- Logging configuration with file and console handlers
-- Service endpoints and authentication settings
-
-**Frontend Configuration**:
-- Ant Design UI components
-- Proxy configuration for API calls
-- State management with localStorage persistence
-- Responsive design with collapsible navigation
-
-### Code Structure
-
-**Backend Architecture**:
-- **Service Layer**: Business logic isolation (`backend/services/`)
-- **API Layer**: RESTful endpoints with blueprints (`backend/api/routes/`)
-- **Core Layer**: Model registry and definitions (`backend/core/`)
-- **Configuration**: Environment-specific settings (`backend/config/`)
-
-**Frontend Architecture**:
-- **Page Components**: Main application views (`frontend/src/pages/`)
-- **Shared Components**: Reusable UI elements (`frontend/src/components/`)
-- **State Management**: LocalStorage for persistence
-- **Navigation**: Hash-based routing with browser history support
-
-## 🐛 Troubleshooting
-
-### Common Issues
-
-**1. EMD Model Deployment Fails**
-```bash
-# Check EMD status and logs
-emd status
-python tests/test_deploy_api.py
-
-# Verify AWS credentials
-aws sts get-caller-identity
-```
-
-**2. Frontend Build Issues**
-```bash
-# Clear cache and reinstall
-cd frontend
-rm -rf node_modules package-lock.json
-npm install
-npm start
-```
-
-**3. Backend Service Errors**
-```bash
-# Check system health
-curl http://localhost:5000/health
-
-# Test modular system
-python tests/test_new_system.py
-```
-
-**4. Performance Test Issues**
-```bash
-# Verify model deployment status
-curl -X POST http://localhost:5000/api/check-model-status \
-  -H "Content-Type: application/json" \
-  -d '{"models": ["qwen2-vl-7b"]}'
-```
-
-**Frontend Debugging**: Use browser developer tools
 
 ### System Requirements
 

@@ -112,7 +112,7 @@ const ModelSelectionModal = ({
       // 获取所有模型列表
       const allModels = [
         ...modelCategories.bedrock.models.map(m => m.key),
-        ...modelCategories.emd.models.map(m => m.key)
+        ...modelCategories.ec2.models.map(m => m.key)
       ];
       
       const response = await fetch('/api/check-model-status', {

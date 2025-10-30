@@ -3,6 +3,7 @@ from typing import Dict, Iterator, List
 from evalscope.perf.arguments import Arguments
 from evalscope.perf.plugin.datasets.base import DatasetPluginBase
 from evalscope.perf.plugin.registry import register_dataset
+import json
 
 
 @register_dataset('custom')
@@ -15,15 +16,16 @@ class CustomDatasetPlugin(DatasetPluginBase):
 
     def build_messages(self) -> Iterator[List[Dict]]:
         for item in self.dataset_line_by_line(self.query_parameters.dataset_path):
-            prompt = item.strip()
-            if len(prompt) > self.query_parameters.min_prompt_length and len(
-                prompt
-            ) < self.query_parameters.max_prompt_length:
-                if self.query_parameters.apply_chat_template:
-                    message = self.create_message(prompt)
-                    yield [message]
-                else:
-                    yield prompt
+            if item.strip():
+                prompt = json.loads(item.strip())['prompt']
+                if len(prompt) > self.query_parameters.min_prompt_length and len(
+                    prompt
+                ) < self.query_parameters.max_prompt_length:
+                    if self.query_parameters.apply_chat_template:
+                        message = self.create_message(prompt)
+                        yield [message]
+                    else:
+                        yield prompt
 
 
 if __name__ == '__main__':
@@ -31,9 +33,9 @@ if __name__ == '__main__':
     from evalscope.perf.main import run_perf_benchmark
 
     args = Arguments(
-        model='qwen2.5-7b-instruct',
-        url='https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
-        dataset_path='outputs/perf_data.txt',
+        model='/home/ec2-user/SageMaker/efs/Models/Qwen3-8B',
+        url='http://localhost:8000/v1/chat/completions',
+        dataset_path='/home/ec2-user/SageMaker/efs/Projects/text-to-sql/data/stress_test_v3.jsonl',
         api_key='EMPTY',
         dataset='custom',
     )
