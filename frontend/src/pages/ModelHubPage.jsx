@@ -7,22 +7,19 @@ import {
   Col,
   Space,
   Divider,
-  Spin,
   message,
   Button,
-  Radio,
   Select,
   Form,
   Input,
   InputNumber,
   Skeleton
 } from 'antd';
-import { 
-  RobotOutlined, 
-  CloudOutlined, 
+import {
+  RobotOutlined,
+  CloudOutlined,
   ThunderboltOutlined,
   CheckCircleOutlined,
-  DeleteOutlined,
   RocketOutlined,
   ReloadOutlined
 } from '@ant-design/icons';
@@ -31,7 +28,6 @@ const { Title, Text, Paragraph } = Typography;
 
 const ModelHubPage = () => {
   const [initialLoading, setInitialLoading] = useState(true);
-  const [statusLoading, setStatusLoading] = useState(false);
   const [deploymentLoading, setDeploymentLoading] = useState(false);
   
   
@@ -211,12 +207,6 @@ const ModelHubPage = () => {
     }
   }, [selectedModel, customModelName, deploymentConfig]);
 
-  // 处理模型选择 (memoized for performance)
-  const handleModelSelection = useCallback((modelKey) => {
-    setSelectedModel(modelKey);
-    // Clear custom model name when selecting from list to ensure mutual exclusivity
-    setCustomModelName('');
-  }, []);
 
   // 处理自定义模型名称输入
   const handleCustomModelNameChange = useCallback((e) => {
@@ -463,191 +453,19 @@ const ModelHubPage = () => {
     return () => clearInterval(pollInterval);
   }, [modelStatus]);
 
-  const handleCleanup = useCallback(async (modelKey) => {
-    try {
-      console.log(`Starting cleanup for model: ${modelKey}`);
-      
-      // Show loading state immediately
-      setModelStatus(prev => ({
-        ...prev,
-        [modelKey]: {
-          ...prev[modelKey],
-          status: 'deleting',
-          message: '正在停止模型...'
-        }
-      }));
-      
-      const response = await fetch('/api/stop-model', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          model_key: modelKey
-        })
-      });
-      
-      if (response.ok) {
-        const responseData = await response.json();
-        console.log('Deletion response:', responseData);
-        
-        if (responseData.success) {
-          message.success(`${modelKey} 停止成功`);
-          
-          // Update status to deleting (will be updated by status polling)
-          setModelStatus(prev => ({
-            ...prev,
-            [modelKey]: {
-              status: 'deleting',
-              message: '正在停止中...',
-              tag: responseData.tag
-            }
-          }));
-          
-        } else {
-          message.error(`停止失败: ${responseData.error || '未知错误'}`);
-          
-          // Revert status on failure
-          setModelStatus(prev => ({
-            ...prev,
-            [modelKey]: {
-              ...prev[modelKey],
-              message: `停止失败: ${responseData.error || '未知错误'}`
-            }
-          }));
-        }
-        
-      } else {
-        const errorText = await response.text();
-        console.error('Deletion failed:', response.status, errorText);
-        message.error(`停止请求失败 (${response.status}): ${errorText}`);
-        
-        // Revert status on failure
-        setModelStatus(prev => ({
-          ...prev,
-          [modelKey]: {
-            ...prev[modelKey],
-            message: `停止请求失败: ${errorText}`
-          }
-        }));
-      }
-    } catch (error) {
-      console.error('停止模型失败:', error);
-      message.error('停止请求失败');
-      
-      // Revert status on error
-      setModelStatus(prev => ({
-        ...prev,
-        [modelKey]: {
-          ...prev[modelKey],
-          message: '停止请求失败'
-        }
-      }));
-    }
-  }, []);
-
-
-
+  // Status tag for Bedrock models (always available)
   const getStatusTag = useCallback((model) => {
     if (model.alwaysAvailable) {
       return <Tag color="success" icon={<CheckCircleOutlined />}>可用</Tag>;
     }
-    
-    const status = modelStatus[model.key];
-    
-    // Add timeout for "检查中..." status - if no status after 15 seconds, show error
-    if (!status) {
-      if (initialLoading) {
-        return <Tag color="processing">检查中...</Tag>;
-      } else {
-        // If not initial loading and still no status, show error state
-        return <Tag color="error">检查失败</Tag>;
-      }
-    }
-
-    switch (status.status) {
-      case 'available':
-      case 'deployed':
-        return <Tag color="success" icon={<CheckCircleOutlined />}>已部署</Tag>;
-      case 'not_deployed':
-        return <Tag color="warning">未部署</Tag>;
-      case 'failed':
-        return <Tag color="warning">部署失败</Tag>;
-      case 'inprogress':
-        return <Tag color="processing">部署中</Tag>;
-      case 'deleting':
-        return <Tag color="processing">停止中</Tag>;
-      case 'init':
-        return <Tag color="processing">初始化</Tag>;
-      default:
-        return <Tag color="default">未知</Tag>;
-    }
-  }, [modelStatus, initialLoading]);
-
-  const getModelRadio = useCallback((model) => {
-    if (model.alwaysAvailable) return null;
-
-    const status = modelStatus[model.key];
-
-    // 如果已部署或正在部署中或正在删除中，不显示单选按钮
-    if (status?.status === 'available' || status?.status === 'deployed' ||
-        status?.status === 'inprogress' || status?.status === 'init' ||
-        status?.status === 'deleting') {
-      return null;
-    }
-
-    return (
-      <Radio
-        checked={selectedModel === model.key}
-        onChange={() => handleModelSelection(model.key)}
-        disabled={!!customModelName.trim()}
-      >
-        选择部署
-      </Radio>
-    );
-  }, [modelStatus, selectedModel, customModelName, handleModelSelection]);
-
-  const getCleanupButton = useCallback((model) => {
-    if (model.alwaysAvailable) return null;
-    
-    const status = modelStatus[model.key];
-    
-    // 只有在已部署状态下才显示清理按钮，删除过程中显示禁用状态
-    if (status?.status === 'available' || status?.status === 'deployed') {
-      return (
-        <Button 
-          danger
-          size="small"
-          icon={<DeleteOutlined />}
-          onClick={() => handleCleanup(model.key)}
-          style={{ width: '100%' }}
-        >
-          停止
-        </Button>
-      );
-    } else if (status?.status === 'deleting') {
-      return (
-        <Button 
-          danger
-          size="small"
-          icon={<DeleteOutlined />}
-          loading
-          disabled
-          style={{ width: '100%' }}
-        >
-          停止中
-        </Button>
-      );
-    }
-    
-    return null;
-  }, [modelStatus, handleCleanup]);
+    return <Tag color="default">未知</Tag>;
+  }, []);
 
   // Skeleton component for loading states
   const SkeletonCard = useMemo(() => (
     <Card
       size="small"
-      style={{ 
+      style={{
         marginBottom: 16,
         borderRadius: 8
       }}
@@ -660,18 +478,16 @@ const ModelHubPage = () => {
           </div>
           <Skeleton active paragraph={{ rows: 2, width: ['100%', '80%'] }} title={false} />
         </div>
-        <div style={{ marginLeft: 16, width: 80 }}>
-          <Skeleton.Button style={{ width: '100%', height: 32 }} active />
-        </div>
       </div>
     </Card>
   ), []);
 
+  // Render model card (for Bedrock models only)
   const renderModelCard = useCallback((model) => (
     <Card
       key={model.key}
       size="small"
-      style={{ 
+      style={{
         marginBottom: 16,
         borderRadius: 8
       }}
@@ -683,21 +499,16 @@ const ModelHubPage = () => {
             <Text strong style={{ fontSize: '16px' }}>{model.name}</Text>
             {getStatusTag(model)}
           </div>
-          <Paragraph 
+          <Paragraph
             style={{ margin: '0 0 8px 0', color: '#666', fontSize: '14px' }}
           >
             {model.description}
           </Paragraph>
         </div>
-        <div style={{ marginLeft: 2 }}>
-          <Space direction="vertical" size="small">
-            {getModelRadio(model)}
-            {!model.alwaysAvailable && getCleanupButton(model)}
-          </Space>
-        </div>
       </div>
     </Card>
-  ), [getStatusTag, getModelRadio, getCleanupButton]);
+  ), [getStatusTag]);
+
 
   return (
     <div style={{ padding: '24px', background: '#f5f5f5', minHeight: '100vh' }}>
@@ -732,88 +543,60 @@ const ModelHubPage = () => {
         </div>
       </div>
 
-      {/* Show UI structure immediately, even during initial loading */}
-      {Object.entries(modelCategories).map(([categoryKey, category]) => (
-        <div key={categoryKey} style={{ marginBottom: 32 }}>
-          <div style={{ 
-            display: 'flex', 
-            alignItems: 'center', 
-            marginBottom: 16
-          }}>
-            <Space>
-              {category.icon}
-              <Title level={3} style={{ margin: 0, color: category.color }}>
-                {category.title}
-              </Title>
-              {statusLoading && categoryKey === 'emd' && (
-                <Spin size="small" />
-              )}
-            </Space>
-          </div>
-          
-          <Row gutter={[16, 16]}>
-            {initialLoading ? (
-              // Show skeleton cards during initial loading
-              Array.from({ length: 6 }, (_, index) => (
-                <Col key={`skeleton-${categoryKey}-${index}`} xs={24} sm={12} lg={8} xl={6}>
-                  {SkeletonCard}
-                </Col>
-              ))
-            ) : (
-              // Show actual model cards once data is loaded
-              category.models.map(model => (
-                <Col key={model.key} xs={24} sm={12} lg={8} xl={6}>
-                  {renderModelCard(model)}
-                </Col>
-              ))
-            )}
-          </Row>
-          
-          {categoryKey !== 'emd' && <Divider />}
+      {/* Bedrock 模型卡片 */}
+      <div style={{ marginBottom: 32 }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          marginBottom: 16
+        }}>
+          <Space>
+            <CloudOutlined />
+            <Title level={3} style={{ margin: 0, color: '#1890ff' }}>
+              Bedrock 模型
+            </Title>
+          </Space>
         </div>
-      ))}
-      
-      {/* Show skeleton structure if no categories loaded yet */}
-      {initialLoading && Object.keys(modelCategories).length === 0 && (
-        <>
-          <div style={{ marginBottom: 32 }}>
-            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
-              <Space>
-                <CloudOutlined />
-                <Title level={3} style={{ margin: 0, color: '#1890ff' }}>
-                  Bedrock 模型
-                </Title>
-              </Space>
-            </div>
-            <Row gutter={[16, 16]}>
-              {Array.from({ length: 4 }, (_, index) => (
-                <Col key={`bedrock-skeleton-${index}`} xs={24} sm={12} lg={8} xl={6}>
-                  {SkeletonCard}
-                </Col>
-              ))}
-            </Row>
-            <Divider />
-          </div>
-          
-          <div style={{ marginBottom: 32 }}>
-            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
-              <Space>
-                <ThunderboltOutlined />
-                <Title level={3} style={{ margin: 0, color: '#52c41a' }}>
-                  部署模型
-                </Title>
-              </Space>
-            </div>
-            <Row gutter={[16, 16]}>
-              {Array.from({ length: 6 }, (_, index) => (
-                <Col key={`emd-skeleton-${index}`} xs={24} sm={12} lg={8} xl={6}>
-                  {SkeletonCard}
-                </Col>
-              ))}
-            </Row>
-          </div>
-        </>
-      )}
+
+        <Row gutter={[16, 16]}>
+          {initialLoading ? (
+            // Show skeleton cards during initial loading
+            Array.from({ length: 4 }, (_, index) => (
+              <Col key={`skeleton-bedrock-${index}`} xs={24} sm={12} lg={8} xl={6}>
+                {SkeletonCard}
+              </Col>
+            ))
+          ) : (
+            // Show actual Bedrock model cards once data is loaded
+            modelCategories.bedrock?.models?.map(model => (
+              <Col key={model.key} xs={24} sm={12} lg={8} xl={6}>
+                {renderModelCard(model)}
+              </Col>
+            ))
+          )}
+        </Row>
+        <Divider />
+      </div>
+
+      {/* EC2 部署模型标题 */}
+      <div style={{ marginBottom: 32 }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          marginBottom: 16
+        }}>
+          <Space>
+            <ThunderboltOutlined />
+            <Title level={3} style={{ margin: 0, color: '#52c41a' }}>
+              EC2 部署模型
+            </Title>
+          </Space>
+        </div>
+        <Text type="secondary">
+          EC2 模型可以在下方部署配置中选择并部署
+        </Text>
+      </div>
+
       {/* 部署配置面板 - 只有在有可部署模型时显示 */}
       {useMemo(() => {
         const hasDeployableModels = Object.values(modelCategories).some(category =>
@@ -838,7 +621,30 @@ const ModelHubPage = () => {
           >
             <Form layout="vertical">
               <Row gutter={16}>
-                <Col span={24}>
+                <Col span={12}>
+                  <Form.Item label="EC2 预设模型选择">
+                    <Select
+                      placeholder="选择 EC2 预设模型"
+                      value={selectedModel}
+                      onChange={(value) => {
+                        setSelectedModel(value);
+                        setCustomModelName('');
+                      }}
+                      disabled={!!customModelName.trim()}
+                      allowClear
+                      onClear={() => setSelectedModel(null)}
+                      style={{ width: '100%' }}
+                      options={
+                        // Only EC2 models in dropdown
+                        Object.values(modelCategories).find(cat => cat.title === 'EC2 部署模型')?.models.map(model => ({
+                          label: `${model.name} (${model.key})`,
+                          value: model.key,
+                        })) || []
+                      }
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
                   <Form.Item label="自定义模型名称 (Hugging Face Hub)">
                     <Input
                       placeholder="输入 Hugging Face 模型名称，例如: Qwen/Qwen3-8B"
