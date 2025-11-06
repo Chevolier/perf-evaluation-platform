@@ -1,28 +1,28 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { 
-  Card, 
-  Typography, 
-  Tag, 
-  Row, 
-  Col, 
-  Space, 
-  Divider, 
-  Spin, 
-  message, 
+import {
+  Card,
+  Typography,
+  Tag,
+  Row,
+  Col,
+  Space,
+  Divider,
+  message,
   Button,
-  Checkbox,
   Select,
   Form,
+  Input,
   InputNumber,
-  Skeleton 
+  Skeleton,
+  List,
+  Alert
 } from 'antd';
-import { 
-  RobotOutlined, 
-  CloudOutlined, 
+import {
+  RobotOutlined,
+  CloudOutlined,
   ThunderboltOutlined,
   CheckCircleOutlined,
   DeleteOutlined,
-  RocketOutlined,
   ReloadOutlined
 } from '@ant-design/icons';
 
@@ -30,7 +30,6 @@ const { Title, Text, Paragraph } = Typography;
 
 const ModelHubPage = () => {
   const [initialLoading, setInitialLoading] = useState(true);
-  const [statusLoading, setStatusLoading] = useState(false);
   const [deploymentLoading, setDeploymentLoading] = useState(false);
   
   
@@ -42,13 +41,23 @@ const ModelHubPage = () => {
     return {};
   });
   
-  const [selectedModels, setSelectedModels] = useState(() => {
+  const [selectedModel, setSelectedModel] = useState(() => {
     try {
-      const saved = localStorage.getItem('modelHub_selectedModels');
-      return saved ? JSON.parse(saved) : [];
+      const saved = localStorage.getItem('modelHub_selectedModel');
+      return saved ? JSON.parse(saved) : null;
     } catch (error) {
-      console.error('Failed to load selected models from localStorage:', error);
-      return [];
+      console.error('Failed to load selected model from localStorage:', error);
+      return null;
+    }
+  });
+
+  const [customModelName, setCustomModelName] = useState(() => {
+    try {
+      const saved = localStorage.getItem('modelHub_customModelName');
+      return saved ? JSON.parse(saved) : '';
+    } catch (error) {
+      console.error('Failed to load custom model name from localStorage:', error);
+      return '';
     }
   });
   
@@ -65,7 +74,7 @@ const ModelHubPage = () => {
       tpSize: 1,
       dpSize: 1,
       gpuMemoryUtilization: 0.9,
-      maxModelLen: 2048
+      maxModelLen: 4096
     };
   });
   // Memoized category templates to avoid recreating icons
@@ -87,10 +96,12 @@ const ModelHubPage = () => {
   const [modelCategories, setModelCategories] = useState(categoryTemplates);
   
 
-  // 批量部署模型 (memoized for performance)
-  const handleBatchDeploy = useCallback(async () => {
-    if (selectedModels.length === 0) {
-      message.warning('请选择要部署的模型');
+  // 部署单个模型 (memoized for performance)
+  const handleModelDeploy = useCallback(async () => {
+    const modelTodeploy = customModelName.trim() || selectedModel;
+
+    if (!modelTodeploy) {
+      message.warning('请选择要部署的模型或输入自定义模型名称');
       return;
     }
 
@@ -98,14 +109,13 @@ const ModelHubPage = () => {
     setDeploymentLoading(true);
 
     // Immediately update status to show deployment in progress
-    const immediateStatus = {};
-    selectedModels.forEach(modelKey => {
-      immediateStatus[modelKey] = {
+    const immediateStatus = {
+      [modelTodeploy]: {
         status: 'inprogress',
         message: '开始部署...',
         tag: null
-      };
-    });
+      }
+    };
 
     // Update UI immediately to show deployment started
     React.startTransition(() => {
@@ -122,7 +132,7 @@ const ModelHubPage = () => {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          models: selectedModels,
+          models: [modelTodeploy],
           instance_type: deploymentConfig.machineType,
           engine_type: deploymentConfig.framework,
           service_type: deploymentConfig.serviceType,
@@ -138,48 +148,48 @@ const ModelHubPage = () => {
         console.log('Deployment response:', responseData);
         
         if (responseData.status === 'success') {
-          // Check individual model deployment results
+          // Check model deployment result
           const results = responseData.results || {};
-          let successCount = 0;
-          let failedCount = 0;
-          
-          const newStatus = {};
-          selectedModels.forEach(modelKey => {
-            const modelResult = results[modelKey];
-            if (modelResult && modelResult.success) {
-              newStatus[modelKey] = { 
-                status: 'inprogress', 
+          const modelResult = results[modelTodeploy];
+
+          if (modelResult && modelResult.success) {
+            const newStatus = {
+              [modelTodeploy]: {
+                status: 'inprogress',
                 message: '部署中',
                 tag: modelResult.tag
-              };
-              successCount++;
-            } else {
-              newStatus[modelKey] = { 
-                status: 'failed', 
-                message: modelResult?.error || '部署失败'
-              };
-              failedCount++;
-            }
-          });
-          
-          // Batch state updates to reduce re-renders
-          React.startTransition(() => {
-            setModelStatus(prev => ({
-              ...prev,
-              ...newStatus
-            }));
-            
-            // 清空选择
-            setSelectedModels([]);
-          });
-          
-          // Show appropriate message
-          if (failedCount === 0) {
-            message.success(`已开始部署 ${successCount} 个模型`);
-          } else if (successCount === 0) {
-            message.error(`${failedCount} 个模型部署失败`);
+              }
+            };
+
+            // Batch state updates to reduce re-renders
+            React.startTransition(() => {
+              setModelStatus(prev => ({
+                ...prev,
+                ...newStatus
+              }));
+
+              // 清空选择
+              setSelectedModel(null);
+              setCustomModelName('');
+            });
+
+            message.success(`模型 ${modelTodeploy} 已开始部署`);
           } else {
-            message.warning(`${successCount} 个模型开始部署，${failedCount} 个模型部署失败`);
+            const failureStatus = {
+              [modelTodeploy]: {
+                status: 'failed',
+                message: modelResult?.error || '部署失败'
+              }
+            };
+
+            React.startTransition(() => {
+              setModelStatus(prev => ({
+                ...prev,
+                ...failureStatus
+              }));
+            });
+
+            message.error(`模型 ${modelTodeploy} 部署失败: ${modelResult?.error || '未知错误'}`);
           }
         } else {
           message.error(`部署请求失败: ${responseData.message || '未知错误'}`);
@@ -197,17 +207,17 @@ const ModelHubPage = () => {
       // Always clear deployment loading state
       setDeploymentLoading(false);
     }
-  }, [selectedModels, deploymentConfig]);
+  }, [selectedModel, customModelName, deploymentConfig]);
 
-  // 处理模型选择 (memoized for performance)
-  const handleModelSelection = useCallback((modelKey, checked) => {
-    setSelectedModels(prev => {
-      if (checked) {
-        return [...prev, modelKey];
-      } else {
-        return prev.filter(key => key !== modelKey);
-      }
-    });
+
+  // 处理自定义模型名称输入
+  const handleCustomModelNameChange = useCallback((e) => {
+    const value = e.target.value;
+    setCustomModelName(value);
+    // Clear selected model when typing custom name to ensure mutual exclusivity
+    if (value.trim()) {
+      setSelectedModel(null);
+    }
   }, []);
 
   // Handle clearing stale deployment statuses
@@ -246,9 +256,10 @@ const ModelHubPage = () => {
   useEffect(() => {
     const timeoutId = setTimeout(() => {
       try {
-        // Only save selected models and deployment config, not status (always fetch fresh)
+        // Only save selected model, custom model name and deployment config, not status (always fetch fresh)
         const batch = {
-          modelHub_selectedModels: JSON.stringify(selectedModels),
+          modelHub_selectedModel: JSON.stringify(selectedModel),
+          modelHub_customModelName: JSON.stringify(customModelName),
           modelHub_deploymentConfig: JSON.stringify(deploymentConfig)
         };
         
@@ -274,7 +285,7 @@ const ModelHubPage = () => {
     }, 300); // Debounce localStorage writes
     
     return () => clearTimeout(timeoutId);
-  }, [selectedModels, deploymentConfig]);
+  }, [selectedModel, customModelName, deploymentConfig]);
 
   // Always fetch fresh data - no caching to ensure correct status
   const fetchModelData = useCallback(async () => {
@@ -294,8 +305,7 @@ const ModelHubPage = () => {
       // First fetch model list to get the available models
       console.log('🔍 DEBUG: Fetching model list first...');
       const modelListResponse = await fetchWithTimeout('/api/model-list', {}, 15000);
-      
-      let modelListData = null;
+
       let deployableModelKeys = [];
       
       // Process model list response
@@ -303,7 +313,6 @@ const ModelHubPage = () => {
         const data = await modelListResponse.json();
         
         if (data.status === 'success' && data.models) {
-          modelListData = data.models;
           
           // Process models with memoized transformation
           const bedrockModels = data.models.bedrock ? 
@@ -446,190 +455,19 @@ const ModelHubPage = () => {
     return () => clearInterval(pollInterval);
   }, [modelStatus]);
 
-  const handleCleanup = useCallback(async (modelKey) => {
-    try {
-      console.log(`Starting cleanup for model: ${modelKey}`);
-      
-      // Show loading state immediately
-      setModelStatus(prev => ({
-        ...prev,
-        [modelKey]: {
-          ...prev[modelKey],
-          status: 'deleting',
-          message: '正在停止模型...'
-        }
-      }));
-      
-      const response = await fetch('/api/stop-model', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          model_key: modelKey
-        })
-      });
-      
-      if (response.ok) {
-        const responseData = await response.json();
-        console.log('Deletion response:', responseData);
-        
-        if (responseData.success) {
-          message.success(`${modelKey} 停止成功`);
-          
-          // Update status to deleting (will be updated by status polling)
-          setModelStatus(prev => ({
-            ...prev,
-            [modelKey]: {
-              status: 'deleting',
-              message: '正在停止中...',
-              tag: responseData.tag
-            }
-          }));
-          
-        } else {
-          message.error(`停止失败: ${responseData.error || '未知错误'}`);
-          
-          // Revert status on failure
-          setModelStatus(prev => ({
-            ...prev,
-            [modelKey]: {
-              ...prev[modelKey],
-              message: `停止失败: ${responseData.error || '未知错误'}`
-            }
-          }));
-        }
-        
-      } else {
-        const errorText = await response.text();
-        console.error('Deletion failed:', response.status, errorText);
-        message.error(`停止请求失败 (${response.status}): ${errorText}`);
-        
-        // Revert status on failure
-        setModelStatus(prev => ({
-          ...prev,
-          [modelKey]: {
-            ...prev[modelKey],
-            message: `停止请求失败: ${errorText}`
-          }
-        }));
-      }
-    } catch (error) {
-      console.error('停止模型失败:', error);
-      message.error('停止请求失败');
-      
-      // Revert status on error
-      setModelStatus(prev => ({
-        ...prev,
-        [modelKey]: {
-          ...prev[modelKey],
-          message: '停止请求失败'
-        }
-      }));
-    }
-  }, []);
-
-
-
+  // Status tag for Bedrock models (always available)
   const getStatusTag = useCallback((model) => {
     if (model.alwaysAvailable) {
       return <Tag color="success" icon={<CheckCircleOutlined />}>可用</Tag>;
     }
-    
-    const status = modelStatus[model.key];
-    
-    // Add timeout for "检查中..." status - if no status after 15 seconds, show error
-    if (!status) {
-      if (initialLoading) {
-        return <Tag color="processing">检查中...</Tag>;
-      } else {
-        // If not initial loading and still no status, show error state
-        return <Tag color="error">检查失败</Tag>;
-      }
-    }
-
-    switch (status.status) {
-      case 'available':
-      case 'deployed':
-        return <Tag color="success" icon={<CheckCircleOutlined />}>已部署</Tag>;
-      case 'not_deployed':
-        return <Tag color="warning">未部署</Tag>;
-      case 'failed':
-        return <Tag color="warning">部署失败</Tag>;
-      case 'inprogress':
-        return <Tag color="processing">部署中</Tag>;
-      case 'deleting':
-        return <Tag color="processing">停止中</Tag>;
-      case 'init':
-        return <Tag color="processing">初始化</Tag>;
-      default:
-        return <Tag color="default">未知</Tag>;
-    }
-  }, [modelStatus, initialLoading]);
-
-  const getModelCheckbox = useCallback((model) => {
-    if (model.alwaysAvailable) return null;
-    
-    const status = modelStatus[model.key];
-    
-    // 如果已部署或正在部署中或正在删除中，不显示复选框
-    if (status?.status === 'available' || status?.status === 'deployed' || 
-        status?.status === 'inprogress' || status?.status === 'init' || 
-        status?.status === 'deleting') {
-      return null;
-    }
-    
-    return (
-      <Checkbox
-        checked={selectedModels.includes(model.key)}
-        onChange={(e) => handleModelSelection(model.key, e.target.checked)}
-      >
-        选择部署
-      </Checkbox>
-    );
-  }, [modelStatus, selectedModels, handleModelSelection]);
-
-  const getCleanupButton = useCallback((model) => {
-    if (model.alwaysAvailable) return null;
-    
-    const status = modelStatus[model.key];
-    
-    // 只有在已部署状态下才显示清理按钮，删除过程中显示禁用状态
-    if (status?.status === 'available' || status?.status === 'deployed') {
-      return (
-        <Button 
-          danger
-          size="small"
-          icon={<DeleteOutlined />}
-          onClick={() => handleCleanup(model.key)}
-          style={{ width: '100%' }}
-        >
-          停止
-        </Button>
-      );
-    } else if (status?.status === 'deleting') {
-      return (
-        <Button 
-          danger
-          size="small"
-          icon={<DeleteOutlined />}
-          loading
-          disabled
-          style={{ width: '100%' }}
-        >
-          停止中
-        </Button>
-      );
-    }
-    
-    return null;
-  }, [modelStatus, handleCleanup]);
+    return <Tag color="default">未知</Tag>;
+  }, []);
 
   // Skeleton component for loading states
   const SkeletonCard = useMemo(() => (
     <Card
       size="small"
-      style={{ 
+      style={{
         marginBottom: 16,
         borderRadius: 8
       }}
@@ -642,18 +480,16 @@ const ModelHubPage = () => {
           </div>
           <Skeleton active paragraph={{ rows: 2, width: ['100%', '80%'] }} title={false} />
         </div>
-        <div style={{ marginLeft: 16, width: 80 }}>
-          <Skeleton.Button style={{ width: '100%', height: 32 }} active />
-        </div>
       </div>
     </Card>
   ), []);
 
+  // Render model card (for Bedrock models only)
   const renderModelCard = useCallback((model) => (
     <Card
       key={model.key}
       size="small"
-      style={{ 
+      style={{
         marginBottom: 16,
         borderRadius: 8
       }}
@@ -665,21 +501,98 @@ const ModelHubPage = () => {
             <Text strong style={{ fontSize: '16px' }}>{model.name}</Text>
             {getStatusTag(model)}
           </div>
-          <Paragraph 
+          <Paragraph
             style={{ margin: '0 0 8px 0', color: '#666', fontSize: '14px' }}
           >
             {model.description}
           </Paragraph>
         </div>
-        <div style={{ marginLeft: 2 }}>
-          <Space direction="vertical" size="small">
-            {getModelCheckbox(model)}
-            {!model.alwaysAvailable && getCleanupButton(model)}
-          </Space>
-        </div>
       </div>
     </Card>
-  ), [getStatusTag, getModelCheckbox, getCleanupButton]);
+  ), [getStatusTag]);
+
+  const handleCleanup = useCallback(async (modelKey) => {
+    try {
+      console.log(`Starting cleanup for model: ${modelKey}`);
+
+      // Show loading state immediately
+      setModelStatus(prev => ({
+        ...prev,
+        [modelKey]: {
+          ...prev[modelKey],
+          status: 'deleting',
+          message: '正在停止模型...'
+        }
+      }));
+
+      const response = await fetch('/api/stop-model', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model_key: modelKey
+        })
+      });
+
+      if (response.ok) {
+        const responseData = await response.json();
+        console.log('Deletion response:', responseData);
+
+        if (responseData.success) {
+          message.success(`${modelKey} 停止成功`);
+
+          // Update status to not_deployed
+          setModelStatus(prev => ({
+            ...prev,
+            [modelKey]: {
+              status: 'not_deployed',
+              message: '模型已停止',
+              tag: null
+            }
+          }));
+
+        } else {
+          message.error(`停止失败: ${responseData.error || '未知错误'}`);
+
+          // Revert status on failure
+          setModelStatus(prev => ({
+            ...prev,
+            [modelKey]: {
+              ...prev[modelKey],
+              message: `停止失败: ${responseData.error || '未知错误'}`
+            }
+          }));
+        }
+
+      } else {
+        const errorText = await response.text();
+        console.error('Deletion failed:', response.status, errorText);
+        message.error(`停止请求失败 (${response.status}): ${errorText}`);
+
+        // Revert status on failure
+        setModelStatus(prev => ({
+          ...prev,
+          [modelKey]: {
+            ...prev[modelKey],
+            message: `停止请求失败: ${errorText}`
+          }
+        }));
+      }
+    } catch (error) {
+      console.error('停止模型失败:', error);
+      message.error('停止请求失败');
+
+      // Revert status on error
+      setModelStatus(prev => ({
+        ...prev,
+        [modelKey]: {
+          ...prev[modelKey],
+          message: '停止请求失败'
+        }
+      }));
+    }
+  }, []);
 
   return (
     <div style={{ padding: '24px', background: '#f5f5f5', minHeight: '100vh' }}>
@@ -714,94 +627,63 @@ const ModelHubPage = () => {
         </div>
       </div>
 
-      {/* Show UI structure immediately, even during initial loading */}
-      {Object.entries(modelCategories).map(([categoryKey, category]) => (
-        <div key={categoryKey} style={{ marginBottom: 32 }}>
-          <div style={{ 
-            display: 'flex', 
-            alignItems: 'center', 
-            marginBottom: 16
-          }}>
-            <Space>
-              {category.icon}
-              <Title level={3} style={{ margin: 0, color: category.color }}>
-                {category.title}
-              </Title>
-              {statusLoading && categoryKey === 'emd' && (
-                <Spin size="small" />
-              )}
-            </Space>
-          </div>
-          
-          <Row gutter={[16, 16]}>
-            {initialLoading ? (
-              // Show skeleton cards during initial loading
-              Array.from({ length: 6 }, (_, index) => (
-                <Col key={`skeleton-${categoryKey}-${index}`} xs={24} sm={12} lg={8} xl={6}>
-                  {SkeletonCard}
-                </Col>
-              ))
-            ) : (
-              // Show actual model cards once data is loaded
-              category.models.map(model => (
-                <Col key={model.key} xs={24} sm={12} lg={8} xl={6}>
-                  {renderModelCard(model)}
-                </Col>
-              ))
-            )}
-          </Row>
-          
-          {categoryKey !== 'emd' && <Divider />}
+      {/* Bedrock 模型卡片 */}
+      <div style={{ marginBottom: 32 }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          marginBottom: 16
+        }}>
+          <Space>
+            <CloudOutlined />
+            <Title level={3} style={{ margin: 0, color: '#1890ff' }}>
+              Bedrock 模型
+            </Title>
+          </Space>
         </div>
-      ))}
-      
-      {/* Show skeleton structure if no categories loaded yet */}
-      {initialLoading && Object.keys(modelCategories).length === 0 && (
-        <>
-          <div style={{ marginBottom: 32 }}>
-            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
-              <Space>
-                <CloudOutlined />
-                <Title level={3} style={{ margin: 0, color: '#1890ff' }}>
-                  Bedrock 模型
-                </Title>
-              </Space>
-            </div>
-            <Row gutter={[16, 16]}>
-              {Array.from({ length: 4 }, (_, index) => (
-                <Col key={`bedrock-skeleton-${index}`} xs={24} sm={12} lg={8} xl={6}>
-                  {SkeletonCard}
-                </Col>
-              ))}
-            </Row>
-            <Divider />
-          </div>
-          
-          <div style={{ marginBottom: 32 }}>
-            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
-              <Space>
-                <ThunderboltOutlined />
-                <Title level={3} style={{ margin: 0, color: '#52c41a' }}>
-                  部署模型
-                </Title>
-              </Space>
-            </div>
-            <Row gutter={[16, 16]}>
-              {Array.from({ length: 6 }, (_, index) => (
-                <Col key={`emd-skeleton-${index}`} xs={24} sm={12} lg={8} xl={6}>
-                  {SkeletonCard}
-                </Col>
-              ))}
-            </Row>
-          </div>
-        </>
-      )}
+
+        <Row gutter={[16, 16]}>
+          {initialLoading ? (
+            // Show skeleton cards during initial loading
+            Array.from({ length: 4 }, (_, index) => (
+              <Col key={`skeleton-bedrock-${index}`} xs={24} sm={12} lg={8} xl={6}>
+                {SkeletonCard}
+              </Col>
+            ))
+          ) : (
+            // Show actual Bedrock model cards once data is loaded
+            modelCategories.bedrock?.models?.map(model => (
+              <Col key={model.key} xs={24} sm={12} lg={8} xl={6}>
+                {renderModelCard(model)}
+              </Col>
+            ))
+          )}
+        </Row>
+        <Divider />
+      </div>
+
+      {/* EC2 部署模型标题 */}
+      <div style={{ marginBottom: 32 }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          marginBottom: 16
+        }}>
+          <Space>
+            <ThunderboltOutlined />
+            <Title level={3} style={{ margin: 0, color: '#52c41a' }}>
+              EC2 部署模型
+            </Title>
+          </Space>
+        </div>
+      </div>
+
       {/* 部署配置面板 - 只有在有可部署模型时显示 */}
       {useMemo(() => {
-        const hasDeployableModels = Object.values(modelCategories).some(category => 
-          category.models.some(model => 
-            !model.alwaysAvailable && 
-            (!modelStatus[model.key] || 
+        const hasDeployableModels = Object.values(modelCategories).some(category =>
+          category.models.some(model =>
+            !model.alwaysAvailable &&
+            (!modelStatus[model.key] ||
              ['not_deployed', 'failed'].includes(modelStatus[model.key]?.status))
           )
         );
@@ -809,16 +691,105 @@ const ModelHubPage = () => {
         if (!hasDeployableModels) return null;
 
         return (
-          <Card 
-            title={
-              <Space>
-                <RocketOutlined />
-                <span>部署配置</span>
-              </Space>
-            }
+          <Card
             style={{ marginTop: 24 }}
           >
             <Form layout="vertical">
+              {/* Model Selection Header */}
+              <div style={{
+                marginBottom: 20,
+                textAlign: 'center',
+                padding: '10px 16px',
+                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                borderRadius: '8px',
+                color: 'white'
+              }}>
+                <Text style={{ color: 'white', fontSize: '15px', fontWeight: '500' }}>
+                  选择部署模型 - 从预设列表中选择或手动输入 Hugging Face 模型名称
+                </Text>
+              </div>
+
+              {/* Selection Options */}
+              <Row gutter={16}>
+                <Col span={12}>
+                  <Form.Item label="📋 预设模型">
+                    <Select
+                      placeholder="选择 EC2 预设模型..."
+                      value={selectedModel}
+                      onChange={(value) => {
+                        setSelectedModel(value);
+                        setCustomModelName('');
+                      }}
+                      disabled={!!customModelName.trim()}
+                      allowClear
+                      onClear={() => setSelectedModel(null)}
+                      style={{ width: '100%' }}
+                      options={
+                        // Only EC2 models in dropdown, ordered as specified
+                        (() => {
+                          const ec2Models = Object.values(modelCategories).find(cat => cat.title === 'EC2 部署模型')?.models || [];
+
+                          // Define the exact order as requested
+                          const orderedKeys = [
+                            'qwen3-0.6b',
+                            'qwen3-8b',
+                            'qwen3-32b',
+                            'qwen3-vl-8b-thinking',
+                            'qwen3-vl-30b-a3b-instruct',
+                            'qwen2.5-7b-instruct',
+                            'qwen2.5-vl-7b-instruct',
+                            'llama-3.1-8b-instruct',
+                            'deepseek-r1-distill-qwen-7b'
+                          ];
+
+                          // Create ordered array based on specified order
+                          const orderedModels = [];
+                          orderedKeys.forEach(key => {
+                            const model = ec2Models.find(m => m.key === key);
+                            if (model) {
+                              orderedModels.push(model);
+                            }
+                          });
+
+                          // Add any remaining models not in the ordered list (fallback)
+                          ec2Models.forEach(model => {
+                            if (!orderedKeys.includes(model.key)) {
+                              orderedModels.push(model);
+                            }
+                          });
+
+                          return orderedModels.map(model => ({
+                            label: `${model.name}`,
+                            value: model.key,
+                          }));
+                        })()
+                      }
+                    />
+                    {selectedModel && (
+                      <div style={{ marginTop: 4, fontSize: '12px', color: '#52c41a', fontWeight: '500' }}>
+                        ✓ 已选择: {selectedModel}
+                      </div>
+                    )}
+                  </Form.Item>
+                </Col>
+
+                <Col span={12}>
+                  <Form.Item label="🤗 自定义模型">
+                    <Input
+                      placeholder="例如: Qwen/Qwen3-8B"
+                      value={customModelName}
+                      onChange={handleCustomModelNameChange}
+                      disabled={!!selectedModel}
+                      style={{ width: '100%' }}
+                    />
+                    {customModelName.trim() && (
+                      <div style={{ marginTop: 4, fontSize: '12px', color: '#52c41a', fontWeight: '500' }}>
+                        ✓ 将部署: {customModelName.trim()}
+                      </div>
+                    )}
+                  </Form.Item>
+                </Col>
+              </Row>
               <Row gutter={16}>
                 <Col span={6}>
                   <Form.Item label="部署方式">
@@ -923,16 +894,19 @@ const ModelHubPage = () => {
                   <Space>
                     <Button
                       type="primary"
-                      onClick={handleBatchDeploy}
-                      disabled={selectedModels.length === 0}
+                      onClick={handleModelDeploy}
+                      disabled={!selectedModel && !customModelName.trim()}
                       loading={deploymentLoading}
                       size="large"
                     >
-                      部署选中模型 ({selectedModels.length})
+                      部署模型 {(customModelName.trim() || selectedModel) && `(${customModelName.trim() || selectedModel})`}
                     </Button>
                     <Button
-                      onClick={() => setSelectedModels([])}
-                      disabled={selectedModels.length === 0}
+                      onClick={() => {
+                        setSelectedModel(null);
+                        setCustomModelName('');
+                      }}
+                      disabled={!selectedModel && !customModelName.trim()}
                     >
                       清空选择
                     </Button>
@@ -949,7 +923,100 @@ const ModelHubPage = () => {
             </Form>
           </Card>
         );
-      }, [modelCategories, modelStatus, selectedModels, deploymentConfig, handleBatchDeploy])}
+      }, [modelCategories, modelStatus, selectedModel, customModelName, deploymentConfig, handleModelDeploy])}
+
+      {/* 部署状态监控 */}
+      {useMemo(() => {
+        // Get all models that have been deployed or are being deployed
+        const deployedModels = Object.entries(modelStatus).filter(([, status]) =>
+          status && ['inprogress', 'deployed', 'deleting', 'init', 'failed'].includes(status.status)
+        );
+
+        if (deployedModels.length === 0) return null;
+
+        return (
+          <Card
+            title={
+              <Space>
+                <ThunderboltOutlined />
+                <span>部署状态</span>
+              </Space>
+            }
+            style={{ marginTop: 24 }}
+          >
+            <List
+              itemLayout="horizontal"
+              dataSource={deployedModels}
+              renderItem={([modelKey, status]) => {
+                const getStatusTag = () => {
+                  switch (status.status) {
+                    case 'deployed':
+                      return <Tag color="success" icon={<CheckCircleOutlined />}>已部署</Tag>;
+                    case 'inprogress':
+                    case 'init':
+                      return <Tag color="processing">部署中</Tag>;
+                    case 'deleting':
+                      return <Tag color="processing">停止中</Tag>;
+                    case 'failed':
+                      return <Tag color="error">部署失败</Tag>;
+                    default:
+                      return <Tag color="default">未知状态</Tag>;
+                  }
+                };
+
+                const getActions = () => {
+                  if (status.status === 'deployed') {
+                    return [
+                      <Button
+                        key="stop"
+                        danger
+                        size="small"
+                        icon={<DeleteOutlined />}
+                        onClick={() => handleCleanup(modelKey)}
+                      >
+                        停止
+                      </Button>
+                    ];
+                  } else if (status.status === 'deleting') {
+                    return [
+                      <Button
+                        key="stopping"
+                        danger
+                        size="small"
+                        icon={<DeleteOutlined />}
+                        loading
+                        disabled
+                      >
+                        停止中
+                      </Button>
+                    ];
+                  }
+                  return [];
+                };
+
+                return (
+                  <List.Item actions={getActions()}>
+                    <List.Item.Meta
+                      title={
+                        <Space>
+                          <Text strong>{modelKey}</Text>
+                          {getStatusTag()}
+                        </Space>
+                      }
+                      description={status.message}
+                    />
+                    {status.endpoint && status.status === 'deployed' && (
+                      <Text type="secondary" style={{ fontSize: '12px' }}>
+                        端点: {status.endpoint}
+                      </Text>
+                    )}
+                  </List.Item>
+                );
+              }}
+            />
+          </Card>
+        );
+      }, [modelStatus, handleCleanup])}
     </div>
   );
 };
