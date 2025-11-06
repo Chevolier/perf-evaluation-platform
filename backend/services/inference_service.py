@@ -1370,9 +1370,23 @@ class InferenceService:
                         api_url,
                         json=payload,
                         headers={"Content-Type": "application/json"},
-                        timeout=120,
+                        timeout=30,  # Reduced from 120s for faster failure feedback
                         stream=True
                     )
+                except requests.exceptions.Timeout:
+                    error_msg = f"Request to {api_url} timed out after 30 seconds"
+                    logger.error(error_msg)
+                    if stream_flag:
+                        logger.warning("Manual API streaming request timed out, retrying without stream flag")
+                        continue
+                    raise ValueError(error_msg)
+                except requests.exceptions.ConnectionError as conn_error:
+                    error_msg = f"Connection error to {api_url}: {str(conn_error)}"
+                    logger.error(error_msg)
+                    if stream_flag:
+                        logger.warning("Manual API streaming request failed, retrying without stream flag: %s", conn_error)
+                        continue
+                    raise ValueError(error_msg)
                 except Exception as request_error:
                     if response is not None:
                         response.close()

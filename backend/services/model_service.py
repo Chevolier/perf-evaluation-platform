@@ -179,7 +179,7 @@ class ModelService:
                 record.get('model_name'),
             )
 
-            metadata = record.get('metadata') or {}
+            metadata = (record.get('metadata') or {}).copy()
             deployment_method = record.get('deployment_method', 'External Deployment')
             endpoint_url = record.get('endpoint_url')
 
@@ -196,12 +196,27 @@ class ModelService:
 
             description = metadata.get('description') or f"{deployment_method} endpoint"
 
+            # Keep the original model_name from the database as it may be the served model name
+            # For HyperPod/external deployments, this is typically the --served-model-name parameter
+            canonical_model_name = record.get('model_name')
+            canonical_model_path = metadata.get('model_path')
+
+            # Only set model_path from registry if not already specified
+            if canonical_model_name and not canonical_model_path:
+                resolved_key = self.registry.resolve_model_key(canonical_model_name)
+                registry_model_path = self.registry.get_model_path(resolved_key)
+                if registry_model_path:
+                    canonical_model_path = registry_model_path
+
+            if canonical_model_path and not metadata.get('model_path'):
+                metadata['model_path'] = canonical_model_path
+
             external_map[model_key] = {
                 'name': display_name,
                 'description': description,
                 'deployment_method': deployment_method,
                 'deployment_id': record.get('deployment_id'),
-                'model_name': record.get('model_name'),
+                'model_name': canonical_model_name,
                 'model_path': metadata.get('model_path'),
                 'endpoint': endpoint_url,
                 'supports_multimodal': metadata.get('supports_multimodal', False),

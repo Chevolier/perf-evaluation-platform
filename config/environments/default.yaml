@@ -48,7 +48,7 @@ hyperpod:
     large: "configs/hyperpod/config_hyperpod_large.yaml"
   dry_run: true
   log_directory: "logs/hyperpod"
-  default_region: "us-west-2"
+  default_region: "us-east-1"
 
 benchmarking:
   default_timeout: 1800  # 30 minutes

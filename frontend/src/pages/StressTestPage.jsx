@@ -888,6 +888,7 @@ const StressTestPage = () => {
       }
       document.removeEventListener('keydown', handlePageRefresh);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handlePageRefresh]);
 
   // 渲染综合性能摘要表格

@@ -14,7 +14,6 @@ import {
   Divider,
   message,
   Empty,
-  Alert,
   Tag,
   Modal,
   Select,
@@ -30,14 +29,13 @@ import {
   SettingOutlined,
   LinkOutlined,
   RocketOutlined,
-  CloseOutlined,
   EyeOutlined,
   DeleteOutlined
 } from '@ant-design/icons';
 import PlaygroundResultsDisplay from '../components/PlaygroundResultsDisplay';
 import PlaygroundModelSelector from '../components/PlaygroundModelSelector';
 
-const { Title, Text, Paragraph } = Typography;
+const { Title, Text } = Typography;
 const { TextArea } = Input;
 
 const PlaygroundPage = ({

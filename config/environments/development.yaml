@@ -19,3 +19,4 @@ cors:
 hyperpod:
   dry_run: true
   log_directory: "logs/hyperpod-dev"
+  default_region: "us-east-1"

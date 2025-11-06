@@ -155,6 +155,7 @@ const VisualizationPage = () => {
     } finally {
       setLoading(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedResults]);
 
   // Fetch specific result data
@@ -1149,7 +1150,7 @@ const VisualizationPage = () => {
 
   useEffect(() => {
     fetchResultsStructure();
-  }, []);
+  }, [fetchResultsStructure]);
 
   // Add keyboard event listener for refresh
   useEffect(() => {
