@@ -1,6 +1,6 @@
 # Model Performance Evaluation Platform
 
-A comprehensive platform for model (LLMs, VLMs, etc.) deployment and performance evaluation. Supports 1-click deployment of various models on EC2 using vLLM, SGLang, plus comprehensive performance testing and visualization.
+A comprehensive platform for model (LLMs, VLMs, etc.) deployment and performance evaluation. Supports 1-click deployment of various models on Amazon SageMaker Endpoint, SageMaker HyperPod, EKS, and EC2 using vLLM, SGLang, and other inference engines, plus comprehensive performance testing and visualization.
 
 ## ✨ Features
 
@@ -10,6 +10,7 @@ A comprehensive platform for model (LLMs, VLMs, etc.) deployment and performance
 - **Result Visualization**: Charts and analytics for performance metrics
 - **Multimodal Support**: Text, image, and video processing capabilities
 - **Enterprise Architecture**: Modular backend with service layer architecture
+- **InfraForge Automation**: Launch and tear down SageMaker HyperPod clusters via InfraForge tooling with dry-run safety modes
 
 ## 🏗️ Architecture
 
@@ -52,6 +53,7 @@ A comprehensive platform for model (LLMs, VLMs, etc.) deployment and performance
 - Python 3.10+ (Required)
 - Node.js 16+ 
 - AWS credentials configured
+- EMD CLI for model deployment
 
 Recommended instance g5.2xlarge.
 
@@ -73,6 +75,10 @@ This will automatically install backend and frontend packages and start the serv
 conda create -n perf-eval python=3.10 -y
 conda activate perf-eval
 pip install -r requirements.txt
+
+cd evalscope/
+pip install -e .
+cd ..
 
 # Configure AWS credentials
 aws configure
@@ -111,6 +117,12 @@ npm install jszip
 npm install
 ```
 
+Configure easy-model-deployer (emd) for 1-click model deployment using emd.
+
+```bash
+emd bootstrap
+```
+
 **3. Start the Platform**
 
 ```bash
@@ -127,6 +139,52 @@ cd frontend && npm start
 - **Backend API**: http://localhost:5000
 - **Health Check**: http://localhost:5000/health
 
+### HyperPod InfraForge Integration
+
+1. **Review configuration** – Update `config/environments/<env>.yaml` to point `hyperpod.infraforge_root` at your cloned InfraForge repository. By default the backend assumes `../InfraForge` relative to this project.
+2. **Fetch tooling** – Run `scripts/fetch_infraforge.sh` (optionally pass a target directory) to clone/update InfraForge at the pinned ref so the backend can execute the CLI.
+3. **Dry-run behaviour** – Development keeps `hyperpod.dry_run=true` so InfraForge commands log without touching AWS. Set `dry_run: false` in production to execute real deployments.
+4. **Launch via API/UI** – Use `POST /api/hyperpod/deploy` or the HyperPod card in Model Hub (preset + overrides). Monitor progress with `GET /api/hyperpod/jobs` and retrieve logs from `GET /api/hyperpod/jobs/{job_id}/logs`.
+5. **Teardown** – Invoke `POST /api/hyperpod/destroy` with the target preset (and region override if needed) to call InfraForge destroy scripts.
+
+All HyperPod job logs are written to `logs/hyperpod*` and surfaced through the API for frontend consumption.
+
+## Model Deployment
+Currently, this platform supports 1-click model deployment using emd. But the vllm version may not be the latest. To evaluate the model's best performance, it is sugggested to deploy a model on a local EC2 instance using the latest vllm or sglang, then manually input api_url and model_name on the 在线体验 or 性能评测 pages. 
+
+### Local EC2 model deployment
+To use vllm to start a server on an g5.2xlarge instance:
+
+```bash
+# enable-prompt-tokens-details would help to show token usage info in response
+vllm serve Qwen/Qwen3-8B \
+	--gpu-memory-utilization 0.9 \
+	--max-model-len 2048 \
+  --enable-prompt-tokens-details
+
+nohup vllm serve Qwen/Qwen2.5-VL-7B-Instruct \
+     --host 0.0.0.0 --port 8000 \
+     --dtype bfloat16\
+    --gpu-memory-utilization 0.9 \
+    --max-model-len 2048 \
+    --limit-mm-per-prompt '{"images": 1, "videos": 1}' \
+    --enable-prompt-tokens-details \
+    >logs/serve_qwen2.5-vl-7bi.out 2>&1 &
+
+nohup vllm serve /home/ec2-user/SageMaker/efs/Models/Qwen3-8B \
+     --host 0.0.0.0 --port 8000 \
+     --dtype bfloat16\
+    --gpu-memory-utilization 0.9 \
+    --max-model-len 2048 \
+    --enable-prompt-tokens-details \
+    >logs/serve_qwen3-8b.out 2>&1 &
+    
+```
+You will obtain:
+Api url: http://0.0.0.0:8000/v1/chat/completions
+Model name: /home/ec2-user/SageMaker/efs/Models/Qwen3-8B
+
+Then use the above api url and model name to do stress test.
 
 ## 📖 Platform Overview
 

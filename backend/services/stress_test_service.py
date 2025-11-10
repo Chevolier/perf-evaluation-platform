@@ -7,34 +7,18 @@ import json
 import subprocess
 import time
 import os
-import sys
-import boto3
-import tempfile
 from datetime import datetime
 from typing import Dict, Any, Optional
 from pathlib import Path
 import re
 
 from ..utils import get_logger
-from .model_service import ModelService
+from ..utils.emd import resolve_deployment_api_url
 
 logger = get_logger(__name__)
 
-# Calculate venv site-packages path relative to this file
-import glob
-backend_dir = os.path.dirname(os.path.dirname(__file__))
-venv_lib_dir = os.path.join(backend_dir, 'venv', 'lib')
-python_dirs = glob.glob(os.path.join(venv_lib_dir, 'python*'))
-if python_dirs:
-    python_dir = os.path.basename(python_dirs[0])
-    VENV_SITE_PACKAGES = os.path.join(venv_lib_dir, python_dir, 'site-packages')
-else:
-    # Fallback to a reasonable default
-    VENV_SITE_PACKAGES = os.path.join(venv_lib_dir, 'python3.10', 'site-packages')
-
 # Test logging immediately when module loads
 logger.info("🔧 StressTestService module loaded - testing logger functionality")
-logger.info(f"📦 Using venv site-packages: {VENV_SITE_PACKAGES}")
 logger.debug("🧪 DEBUG: StressTestService module debug logging test")
 logger.warning("⚠️ WARNING: StressTestService module warning logging test")
 
@@ -44,34 +28,6 @@ class StressTestService:
     def __init__(self):
         """Initialize stress test service."""
         self.test_sessions = {}
-        self.model_service = ModelService()
-
-    def _get_deployed_model_framework(self, model_key: str) -> str:
-        """Get the framework of a deployed model from ModelService.
-
-        Args:
-            model_key: Model key to check
-
-        Returns:
-            Framework name (e.g., 'vllm', 'sglang') or 'vllm' as default
-        """
-        try:
-            if self.model_service.registry.is_ec2_model(model_key):
-                # Check if model is currently deployed on EC2
-                if model_key in self.model_service._ec2_deployments:
-                    deployment_info = self.model_service._ec2_deployments[model_key]
-                    framework = deployment_info.get('engine_type', 'vllm')
-                    logger.info(f"Found deployed model {model_key} using framework: {framework}")
-                    return framework
-                else:
-                    logger.info(f"Model {model_key} is EC2 model but not currently deployed, defaulting to vllm")
-                    return 'vllm'
-            else:
-                logger.info(f"Model {model_key} is not EC2 model, defaulting to vllm")
-                return 'vllm'
-        except Exception as e:
-            logger.error(f"Error getting framework for model {model_key}: {e}")
-            return 'vllm'
     
     def start_stress_test(self, model_key: str, test_params: Dict[str, Any]) -> str:
         """Start a stress test for the specified model.
@@ -87,13 +43,7 @@ class StressTestService:
         session_id = str(uuid.uuid4())[:8]
         
         logger.info(f"Starting stress test for model {model_key} with session {session_id}")
-
-        # Ensure framework information is set correctly in test_params
-        if 'inference_framework' not in test_params:
-            detected_framework = self._get_deployed_model_framework(model_key)
-            test_params['inference_framework'] = detected_framework
-            logger.info(f"Set inference_framework to {detected_framework} for model {model_key}")
-
+        
         # Initialize test session with 0% progress
         self.test_sessions[session_id] = {
             "status": "preparing",
@@ -119,20 +69,20 @@ class StressTestService:
     
     def start_stress_test_with_custom_api(self, api_url: str, model_name: str, test_params: Dict[str, Any]) -> str:
         """Start a stress test with custom API URL and model name.
-
+        
         Args:
             api_url: Custom API endpoint URL
             model_name: Custom model name
             test_params: Test parameters including concurrency, num_requests, etc.
-
+            
         Returns:
             Session ID for tracking the test
         """
         # Generate unique session ID
         session_id = str(uuid.uuid4())[:8]
-
+        
         logger.info(f"Starting custom API stress test for {model_name} at {api_url} with session {session_id}")
-
+        
         # Initialize test session with 0% progress
         self.test_sessions[session_id] = {
             "status": "preparing",
@@ -146,7 +96,7 @@ class StressTestService:
             "error": None,
             "params": test_params
         }
-
+        
         # Start test in background thread
         thread = threading.Thread(
             target=self._run_custom_api_stress_test,
@@ -154,47 +104,7 @@ class StressTestService:
             daemon=True
         )
         thread.start()
-
-        return session_id
-
-    def start_stress_test_with_sagemaker_endpoint(self, endpoint_name: str, model_name: str, test_params: Dict[str, Any]) -> str:
-        """Start a stress test with SageMaker endpoint.
-
-        Args:
-            endpoint_name: SageMaker endpoint name
-            model_name: Model display name (Huggingface model name)
-            test_params: Test parameters including concurrency, num_requests, etc.
-
-        Returns:
-            Session ID for tracking the test
-        """
-        # Generate unique session ID
-        session_id = str(uuid.uuid4())[:8]
-
-        logger.info(f"Starting SageMaker endpoint stress test for {model_name} at endpoint {endpoint_name} with session {session_id}")
-
-        # Initialize test session with 0% progress
-        self.test_sessions[session_id] = {
-            "status": "preparing",
-            "model": model_name,
-            "endpoint_name": endpoint_name,
-            "start_time": datetime.now().isoformat(),
-            "progress": 0,
-            "message": "准备测试环境...",
-            "current_message": "正在初始化压力测试...",
-            "results": None,
-            "error": None,
-            "params": test_params
-        }
-
-        # Start test in background thread
-        thread = threading.Thread(
-            target=self._run_sagemaker_endpoint_stress_test,
-            args=(endpoint_name, model_name, test_params, session_id),
-            daemon=True
-        )
-        thread.start()
-
+        
         return session_id
     
     def get_test_status(self, session_id: str) -> Optional[Dict[str, Any]]:
@@ -747,23 +657,23 @@ class StressTestService:
     
     def _run_custom_api_stress_test(self, api_url: str, model_name: str, test_params: Dict[str, Any], session_id: str):
         """Run stress test with custom API endpoint (background thread).
-
+        
         Args:
             api_url: Custom API endpoint URL
-            model_name: Custom model name
+            model_name: Custom model name  
             test_params: Test parameters
             session_id: Session ID
         """
         try:
             logger.info(f"Running custom API stress test for session {session_id}")
-
+            
             # Update status - let real-time polling handle progress updates
             self._update_session(session_id, {
-                "status": "running",
+                "status": "running", 
                 "message": "正在执行压力测试...",
                 "current_message": "开始发送测试请求..."
             })
-
+            
             # Use evalscope with custom API
             try:
                 print(f"test_params: {test_params}")
@@ -775,7 +685,7 @@ class StressTestService:
                     import traceback
                     logger.error(f"[DEBUG] Full traceback: {traceback.format_exc()}")
                 raise attr_error
-
+            
             # Update with completed results
             self._update_session(session_id, {
                 "status": "completed",
@@ -786,63 +696,11 @@ class StressTestService:
                 "end_time": datetime.now().isoformat(),
                 "output_directory": self.test_sessions[session_id].get("output_directory")
             })
-
+            
             logger.info(f"Custom API stress test completed for session {session_id}")
-
+            
         except Exception as e:
             logger.error(f"Custom API stress test failed for session {session_id}: {e}")
-            self._update_session(session_id, {
-                "status": "failed",
-                "error": str(e),
-                "message": "压力测试失败",
-                "current_message": f"测试失败: {str(e)}"
-            })
-
-    def _run_sagemaker_endpoint_stress_test(self, endpoint_name: str, model_name: str, test_params: Dict[str, Any], session_id: str):
-        """Run stress test with SageMaker endpoint (background thread).
-
-        Args:
-            endpoint_name: SageMaker endpoint name
-            model_name: Model display name (Huggingface model name)
-            test_params: Test parameters
-            session_id: Session ID
-        """
-        try:
-            logger.info(f"Running SageMaker endpoint stress test for session {session_id}")
-
-            # Update status
-            self._update_session(session_id, {
-                "status": "running",
-                "message": "正在执行压力测试...",
-                "current_message": "开始发送测试请求..."
-            })
-
-            # Use the SageMaker endpoint stress testing implementation
-            try:
-                results = self._run_evalscope_with_sagemaker_endpoint(endpoint_name, model_name, test_params, session_id)
-            except AttributeError as attr_error:
-                if "'list' object has no attribute 'get'" in str(attr_error):
-                    logger.error(f"[DEBUG] FOUND THE ERROR! AttributeError in _run_evalscope_with_sagemaker_endpoint:")
-                    logger.error(f"[DEBUG] Error message: {attr_error}")
-                    import traceback
-                    logger.error(f"[DEBUG] Full traceback: {traceback.format_exc()}")
-                raise attr_error
-
-            # Update with completed results
-            self._update_session(session_id, {
-                "status": "completed",
-                "progress": 100,
-                "message": "压力测试完成",
-                "current_message": "测试结果已生成",
-                "results": results,
-                "end_time": datetime.now().isoformat(),
-                "output_directory": self.test_sessions[session_id].get("output_directory")
-            })
-
-            logger.info(f"SageMaker endpoint stress test completed for session {session_id}")
-
-        except Exception as e:
-            logger.error(f"SageMaker endpoint stress test failed for session {session_id}: {e}")
             self._update_session(session_id, {
                 "status": "failed",
                 "error": str(e),
@@ -922,60 +780,46 @@ class StressTestService:
             "current_message": "检查模型部署状态..."
         })
         
-        if model_registry.is_ec2_model(model_key):
-            print(f"model_key: {model_key}")
-            # Check EC2 model status using the same method as the frontend
-            status_result = model_service.check_multiple_model_status([model_key])
-            model_status = status_result.get('model_status', {}).get(model_key)
-
-            if not model_status or model_status.get('status') != 'deployed':
-                raise Exception(f"EC2模型 {model_key} 未部署或不可用: {model_status.get('message', 'Model not deployed') if model_status else 'Model not found'}")
-
+        if model_registry.is_emd_model(model_key):
+            # Get EMD model info
+            deployment_status = model_service.get_emd_deployment_status(model_key)
+            if deployment_status.get('status') != 'deployed':
+                raise Exception(f"EMD模型 {model_key} 未部署或不可用: {deployment_status.get('message')}")
+            
             model_info = model_registry.get_model_info(model_key)
             model_path = model_info.get('model_path', model_key)
-            deployment_tag = model_status.get('tag')
-
-            # Get dynamic EC2 API URL from deployment status
-            api_url = self._get_ec2_api_url(model_path, deployment_tag, model_status.get('endpoint'))
-
-            # For EC2 Docker deployments, use only the model_path as the model name
-            # The deployment tag is just for tracking, not part of the served model name
-            model_name = model_path
+            deployment_tag = deployment_status.get('tag')
+            
+            # Get dynamic EMD API URL from deployment status
+            api_url = self._get_emd_api_url(model_path, deployment_tag)
+            
+            # Use the full deployed model name with tag
+            if deployment_tag:
+                model_name = f"{model_path}/{deployment_tag}"
+            else:
+                model_name = model_path
             # Use appropriate tokenizer path based on model
+            tokenizer_path = self._get_tokenizer_path(model_name)
+
+        elif model_registry.is_external_model(model_key):
+            external_info = model_service.get_external_model_info(model_key)
+            if not external_info:
+                raise Exception(f"未找到外部部署 {model_key} 的配置信息")
+
+            api_url = external_info.get('endpoint')
+            if not api_url:
+                raise Exception(f"外部部署 {model_key} 缺少可用的API地址")
+
+            model_name = external_info.get('model_name') or external_info.get('name') or model_key
             tokenizer_path = self._get_tokenizer_path(model_name)
 
         elif model_registry.is_bedrock_model(model_key):
             # Bedrock models don't support direct stress testing via evalscope
             # This matches the limitation in the original backend
             raise Exception(f"Bedrock模型 {model_key} 暂不支持直接压力测试，请使用EMD模型进行性能测试。Bedrock模型为无服务器架构，性能会根据负载自动调整。")
-
+            
         else:
-            # Check if this is a deployed custom model (not in registry but deployed via model service)
-            custom_model_status = model_service.get_ec2_deployment_status(model_key)
-            if custom_model_status.get('status') in ['deployed', 'inprogress']:
-                # Treat deployed custom model as EC2 model
-                logger.info(f"🤖 Processing custom deployed model for stress test: {model_key}")
-
-                # Check deployment status
-                status_result = model_service.check_multiple_model_status([model_key])
-                model_status = status_result.get('model_status', {}).get(model_key)
-
-                if not model_status or model_status.get('status') != 'deployed':
-                    raise Exception(f"自定义模型 {model_key} 未部署或不可用: {model_status.get('message', 'Model not deployed') if model_status else 'Model not found'}")
-
-                # For custom models, use model_key as model_path since they're not in registry
-                model_path = model_key
-                deployment_tag = model_status.get('tag')
-
-                # Get dynamic EC2 API URL from deployment status
-                api_url = self._get_ec2_api_url(model_path, deployment_tag, model_status.get('endpoint'))
-
-                # For custom models, use the model_key as the model name
-                model_name = model_path
-                # Use appropriate tokenizer path based on model
-                tokenizer_path = self._get_tokenizer_path(model_name)
-            else:
-                raise Exception(f"未知模型类型: {model_key}")
+            raise Exception(f"未知模型类型: {model_key}")
         
         self._update_session(session_id, {
             "current_message": "测试模型端点连接..."
@@ -1028,96 +872,24 @@ class StressTestService:
             logger.info(f"EVALSCOPE_LOG: Token config - min_prompt_length={min_prompt_length}, max_prompt_length={max_prompt_length}")
             logger.info(f"EVALSCOPE_LOG: Token config - min_tokens={min_tokens}, max_tokens={max_tokens}")
             logger.info(f"EVALSCOPE_LOG: Tokenizer path - {tokenizer_path}")
-
-            # Handle custom dataset with S3 download if needed
-            local_dataset_path = None
-            if dataset == 'custom' and dataset_path:
-                if dataset_path.startswith('s3://'):
-                    # Download from S3
-                    self._update_session(session_id, {
-                        "current_message": "从S3下载自定义数据集..."
-                    })
-                    try:
-                        local_dataset_path = self._download_s3_dataset(dataset_path, session_id)
-                        logger.info(f"Successfully downloaded S3 dataset to: {local_dataset_path}")
-                    except Exception as e:
-                        logger.error(f"Failed to download S3 dataset: {e}")
-                        raise Exception(f"下载S3数据集失败: {str(e)}")
-                else:
-                    # Use local path as-is
-                    local_dataset_path = dataset_path
-                    if not os.path.exists(local_dataset_path):
-                        raise Exception(f"本地数据集文件不存在: {local_dataset_path}")
-
-                # For custom datasets, use flexible prompt length limits to avoid filtering out user prompts
-                min_prompt_length = 1  # Allow very short prompts
-                max_prompt_length = 50000  # Allow very long prompts
-                logger.info(f"[CUSTOM DATASET] Updated prompt lengths: min={min_prompt_length}, max={max_prompt_length}")
-
+            
+            # Create a simple Python script that uses evalscope SDK directly (original approach)
+            dataset_param = f"'{dataset_path}'" if dataset == 'custom' and dataset_path else f"'{dataset}'"
+            
             # Check if VLM parameters should be included (when image parameters are provided)
             has_vlm_params = 'image_width' in test_params and 'image_height' in test_params and 'image_num' in test_params
-
-
-            # Create appropriate script content based on dataset type
-            if dataset == 'custom' and local_dataset_path:
-                # Use dataset_path for custom datasets
-                script_content = f'''#!/usr/bin/env python
+            
+            script_content = f'''#!/usr/bin/env python
 import sys
 import json
 
 # Add evalscope to path
-sys.path.insert(0, '{VENV_SITE_PACKAGES}')
+sys.path.insert(0, '/home/ec2-user/SageMaker/efs/conda_envs/evalscope/lib/python3.10/site-packages')
 
 try:
     from evalscope.perf.main import run_perf_benchmark
     from evalscope.perf.arguments import Arguments
-
-    # Create evalscope configuration for custom dataset (this will create cartesian product and subfolders)
-    task_cfg = Arguments(
-        parallel={concurrency_list},
-        number={num_requests_list},
-        model='{model_name}',
-        url='{api_url}',
-        api='openai',
-        dataset_path='{local_dataset_path}',
-        dataset='custom',
-        extra_args={{'ignore_eos': False}},
-        tokenizer_path='{tokenizer_path}',
-        temperature={temperature},
-        outputs_dir='{output_dir}',
-        stream=True,
-        connect_timeout={connect_timeout},
-        read_timeout={read_timeout},
-        seed=42
-    )
-
-    # Run the benchmark (this creates the subfolder structure)
-    results = run_perf_benchmark(task_cfg)
-
-    # Output results as JSON
-    print("EVALSCOPE_RESULTS_START")
-    print(json.dumps(results, default=str, ensure_ascii=False))
-    print("EVALSCOPE_RESULTS_END")
-
-except Exception as e:
-    print("EVALSCOPE_ERROR:", str(e))
-    import traceback
-    traceback.print_exc()
-    sys.exit(1)
-'''
-            else:
-                # Use standard dataset parameter for non-custom datasets
-                script_content = f'''#!/usr/bin/env python
-import sys
-import json
-
-# Add evalscope to path
-sys.path.insert(0, '{VENV_SITE_PACKAGES}')
-
-try:
-    from evalscope.perf.main import run_perf_benchmark
-    from evalscope.perf.arguments import Arguments
-
+    
     # Create evalscope configuration (this will create cartesian product and subfolders)
     task_cfg = Arguments(
         parallel={concurrency_list},
@@ -1125,13 +897,12 @@ try:
         model='{model_name}',
         url='{api_url}',
         api='openai',
-        dataset='{dataset}',
+        dataset={dataset_param},
         min_tokens={min_tokens},
         max_tokens={max_tokens},
         prefix_length={prefix_length},
         min_prompt_length={min_prompt_length},
         max_prompt_length={max_prompt_length},
-        extra_args={{'ignore_eos': True}},
         tokenizer_path='{tokenizer_path}',
         temperature={temperature},
         outputs_dir='{output_dir}',
@@ -1140,15 +911,15 @@ try:
         read_timeout={read_timeout},
         seed=42{', image_width=' + str(image_width) + ', image_height=' + str(image_height) + ', image_format="' + image_format + '", image_num=' + str(image_num) if has_vlm_params else ''}
     )
-
+    
     # Run the benchmark (this creates the subfolder structure)
     results = run_perf_benchmark(task_cfg)
-
+    
     # Output results as JSON
     print("EVALSCOPE_RESULTS_START")
     print(json.dumps(results, default=str, ensure_ascii=False))
     print("EVALSCOPE_RESULTS_END")
-
+    
 except Exception as e:
     print("EVALSCOPE_ERROR:", str(e))
     import traceback
@@ -1442,13 +1213,9 @@ except Exception as e:
         from ..core.models import model_registry
         import os
         
-        # Get model information from registry if available, otherwise use model_key for custom models
+        # Get model information
         model_info = model_registry.get_model_info(model_key)
-        if model_info:
-            model_name = model_info.get('model_path', model_key).replace('/', '-')
-        else:
-            # Custom model not in registry, use model_key as path
-            model_name = model_key.replace('/', '-')
+        model_name = model_info.get('model_path', model_key).replace('/', '-')
         
         # Create directory path with session_id: outputs/model_name/session_id
         project_root = Path(__file__).parent.parent.parent  # Go up 3 levels to inference-platform directory
@@ -1927,15 +1694,8 @@ except Exception as e:
         from ..core.models import model_registry
         
         try:
-            # Get model information from registry if available, otherwise use defaults for custom models
+            # Get model information
             model_info = model_registry.get_model_info(model_key)
-            if not model_info:
-                # Custom model not in registry, create default info
-                model_info = {
-                    "name": model_key,
-                    "model_path": model_key,
-                    "huggingface_repo": model_key
-                }
             
             # Create eval_config.json with all deployment and test parameters
             eval_config = {
@@ -1949,12 +1709,12 @@ except Exception as e:
                 },
                 "deployment_config": {
                     "deployment_method": test_params.get('deployment_method', 'EMD'),
-                    "framework": test_params.get('inference_framework', self._get_deployed_model_framework(model_key)),
+                    "framework": test_params.get('inference_framework', 'vllm'),
                     "instance_type": test_params.get('instance_type', 'ml.g5.2xlarge'),
                     "tp_size": test_params.get('tp_size', self._infer_tp_size(test_params.get('instance_type', 'ml.g5.2xlarge'))),
                     "dp_size": test_params.get('dp_size', 1),
                     "platform": test_params.get('deployment_method', 'EMD'),
-                    "region": "us-west-2"
+                    "region": "us-east-1"
                 },
                 "stress_test_config": {
                     "concurrency": test_params.get('concurrency', [5]),
@@ -2202,7 +1962,7 @@ except Exception as e:
                     "tp_size": test_params.get('tp_size', 1),
                     "dp_size": test_params.get('dp_size', 1),
                     "platform": test_params.get('deployment_method', 'EMD'),
-                    "region": "us-west-2",
+                    "region": "us-east-1",
                     "api_endpoint": test_params.get('api_url', 'Unknown'),
                     "api_type": "openai"
                 },
@@ -2263,9 +2023,6 @@ except Exception as e:
             logger.error(f"Failed to generate enhanced config for session {session_id}: {e}")
 
     def _run_evalscope_with_custom_api(self, api_url: str, model_name: str, test_params: Dict[str, Any], session_id: str) -> Dict[str, Any]:
-        # No-op function for functions that don't have litellm process
-        def cleanup_litellm_process():
-            pass
         """Run stress test using evalscope with custom API endpoint.
         
         Args:
@@ -2317,14 +2074,7 @@ except Exception as e:
         # Validate that both lists have the same length for paired combinations
         if len(num_requests_list) != len(concurrency_list):
             raise Exception(f"请求总数和并发数的值数量必须相同。当前请求总数有 {len(num_requests_list)} 个值，并发数有 {len(concurrency_list)} 个值。")
-
-        # Create output directory first (needed for logs)
-        output_dir = self._create_custom_api_output_dir(model_name, session_id)
-        logger.info(f"Created output directory for custom API test: {output_dir}")
-
-        # Store output directory in session
-        self.test_sessions[session_id]["output_directory"] = output_dir
-
+        
         logger.info(f"Starting evalscope stress test with custom API: {num_requests_list} requests, {concurrency_list} concurrent")
         
         self._update_session(session_id, {
@@ -2400,32 +2150,11 @@ except Exception as e:
             logger.info(f"[DEBUG] Using tokenizer path: {tokenizer_path}")
             
             print(f"custom_api, model_name: {model_name}")
-            # Note: output_dir already created at the beginning of this function
-
-            # Handle custom dataset with S3 download if needed
-            local_dataset_path = None
-            if dataset == 'custom' and dataset_path:
-                if dataset_path.startswith('s3://'):
-                    # Download from S3
-                    self._update_session(session_id, {
-                        "current_message": "从S3下载自定义数据集..."
-                    })
-                    try:
-                        local_dataset_path = self._download_s3_dataset(dataset_path, session_id)
-                        logger.info(f"Successfully downloaded S3 dataset to: {local_dataset_path}")
-                    except Exception as e:
-                        logger.error(f"Failed to download S3 dataset: {e}")
-                        raise Exception(f"下载S3数据集失败: {str(e)}")
-                else:
-                    # Use local path as-is
-                    local_dataset_path = dataset_path
-                    if not os.path.exists(local_dataset_path):
-                        raise Exception(f"本地数据集文件不存在: {local_dataset_path}")
-
-                # For custom datasets, use flexible prompt length limits to avoid filtering out user prompts
-                min_prompt_length = 1  # Allow very short prompts
-                max_prompt_length = 50000  # Allow very long prompts
-                logger.info(f"[CUSTOM DATASET] Updated prompt lengths: min={min_prompt_length}, max={max_prompt_length}")
+            # Create output directory using the same structure as regular model tests
+            output_dir = self._create_custom_api_output_dir(model_name, session_id)
+            
+            # Store output directory in session
+            self.test_sessions[session_id]["output_directory"] = output_dir
             
             # Let real-time polling handle all progress updates - no hardcoded progress here
             self._update_session(session_id, {
@@ -2433,71 +2162,22 @@ except Exception as e:
             })
             
             # Create Python script to run evalscope programmatically using the same approach as original implementation
-            # For custom datasets, we need to use dataset_path instead of dataset parameter
+            dataset_param = f"'{dataset_path}'" if dataset == 'custom' and dataset_path else f"'{dataset}'"
             
             # Check if VLM parameters should be included (when image parameters are provided)
             has_vlm_params = 'image_width' in test_params and 'image_height' in test_params and 'image_num' in test_params
-
-            # Create appropriate script content based on dataset type
-            if dataset == 'custom' and local_dataset_path:
-                # Use dataset_path for custom datasets
-                script_content = f'''#!/usr/bin/env python
+            
+            script_content = f'''#!/usr/bin/env python
 import sys
 import json
 
 # Add evalscope to path
-sys.path.insert(0, '{VENV_SITE_PACKAGES}')
+sys.path.insert(0, '/home/ec2-user/SageMaker/efs/conda_envs/evalscope/lib/python3.10/site-packages')
 
 try:
     from evalscope.perf.main import run_perf_benchmark
     from evalscope.perf.arguments import Arguments
-
-    # Create evalscope configuration for custom dataset (this will create cartesian product and subfolders)
-    task_cfg = Arguments(
-        parallel={concurrency_list},
-        number={num_requests_list},
-        model='{model_name}',
-        url='{api_url}',
-        api='openai',
-        dataset_path='{local_dataset_path}',
-        dataset='custom',
-        extra_args={{'ignore_eos': False}},
-        tokenizer_path='{tokenizer_path}',
-        temperature={temperature},
-        outputs_dir='{output_dir}',
-        stream=True,
-        connect_timeout={connect_timeout},
-        read_timeout={read_timeout},
-        seed=42
-    )
-
-    # Run the benchmark (this creates the subfolder structure)
-    results = run_perf_benchmark(task_cfg)
-
-    # Output results as JSON
-    print("EVALSCOPE_RESULTS_START")
-    print(json.dumps(results, default=str, ensure_ascii=False))
-    print("EVALSCOPE_RESULTS_END")
-
-except Exception as e:
-    print("EVALSCOPE_ERROR:", str(e))
-    import traceback
-    traceback.print_exc()
-    sys.exit(1)
-'''
-            else:
-                # Use standard dataset parameter for non-custom datasets
-                script_content = f'''#!/usr/bin/env python
-import sys
-import json
-
-# Add evalscope to path
-sys.path.insert(0, '{VENV_SITE_PACKAGES}')
-
-try:
-    from evalscope.perf.main import run_perf_benchmark
-    from evalscope.perf.arguments import Arguments
-
+    
     # Create evalscope configuration (this will create cartesian product and subfolders)
     task_cfg = Arguments(
         parallel={concurrency_list},
@@ -2505,13 +2185,12 @@ try:
         model='{model_name}',
         url='{api_url}',
         api='openai',
-        dataset='{dataset}',
+        dataset={dataset_param},
         min_tokens={min_tokens},
         max_tokens={max_tokens},
         prefix_length={prefix_length},
         min_prompt_length={min_prompt_length},
         max_prompt_length={max_prompt_length},
-        extra_args={{'ignore_eos': True}},
         tokenizer_path='{tokenizer_path}',
         temperature={temperature},
         outputs_dir='{output_dir}',
@@ -2520,15 +2199,15 @@ try:
         read_timeout={read_timeout},
         seed=42{', image_width=' + str(image_width) + ', image_height=' + str(image_height) + ', image_format="' + image_format + '", image_num=' + str(image_num) if has_vlm_params else ''}
     )
-
+    
     # Run the benchmark (this creates the subfolder structure)
     results = run_perf_benchmark(task_cfg)
-
+    
     # Output results as JSON
     print("EVALSCOPE_RESULTS_START")
     print(json.dumps(results, default=str, ensure_ascii=False))
     print("EVALSCOPE_RESULTS_END")
-
+    
 except Exception as e:
     print("EVALSCOPE_ERROR:", str(e))
     import traceback
@@ -2586,8 +2265,6 @@ except Exception as e:
                         except Exception as save_error:
                             logger.error(f"Failed to save results (non-critical): {save_error}")
                         
-                        # Clean up litellm process before returning
-                        cleanup_litellm_process()
                         return file_results
                     except Exception as e:
                         logger.error(f"Failed to parse results file: {e}")
@@ -2627,8 +2304,6 @@ except Exception as e:
                     logger.error(f"Failed to save results (non-critical): {save_error}")
                     # Continue processing even if save fails
                 
-                # Clean up litellm process before returning
-                cleanup_litellm_process()
                 return transformed_results
             
             # Fallback to parsing from stdout if no subfolders found
@@ -2661,8 +2336,6 @@ except Exception as e:
                         except Exception as save_error:
                             logger.error(f"Failed to save results (non-critical): {save_error}")
                         
-                        # Clean up litellm process before returning
-                        cleanup_litellm_process()
                         return file_results
                     except Exception as e:
                         logger.error(f"Failed to read results from file: {e}")
@@ -2702,8 +2375,6 @@ except Exception as e:
                     logger.error(f"Failed to save results (non-critical): {save_error}")
                     # Continue processing even if save fails
                 
-                # Clean up litellm process before returning
-                cleanup_litellm_process()
                 return transformed_results
                 
             except json.JSONDecodeError as e:
@@ -2716,748 +2387,24 @@ except Exception as e:
             raise Exception(f"Evalscope执行超时 ({total_timeout}秒)，可能是模型连接问题或tokenizer加载缓慢。当前运行 {num_combinations} 个组合测试，建议减少测试参数组合数量")
         except Exception as e:
             logger.error(f"Custom API Evalscope execution failed for session {session_id}: {e}")
-            raise Exception(f"Evalscope执行失败: {str(e)}")
-
-    def _run_evalscope_with_sagemaker_endpoint(self, endpoint_name: str, model_name: str, test_params: Dict[str, Any], session_id: str) -> Dict[str, Any]:
-        """Run stress test using SageMaker endpoint (different from OpenAI format).
-
-        Args:
-            endpoint_name: SageMaker endpoint name
-            model_name: Model display name (Huggingface model name)
-            test_params: Test parameters
-            session_id: Session ID
-
-        Returns:
-            Test results
-        """
-        num_requests_list = test_params.get('num_requests', [50])
-        concurrency_list = test_params.get('concurrency', [5])
-        prefix_length = test_params.get('prefix_length', 0)
-        input_tokens = test_params.get('input_tokens', 200)
-        output_tokens = test_params.get('output_tokens', 500)
-        temperature = test_params.get('temperature', 0.1)
-        dataset = test_params.get('dataset', 'random')
-        dataset_path = test_params.get('dataset_path', '')
-
-        connect_timeout = test_params.get("connect_timeout", 7200)
-        read_timeout = test_params.get("read_timeout", 7200)
-        
-        # VLM parameters
-        image_width = test_params.get('image_width', 512)
-        image_height = test_params.get('image_height', 512)
-        image_num = test_params.get('image_num', 1)
-        image_format = test_params.get('image_format', 'RGB')
-
-        api_url = "http://localhost:4000/chat/completions"
-        sm_model_name = f"sagemaker/{endpoint_name}"
-
-        # Create output directory first (needed for litellm logs)
-        output_dir = self._create_custom_api_output_dir(model_name, session_id)
-        logger.info(f"Created output directory for SageMaker endpoint test: {output_dir}")
-
-        # Store output directory in session
-        self.test_sessions[session_id]["output_directory"] = output_dir
-
-        # Create config.yaml file for litellm
-        config_dir = Path(__file__).parent.parent.parent / 'config'
-        config_dir.mkdir(exist_ok=True)
-        config_file = config_dir / 'sm_config.yaml'
-
-        config_content = f"""model_list:
-  - model_name: {model_name}
-    litellm_params:
-      model: {sm_model_name}
-      drop_params: True
-      aws_access_key_id:
-      aws_secret_access_key:
-      aws_region_name:
-"""
-
-        with open(config_file, 'w', encoding='utf-8') as f:
-            f.write(config_content)
-
-        logger.info(f"Created config.yaml file at {config_file}")
-
-        # Start litellm server
-        litellm_process = None  # Initialize process variable
-        try:
-            import subprocess
-            import time
-
-            # Check if litellm server is already running on port 4000
-            try:
-                import requests
-                test_response = requests.get("http://localhost:4000/health", timeout=2)
-                if test_response.status_code == 200:
-                    logger.info("Litellm server already running on port 4000")
-                else:
-                    raise requests.RequestException("Server not healthy")
-            except (requests.RequestException, requests.ConnectionError):
-                logger.info("Starting litellm server...")
-
-                # Create log file path for litellm server
-                litellm_log_file = os.path.join(output_dir, f'litellm_server_{session_id}.log')
-                logger.info(f"Litellm logs will be saved to: {litellm_log_file}")
-
-                # Start litellm server in background with l og file
-                # Use unbuffered output to ensure logs are written immediately
-                log_file_handle = open(litellm_log_file, 'w', buffering=1)  # Line buffered
-                litellm_process = subprocess.Popen([
-                    'litellm', '--config', str(config_file), '--port', '4000'
-                ], stdout=log_file_handle, stderr=subprocess.STDOUT, text=True)
-
-                # Update session with litellm log path and file handle for cleanup
-                self._update_session(session_id, {
-                    "litellm_log_file": litellm_log_file,
-                    "litellm_log_handle": log_file_handle,
-                    "current_message": "正在启动litellm服务器..."
-                })
-
-                # Wait a few seconds for server to start
-                time.sleep(5)
-
-                # Verify server is running
-                max_retries = 12  # 60 seconds total
-                for retry in range(max_retries):
-                    try:
-                        test_response = requests.get("http://localhost:4000/health", timeout=2)
-                        if test_response.status_code == 200:
-                            logger.info("Litellm server started successfully")
-                            self._update_session(session_id, {
-                                "current_message": "litellm服务器启动成功，准备开始测试..."
-                            })
-                            break
-                    except (requests.RequestException, requests.ConnectionError):
-                        if retry < max_retries - 1:
-                            logger.info(f"Waiting for litellm server to start... (attempt {retry + 1}/{max_retries})")
-
-                            # Update session with current status and show current log snippet
-                            try:
-                                if os.path.exists(litellm_log_file):
-                                    with open(litellm_log_file, 'r') as f:
-                                        log_content = f.read()
-                                    if log_content.strip():
-                                        # Show last few lines of log for progress
-                                        log_lines = log_content.strip().split('\n')
-                                        recent_lines = log_lines[-3:] if len(log_lines) >= 3 else log_lines
-                                        recent_log = '\n'.join(recent_lines)
-                                        logger.info(f"Recent litellm log output:\n{recent_log}")
-                            except Exception:
-                                pass  # Don't fail on log reading errors
-
-                            self._update_session(session_id, {
-                                "current_message": f"等待litellm服务器启动... (尝试 {retry + 1}/{max_retries})"
-                            })
-                            time.sleep(5)
-                        else:
-                            logger.error("Failed to start litellm server after 60 seconds")
-
-                            # Try to read and log litellm error output
-                            try:
-                                if os.path.exists(litellm_log_file):
-                                    with open(litellm_log_file, 'r') as f:
-                                        litellm_output = f.read()
-                                    if litellm_output.strip():
-                                        logger.error(f"Litellm server output:\n{litellm_output}")
-                                        self._update_session(session_id, {
-                                            "current_message": f"litellm服务器启动失败，请查看日志文件: {litellm_log_file}"
-                                        })
-                                    else:
-                                        logger.error("Litellm log file is empty")
-                                else:
-                                    logger.error(f"Litellm log file not found: {litellm_log_file}")
-                            except Exception as log_error:
-                                logger.error(f"Could not read litellm log file: {log_error}")
-
-                            # Clean up failed process
-                            cleanup_litellm_process()
-                            raise Exception("无法启动litellm服务器")
-
-        except ImportError:
-            logger.error("litellm not installed")
-            raise Exception("litellm未安装，请运行: pip install litellm")
-        except Exception as e:
-            logger.error(f"Error starting litellm server: {e}")
-
-            # Try to read litellm logs if they exist
-            if 'litellm_log_file' in locals():
-                try:
-                    if os.path.exists(litellm_log_file):
-                        with open(litellm_log_file, 'r') as f:
-                            litellm_output = f.read()
-                        if litellm_output.strip():
-                            logger.error(f"Litellm server startup error output:\n{litellm_output}")
-                except Exception as log_error:
-                    logger.error(f"Could not read litellm error log: {log_error}")
-
-            # Clean up failed process
-            if 'cleanup_litellm_process' in locals():
-                cleanup_litellm_process()
-            elif litellm_process:
-                try:
-                    litellm_process.terminate()
-                    litellm_process.wait(timeout=10)
-                except:
-                    pass
-            raise Exception(f"启动litellm服务器失败: {str(e)}")
-
-        logger.info(f"[DEBUG] Custom API - Raw parameters from frontend:")
-        logger.info(f"[DEBUG]   num_requests: {num_requests_list} (type: {type(num_requests_list)})")
-        logger.info(f"[DEBUG]   concurrency: {concurrency_list} (type: {type(concurrency_list)})")
-        logger.info(f"[DEBUG]   prefix_length: {prefix_length} (type: {type(prefix_length)})")
-
-        # Convert to lists if single values were provided for backward compatibility
-        if not isinstance(num_requests_list, list):
-            num_requests_list = [num_requests_list]
-        if not isinstance(concurrency_list, list):
-            concurrency_list = [concurrency_list]
-
-        # Ensure lists are not empty
-        if not num_requests_list:
-            logger.warning("[DEBUG] Custom API - num_requests_list is empty, using default [50]")
-            num_requests_list = [50]
-        if not concurrency_list:
-            logger.warning("[DEBUG] Custom API - concurrency_list is empty, using default [5]")
-            concurrency_list = [5]
-
-        # Validate that both lists have the same length for paired combinations
-        if len(num_requests_list) != len(concurrency_list):
-            raise Exception(f"请求总数和并发数的值数量必须相同。当前请求总数有 {len(num_requests_list)} 个值，并发数有 {len(concurrency_list)} 个值。")
-
-        # Helper function to clean up litellm process
-        def cleanup_litellm_process():
-            if litellm_process:
-                try:
-                    logger.info("Stopping litellm server process...")
-                    litellm_process.terminate()
-                    litellm_process.wait(timeout=10)
-                    logger.info("Litellm server process stopped successfully")
-                except subprocess.TimeoutExpired:
-                    logger.warning("Litellm server process did not terminate gracefully, forcing kill...")
-                    litellm_process.kill()
-                    litellm_process.wait()
-                except Exception as cleanup_error:
-                    logger.error(f"Error stopping litellm server process: {cleanup_error}")
-
-            # Close log file handle if it exists
-            session = self.test_sessions.get(session_id, {})
-            log_handle = session.get('litellm_log_handle')
-            if log_handle:
-                try:
-                    log_handle.flush()
-                    log_handle.close()
-                    logger.info("Closed litellm log file handle")
-                except Exception as e:
-                    logger.error(f"Error closing litellm log handle: {e}")
-
-        logger.info(f"Starting evalscope stress test with custom API: {num_requests_list} requests, {concurrency_list} concurrent")
-
-        self._update_session(session_id, {
-            "current_message": "测试自定义API端点连接..."
-        })
-        
-        # Test endpoint connectivity first
-        try:
-            import requests
-            # Try a simple request to test the endpoint
-            test_payload = {
-                "model": model_name,
-                "messages": [{"role": "user", "content": "Test connection"}],
-                "max_tokens": 10
-            }
-            
-            logger.info(f"Testing custom API endpoint: {api_url}")
-            logger.info(f"Test payload: {test_payload}")
-            
-            test_response = requests.post(api_url, json=test_payload, timeout=15)
-            
-            logger.info(f"Custom endpoint test response: {test_response.status_code}")
-            logger.info(f"Response headers: {dict(test_response.headers)}")
-            logger.info(f"Response body: {test_response.text[:500]}")
-            
-            if test_response.status_code == 404:
-                response_text = test_response.text
-                if "not found in any endpoint" in response_text or "model" in response_text.lower():
-                    raise Exception(f"模型未找到 (404): 模型 '{model_name}' 在此端点不存在，请检查模型名称是否正确")
-                else:
-                    raise Exception(f"API端点不存在 (404): 请检查URL是否正确。确保使用完整路径如 /v1/chat/completions。当前URL: {api_url}")
-            elif test_response.status_code == 401:
-                raise Exception(f"认证失败 (401): API需要认证，请检查API密钥或认证方式")
-            elif test_response.status_code == 403:
-                raise Exception(f"访问被拒绝 (403): 无权限访问此API端点")
-            elif test_response.status_code == 422:
-                raise Exception(f"请求格式错误 (422): 请检查模型名称是否正确。当前模型: {model_name}")
-            elif test_response.status_code == 500:
-                raise Exception(f"服务器内部错误 (500): API服务器出现问题")
-            elif test_response.status_code != 200:
-                raise Exception(f"API返回错误状态码 {test_response.status_code}: {test_response.text[:200]}")
-                
-        except requests.exceptions.ConnectionError:
-            logger.error(f"Connection error when testing custom endpoint: {api_url}")
-            raise Exception(f"无法连接到API端点: {api_url}，请检查URL是否正确且服务是否可访问")
-        except requests.exceptions.Timeout:
-            logger.error(f"Timeout when testing custom endpoint: {api_url}")
-            raise Exception(f"API端点响应超时: {api_url}，请检查服务是否正常")
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Request error when testing custom endpoint: {e}")
-            raise Exception(f"请求失败: {str(e)}")
-        except Exception as e:
-            logger.error(f"Custom endpoint connectivity test failed: {e}")
-            raise Exception(f"自定义API端点连接失败: {str(e)}")
-        
-        self._update_session(session_id, {
-            "current_message": "配置evalscope测试参数..."
-        })
-        
-        try:
-            # Use single token values instead of ranges
-            min_tokens = output_tokens
-            max_tokens = output_tokens
-            min_prompt_length = input_tokens
-            max_prompt_length = input_tokens
-            
-            logger.info(f"[DEBUG] Custom API Token parameters: prefix_length={prefix_length}, input_tokens={input_tokens}, output_tokens={output_tokens}")
-            logger.info(f"[DEBUG] Custom API Evalscope config: min_prompt_length={min_prompt_length}, max_prompt_length={max_prompt_length}, min_tokens={min_tokens}, max_tokens={max_tokens}")
-            logger.info(f"[DEBUG] Custom API Token parameters: connect_timeout={connect_timeout}, read_timeout={read_timeout}")
-
-            # Get appropriate tokenizer path based on model name
-            tokenizer_path = self._get_tokenizer_path(model_name)
-            logger.info(f"[DEBUG] Using tokenizer path: {tokenizer_path}")
-            
-            print(f"custom_api, model_name: {model_name}")
-            # Note: output_dir already created at the beginning of this function
-
-            # Handle custom dataset with S3 download if needed
-            local_dataset_path = None
-            if dataset == 'custom' and dataset_path:
-                if dataset_path.startswith('s3://'):
-                    # Download from S3
-                    self._update_session(session_id, {
-                        "current_message": "从S3下载自定义数据集..."
-                    })
-                    try:
-                        local_dataset_path = self._download_s3_dataset(dataset_path, session_id)
-                        logger.info(f"Successfully downloaded S3 dataset to: {local_dataset_path}")
-                    except Exception as e:
-                        logger.error(f"Failed to download S3 dataset: {e}")
-                        raise Exception(f"下载S3数据集失败: {str(e)}")
-                else:
-                    # Use local path as-is
-                    local_dataset_path = dataset_path
-                    if not os.path.exists(local_dataset_path):
-                        raise Exception(f"本地数据集文件不存在: {local_dataset_path}")
-
-                # For custom datasets, use flexible prompt length limits to avoid filtering out user prompts
-                min_prompt_length = 1  # Allow very short prompts
-                max_prompt_length = 500000  # Allow very long prompts
-                logger.info(f"[CUSTOM DATASET] Updated prompt lengths: min={min_prompt_length}, max={max_prompt_length}")
-            
-            # Let real-time polling handle all progress updates - no hardcoded progress here
-            self._update_session(session_id, {
-                "current_message": f"正在执行evalscope基准测试 ({num_requests_list} 请求, {concurrency_list} 并发)..."
-            })
-            
-            # Create Python script to run evalscope programmatically using the same approach as original implementation
-            # For custom datasets, we need to use dataset_path instead of dataset parameter
-            
-            # Check if VLM parameters should be included (when image parameters are provided)
-            has_vlm_params = 'image_width' in test_params and 'image_height' in test_params and 'image_num' in test_params
-
-            # Create appropriate script content based on dataset type
-            if dataset == 'custom' and local_dataset_path:
-                # Use dataset_path for custom datasets
-                script_content = f'''#!/usr/bin/env python
-import sys
-import json
-
-# Add evalscope to path
-sys.path.insert(0, '{VENV_SITE_PACKAGES}')
-
-try:
-    from evalscope.perf.main import run_perf_benchmark
-    from evalscope.perf.arguments import Arguments
-
-    # Create evalscope configuration for custom dataset (this will create cartesian product and subfolders)
-    task_cfg = Arguments(
-        parallel={concurrency_list},
-        number={num_requests_list},
-        model='{sm_model_name}',
-        url='{api_url}',
-        api='openai',
-        dataset_path='{local_dataset_path}',
-        dataset='custom',
-        extra_args={{'ignore_eos': False}},
-        tokenizer_path='{tokenizer_path}',
-        temperature={temperature},
-        outputs_dir='{output_dir}',
-        stream=True,
-        connect_timeout={connect_timeout},
-        read_timeout={read_timeout},
-        seed=42
-    )
-
-    # Run the benchmark (this creates the subfolder structure)
-    results = run_perf_benchmark(task_cfg)
-
-    # Output results as JSON
-    print("EVALSCOPE_RESULTS_START")
-    print(json.dumps(results, default=str, ensure_ascii=False))
-    print("EVALSCOPE_RESULTS_END")
-
-except Exception as e:
-    print("EVALSCOPE_ERROR:", str(e))
-    import traceback
-    traceback.print_exc()
-    sys.exit(1)
-'''
-            else:
-                # Use standard dataset parameter for non-custom datasets
-                script_content = f'''#!/usr/bin/env python
-import sys
-import json
-
-# Add evalscope to path
-sys.path.insert(0, '{VENV_SITE_PACKAGES}')
-
-try:
-    from evalscope.perf.main import run_perf_benchmark
-    from evalscope.perf.arguments import Arguments
-
-    # Create evalscope configuration (this will create cartesian product and subfolders)
-    task_cfg = Arguments(
-        parallel={concurrency_list},
-        number={num_requests_list},
-        model='{sm_model_name}',
-        url='{api_url}',
-        api='openai',
-        dataset='{dataset}',
-        min_tokens={min_tokens},
-        max_tokens={max_tokens},
-        prefix_length={prefix_length},
-        min_prompt_length={min_prompt_length},
-        max_prompt_length={max_prompt_length},
-        extra_args={{'ignore_eos': True}},
-        tokenizer_path='{tokenizer_path}',
-        temperature={temperature},
-        outputs_dir='{output_dir}',
-        stream=True,
-        connect_timeout={connect_timeout},
-        read_timeout={read_timeout},
-        seed=42{', image_width=' + str(image_width) + ', image_height=' + str(image_height) + ', image_format="' + image_format + '", image_num=' + str(image_num) if has_vlm_params else ''}
-    )
-
-    # Run the benchmark (this creates the subfolder structure)
-    results = run_perf_benchmark(task_cfg)
-
-    # Output results as JSON
-    print("EVALSCOPE_RESULTS_START")
-    print(json.dumps(results, default=str, ensure_ascii=False))
-    print("EVALSCOPE_RESULTS_END")
-
-except Exception as e:
-    print("EVALSCOPE_ERROR:", str(e))
-    import traceback
-    traceback.print_exc()
-    sys.exit(1)
-'''
-            
-            script_path = f"{output_dir}/run_evalscope.py"
-            with open(script_path, 'w', encoding='utf-8') as f:
-                f.write(script_content)
-            
-            logger.info(f"[DEBUG] Custom API Evalscope execution script written to: {script_path}")
-            
-            # Run evalscope in subprocess with conda environment
-            env = os.environ.copy()
-            cmd = [
-                '/bin/bash', '-c',
-                f'source /home/ubuntu/anaconda3/etc/profile.d/conda.sh && conda activate evalscope && python {script_path}'
-            ]
-            
-            logger.info(f"Executing custom API evalscope command in subprocess...")
-            
-            # Calculate timeout based on cartesian product (evalscope runs all combinations)
-            num_combinations = len(num_requests_list) * len(concurrency_list)
-            base_timeout = 1200  # 20 minutes per combination
-            total_timeout = max(7200, num_combinations * base_timeout)  # At least 1 hour
-            
-            logger.info(f"[DEBUG] Custom API - Running {num_combinations} combinations ({len(concurrency_list)} concurrency × {len(num_requests_list)} requests)")
-            logger.info(f"[DEBUG] Custom API - Setting timeout to {total_timeout} seconds ({total_timeout/60:.1f} minutes)")
-            logger.info(f"[DEBUG] Custom API - Will filter to paired combinations: {list(zip(concurrency_list, num_requests_list))}")
-            
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=total_timeout,
-                env=env
-            )
-            
-            if result.returncode != 0:
-                logger.error(f"Custom API Evalscope subprocess failed - stdout: {result.stdout}")
-                logger.error(f"Custom API Evalscope subprocess failed - stderr: {result.stderr}")
-                # Check if results file exists anyway (evalscope might have completed but subprocess failed)
-                results_file = f"{output_dir}/benchmark_results.json"
-                if Path(results_file).exists():
-                    logger.info(f"Found results file despite subprocess failure, attempting to parse: {results_file}")
-                    try:
-                        import json
-                        with open(results_file, 'r') as f:
-                            file_results = json.load(f)
-                        
-                        # Save results and return them
-                        try:
-                            self._save_results_to_output_dir(output_dir, file_results, test_params, model_name, session_id)
-                        except Exception as save_error:
-                            logger.error(f"Failed to save results (non-critical): {save_error}")
-                        
-                        # Clean up litellm process before returning
-                        cleanup_litellm_process()
-                        return file_results
-                    except Exception as e:
-                        logger.error(f"Failed to parse results file: {e}")
-                
-                raise Exception(f"Evalscope执行失败: {result.stderr}")
-            
-            logger.info(f"Custom API Evalscope subprocess completed successfully")
-            logger.info(f"Stdout: {result.stdout}")
-            
-            # Parse real progress before processing results
-            output_dir = self.test_sessions[session_id].get("output_directory") 
-            if output_dir:
-                progress_info = self._parse_benchmark_log_progress(output_dir, session_id)
-                total_expected_requests = self._calculate_total_expected_requests(test_params)
-                
-                if total_expected_requests > 0 and progress_info['total_processed'] > 0:
-                    real_progress = round(min(90, (progress_info['total_processed'] / total_expected_requests) * 100))
-                    progress_message = f"已处理 {progress_info['total_processed']}/{total_expected_requests} 个请求，正在处理测试结果..."
-                    
-                    self._update_session(session_id, {
-                        "progress": real_progress,
-                        "current_message": progress_message,
-                        "real_progress_info": progress_info
-                    })
-
-            # Check if evalscope generated subfolder results (new multi-combination format)
-            subfolder_results = self._collect_subfolder_results(output_dir, session_id)
-            if subfolder_results:
-                logger.info(f"Custom API - Found {len(subfolder_results)} subfolder results, using comprehensive format")
-                # Transform results to match frontend expectations
-                transformed_results = self._process_comprehensive_results(subfolder_results, test_params, session_id)
-                
-                # Save results to output directory for consistency
-                try:
-                    self._save_results_to_output_dir(output_dir, transformed_results, test_params, model_name, session_id)
-                except Exception as save_error:
-                    logger.error(f"Failed to save results (non-critical): {save_error}")
-                    # Continue processing even if save fails
-                
-                # Clean up litellm process before returning
-                cleanup_litellm_process()
-                return transformed_results
-            
-            # Fallback to parsing from stdout if no subfolders found
-            output = result.stdout
-            start_marker = "EVALSCOPE_RESULTS_START"
-            end_marker = "EVALSCOPE_RESULTS_END"
-            
-            if start_marker in output and end_marker in output:
-                start_idx = output.find(start_marker) + len(start_marker)
-                end_idx = output.find(end_marker)
-                results_json_str = output[start_idx:end_idx].strip()
-            else:
-                logger.error(f"No results markers found in custom API output")
-                logger.error(f"Output: {output}")
-                
-                # Try to read results from file as fallback
-                results_file = f"{output_dir}/benchmark_results.json"
-                if Path(results_file).exists():
-                    logger.info(f"Stdout parsing failed, trying to read results from file: {results_file}")
-                    try:
-                        import json
-                        with open(results_file, 'r') as f:
-                            file_results = json.load(f)
-                        
-                        logger.info(f"Successfully read results from file: {file_results}")
-                        
-                        # Save results and return them
-                        try:
-                            self._save_results_to_output_dir(output_dir, file_results, test_params, model_name, session_id)
-                        except Exception as save_error:
-                            logger.error(f"Failed to save results (non-critical): {save_error}")
-                        
-                        # Clean up litellm process before returning
-                        cleanup_litellm_process()
-                        return file_results
-                    except Exception as e:
-                        logger.error(f"Failed to read results from file: {e}")
-                
-                if "EVALSCOPE_ERROR:" in output:
-                    error_line = [line for line in output.split('\n') if 'EVALSCOPE_ERROR:' in line]
-                    if error_line:
-                        raise Exception(f"Evalscope执行出错: {error_line[0].split('EVALSCOPE_ERROR:')[1].strip()}")
-                raise Exception("无法从evalscope输出中提取测试结果")
-            
-            try:
-                import json
-                results = json.loads(results_json_str)
-                logger.info(f"Custom API parsed results type: {type(results)}")
-                logger.info(f"Custom API parsed results preview: {str(results)[:200]}...")
-                
-                # Handle legacy single result format (we now use subfolder results instead)
-                if isinstance(results, list) and len(results) > 0:
-                    # If results is a list, take the first element (which should be the main results)
-                    actual_results = results[0] if isinstance(results[0], dict) else {}
-                    logger.info(f"Using first element from list: {actual_results}")
-                elif isinstance(results, dict):
-                    actual_results = results
-                else:
-                    logger.warning(f"Unexpected results format: {type(results)}")
-                    actual_results = {}
-                
-                # Transform results to match frontend expectations (like original implementation)
-                transformed_results = self._transform_evalscope_results_to_frontend_format(
-                    actual_results, test_params, session_id
-                )
-                
-                # Save results to output directory for consistency
-                try:
-                    self._save_results_to_output_dir(output_dir, transformed_results, test_params, model_name, session_id)
-                except Exception as save_error:
-                    logger.error(f"Failed to save results (non-critical): {save_error}")
-                    # Continue processing even if save fails
-                
-                # Clean up litellm process before returning
-                cleanup_litellm_process()
-                return transformed_results
-                
-            except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse custom API results JSON: {e}")
-                logger.error(f"Results string: {results_json_str}")
-                raise Exception(f"解析测试结果失败: {str(e)}")
-            
-        except subprocess.TimeoutExpired as e:
-            logger.error(f"Custom API Evalscope subprocess timed out after {total_timeout} seconds for session {session_id}")
-            cleanup_litellm_process()
-            raise Exception(f"Evalscope执行超时 ({total_timeout}秒)，可能是模型连接问题或tokenizer加载缓慢。当前运行 {num_combinations} 个组合测试，建议减少测试参数组合数量")
-        except Exception as e:
-            logger.error(f"Custom API Evalscope execution failed for session {session_id}: {e}")
-            cleanup_litellm_process()
             raise Exception(f"Evalscope执行失败: {str(e)}")
 
     def _get_emd_api_url(self, model_path: str, deployment_tag: str) -> str:
-        """Get EMD API URL dynamically from EMD status.
-        
-        Args:
-            model_path: Model path (e.g., "Qwen2-VL-7B-Instruct")
-            deployment_tag: Deployment tag
-            
-        Returns:
-            Complete API URL for the deployed model
-            
-        Raises:
-            Exception: If unable to find API URL
-        """
+        """Get the OpenAI-compatible API URL for a deployed EMD model."""
         try:
-            from emd.sdk.status import get_model_status
-            
-            # Get all model deployment status
-            status = get_model_status()
-            logger.info(f"Looking for API URL for model {model_path} with tag {deployment_tag}")
-            
-            # Check completed deployments first
-            for model in status.get("completed", []):
-                model_id = model.get("model_id")
-                model_tag = model.get("model_tag")
-                
-                # Match by model_id and tag
-                if model_id == model_path and model_tag == deployment_tag:
-                    # Try to get base URL from DNSName field
-                    dns_name = model.get("DNSName")
-                    if dns_name:
-                        api_url = f"http://{dns_name}/v1/chat/completions"
-                        logger.info(f"Found API URL from DNSName: {api_url}")
-                        return api_url
-                    
-                    # Try to extract from outputs field
-                    outputs = model.get("outputs", "")
-                    if outputs and isinstance(outputs, str):
-                        try:
-                            import ast
-                            # Parse the outputs string as a Python dict
-                            outputs_dict = ast.literal_eval(outputs)
-                            base_url = outputs_dict.get("BaseURL")
-                            if base_url:
-                                api_url = f"{base_url}/v1/chat/completions"
-                                logger.info(f"Found API URL from outputs: {api_url}")
-                                return api_url
-                        except Exception as e:
-                            logger.warning(f"Failed to parse outputs field: {e}")
-                    
-                    logger.warning(f"Found model {model_id}/{model_tag} but no URL fields available")
-                    break
-            
-            # If not found in completed, check inprogress (shouldn't happen as we check status first)
-            for model in status.get("inprogress", []):
-                model_id = model.get("model_id")
-                model_tag = model.get("model_tag")
-                
-                if model_id == model_path and model_tag == deployment_tag:
-                    # Model is still deploying, this shouldn't happen as we check deployment status first
-                    logger.warning(f"Model {model_id}/{model_tag} is still in progress")
-                    break
-            
-            # Fallback - if we can't find the specific model, try to get any deployed model's DNS
-            # This can happen in some edge cases
-            for model in status.get("completed", []):
-                dns_name = model.get("DNSName")
-                if dns_name:
-                    api_url = f"http://{dns_name}/v1/chat/completions"
-                    logger.warning(f"Using fallback API URL from another deployed model: {api_url}")
-                    return api_url
-            
-            # If all else fails, raise an exception
-            raise Exception(f"无法找到模型 {model_path}/{deployment_tag} 的API端点。请检查模型是否已正确部署。")
-            
-        except ImportError:
-            logger.error("EMD SDK not available")
-            raise Exception("EMD SDK 不可用，无法获取API端点")
-        except Exception as e:
-            logger.error(f"Error getting EMD API URL: {e}")
-            raise Exception(f"获取EMD API端点失败: {str(e)}")
-
-    def _get_ec2_api_url(self, model_path: str, deployment_tag: str, endpoint: str) -> str:
-        """Get EC2 API URL for Docker deployed models.
-
-        Args:
-            model_path: Model path (e.g., "Qwen3-8B")
-            deployment_tag: Deployment tag (optional)
-            endpoint: Endpoint URL from model status (e.g., "http://localhost:8000")
-
-        Returns:
-            Complete API URL for the deployed model
-
-        Raises:
-            Exception: If unable to construct API URL
-        """
-        try:
-            if endpoint:
-                # Use the endpoint provided by the model status
-                if endpoint.endswith('/'):
-                    api_url = f"{endpoint}v1/chat/completions"
-                else:
-                    api_url = f"{endpoint}/v1/chat/completions"
-                logger.info(f"Using EC2 API URL: {api_url}")
-                return api_url
+            endpoint, used_fallback = resolve_deployment_api_url(model_path, deployment_tag)
+            if used_fallback:
+                logger.warning(
+                    "Using fallback EMD endpoint %s for %s/%s", endpoint, model_path, deployment_tag
+                )
             else:
-                # Fallback to default localhost pattern if no endpoint provided
-                # This shouldn't happen with proper EC2 model registration
-                logger.warning(f"No endpoint provided for EC2 model {model_path}, using fallback")
-                raise Exception(f"无法获取EC2模型 {model_path} 的API端点")
-
-        except Exception as e:
-            logger.error(f"Error getting EC2 API URL: {e}")
-            raise Exception(f"获取EC2 API端点失败: {str(e)}")
+                logger.info(
+                    "Resolved EMD endpoint %s for %s/%s", endpoint, model_path, deployment_tag
+                )
+            return endpoint
+        except RuntimeError as exc:
+            logger.error("Error resolving EMD API URL: %s", exc)
+            raise Exception(str(exc))
 
     def _get_tokenizer_path(self, model_name: str) -> str:
         """Get appropriate tokenizer path based on model name.
@@ -3514,110 +2461,6 @@ except Exception as e:
             # For unknown models, try the base model name as-is
             logger.warning(f"Unknown model family for {model_name}, using base model name as tokenizer path")
             return base_model
-
-    def _download_s3_dataset(self, s3_path: str, session_id: str) -> str:
-        """Download dataset from S3 and return local path.
-
-        Args:
-            s3_path: S3 path in format s3://bucket/key
-            session_id: Session ID for logging and temporary file naming
-
-        Returns:
-            Local file path to downloaded dataset
-
-        Raises:
-            Exception: If S3 download fails
-        """
-        try:
-            logger.info(f"Downloading custom dataset from S3: {s3_path}")
-
-            # Parse S3 path
-            if not s3_path.startswith('s3://'):
-                raise Exception(f"Invalid S3 path format: {s3_path}. Must start with 's3://'")
-
-            s3_parts = s3_path[5:].split('/', 1)  # Remove 's3://' and split
-            if len(s3_parts) != 2:
-                raise Exception(f"Invalid S3 path format: {s3_path}. Expected format: s3://bucket/key")
-
-            bucket_name = s3_parts[0]
-            object_key = s3_parts[1]
-
-            logger.info(f"Parsed S3 path - Bucket: {bucket_name}, Key: {object_key}")
-
-            # Create S3 client
-            try:
-                s3_client = boto3.client('s3')
-                logger.info("S3 client created successfully")
-            except Exception as e:
-                logger.error(f"Failed to create S3 client: {e}")
-                raise Exception(f"无法创建S3客户端，请检查AWS凭据配置: {str(e)}")
-
-            # Get file extension from S3 key
-            file_extension = os.path.splitext(object_key)[1]
-            if not file_extension:
-                file_extension = '.jsonl'  # Default to .jsonl for datasets
-
-            # Create temporary file with appropriate extension
-            temp_file = tempfile.NamedTemporaryFile(
-                mode='wb',
-                suffix=f'_{session_id}_dataset{file_extension}',
-                delete=False
-            )
-            temp_file_path = temp_file.name
-            temp_file.close()
-
-            logger.info(f"Created temporary file: {temp_file_path}")
-
-            # Download file from S3
-            try:
-                logger.info(f"Starting S3 download from s3://{bucket_name}/{object_key}")
-                s3_client.download_file(bucket_name, object_key, temp_file_path)
-                logger.info(f"Successfully downloaded dataset to: {temp_file_path}")
-
-                # Verify file exists and has content
-                if not os.path.exists(temp_file_path):
-                    raise Exception("Downloaded file does not exist")
-
-                file_size = os.path.getsize(temp_file_path)
-                if file_size == 0:
-                    raise Exception("Downloaded file is empty")
-
-                logger.info(f"Downloaded dataset file size: {file_size} bytes")
-
-                # Verify it's a valid JSON Lines file by reading first few lines
-                try:
-                    with open(temp_file_path, 'r', encoding='utf-8') as f:
-                        first_line = f.readline().strip()
-                        if first_line:
-                            json.loads(first_line)  # Validate JSON format
-                            logger.info("Dataset file format validation successful")
-                        else:
-                            logger.warning("Dataset file appears to be empty")
-                except json.JSONDecodeError as e:
-                    logger.warning(f"Dataset file may not be valid JSON Lines format: {e}")
-                    # Continue anyway, let evalscope handle format validation
-                except Exception as e:
-                    logger.warning(f"Could not validate dataset file format: {e}")
-                    # Continue anyway
-
-                return temp_file_path
-
-            except s3_client.exceptions.NoSuchBucket:
-                raise Exception(f"S3存储桶不存在: {bucket_name}")
-            except s3_client.exceptions.NoSuchKey:
-                raise Exception(f"S3文件不存在: s3://{bucket_name}/{object_key}")
-            except Exception as e:
-                logger.error(f"S3 download failed: {e}")
-                # Clean up temp file on error
-                try:
-                    os.unlink(temp_file_path)
-                except:
-                    pass
-                raise Exception(f"S3下载失败: {str(e)}")
-
-        except Exception as e:
-            logger.error(f"Error downloading S3 dataset {s3_path}: {e}")
-            raise
     
     def _parse_benchmark_log_progress(self, output_dir: str, session_id: str) -> Dict[str, Any]:
         """Parse benchmark.log files to extract real progress information.
@@ -3938,47 +2781,13 @@ except Exception as e:
 
     def _update_session(self, session_id: str, updates: Dict[str, Any]):
         """Update session data.
-
+        
         Args:
             session_id: Session ID
             updates: Dictionary of updates to apply
         """
         if session_id in self.test_sessions:
             self.test_sessions[session_id].update(updates)
-
-    def get_litellm_logs(self, session_id: str) -> Optional[str]:
-        """Get litellm server logs for a session.
-
-        Args:
-            session_id: Session ID
-
-        Returns:
-            Litellm log content as string or None if not available
-        """
-        try:
-            session = self.test_sessions.get(session_id)
-            if not session:
-                logger.warning(f"Session {session_id} not found")
-                return None
-
-            litellm_log_file = session.get('litellm_log_file')
-            if not litellm_log_file:
-                logger.info(f"No litellm log file found for session {session_id}")
-                return None
-
-            if not os.path.exists(litellm_log_file):
-                logger.warning(f"Litellm log file does not exist: {litellm_log_file}")
-                return None
-
-            with open(litellm_log_file, 'r') as f:
-                log_content = f.read()
-
-            logger.info(f"Retrieved litellm logs for session {session_id}, size: {len(log_content)} characters")
-            return log_content
-
-        except Exception as e:
-            logger.error(f"Error reading litellm logs for session {session_id}: {e}")
-            return None
     
     def delete_session_folder(self, session_id: str) -> bool:
         """Delete a session folder and all its contents from disk.

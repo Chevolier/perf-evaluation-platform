@@ -1,20 +1,57 @@
 """Model management service for deployment and status tracking."""
 
+import re
 import time
-import subprocess
-import threading
-import json
-import os
-from pathlib import Path
-from typing import Dict, Any, List
+import random
+from typing import Dict, Any, List, Optional
 from datetime import datetime
 
-# EMD functionality removed - only EC2 deployment supported
+import os
+import sys
+from pathlib import Path
 
-from ..core.models import model_registry
-from ..utils import get_logger
+
+def _ensure_local_emd_sdk() -> None:
+    """Best-effort attempt to prepend a locally cloned EMD SDK to sys.path."""
+    candidate_env = os.environ.get("EMD_SDK_PATH")
+    candidates = []
+
+    if candidate_env:
+        candidates.append(Path(candidate_env).expanduser())
+
+    repo_root = Path(__file__).resolve().parents[2]
+    candidates.extend([
+        repo_root / "easy-model-deployer" / "src",
+        repo_root.parent / "easy-model-deployer" / "src"
+    ])
+
+    for candidate in candidates:
+        if candidate and candidate.exists() and candidate.is_dir():
+            candidate_str = str(candidate)
+            if candidate_str not in sys.path:
+                sys.path.insert(0, candidate_str)
+            break
+
+
+_ensure_local_emd_sdk()
+
+try:
+    from emd.sdk.status import get_model_status
+    from emd.sdk.deploy import deploy as emd_deploy
+    from emd.sdk.destroy import destroy as emd_destroy
+    EMD_AVAILABLE = True
+except ImportError:
+    EMD_AVAILABLE = False
+
+from ..core.models import model_registry, EMDModel
+from ..config import get_config
+from ..utils import get_logger, DatabaseManager
+from ..utils.emd import extract_endpoint_from_model_entry
+from ..utils.emd import extract_endpoint_from_model_entry
+
 
 logger = get_logger(__name__)
+
 
 class ModelService:
     """Service for managing model deployment and status."""
@@ -22,158 +59,175 @@ class ModelService:
     def __init__(self):
         """Initialize model service."""
         self.registry = model_registry
+        self._db = DatabaseManager()
         self._deployment_status = {}
+        self._current_emd_tag = None
+        self._external_models: Dict[str, Dict[str, Any]] = {}
+        
+        # Circuit breaker for AWS throttling
+        self._circuit_breaker = {
+            'state': 'closed',  # closed, open, half_open
+            'failure_count': 0,
+            'last_failure_time': None,
+            'failure_threshold': 3,  # Open circuit after 3 consecutive failures
+            'recovery_timeout': 60,  # Try again after 60 seconds
+            'half_open_success_threshold': 1  # Close circuit after 1 success in half-open
+        }
+        
+        # Enhanced caching for throttling scenarios
+        self._emd_status_cache = {
+            'data': None,
+            'timestamp': None,
+            'extended_ttl': 300  # 5 minutes extended cache for throttling
+        }
 
-        # EC2 Docker deployment tracking
-        self._ec2_deployments = {}  # Store running Docker containers info
-        self._ec2_status_checkers = {}  # Store status checker threads
-
-        # Deployment state persistence
-        self._state_dir = Path("data/deployment_state")
-        self._state_dir.mkdir(parents=True, exist_ok=True)
-        self._deployments_file = self._state_dir / "ec2_deployments.json"
-        self._status_file = self._state_dir / "deployment_status.json"
-
-        # Load existing deployment state on startup
-        self._load_deployment_state()
-
-    def _save_deployment_state(self):
-        """Save current deployment state to files."""
         try:
-            # Save EC2 deployments
-            with open(self._deployments_file, 'w') as f:
-                json.dump(self._ec2_deployments, f, indent=2, default=str)
+            self._refresh_external_models()
+        except Exception as exc:  # pragma: no cover - best effort preload
+            logger.debug("Skipping external deployment preload: %s", exc)
+    
+    def _should_circuit_break(self) -> bool:
+        """Check if circuit breaker should prevent EMD calls."""
+        circuit = self._circuit_breaker
+        now = time.time()
+        
+        if circuit['state'] == 'closed':
+            return False
+        elif circuit['state'] == 'open':
+            # Check if recovery timeout has passed
+            if circuit['last_failure_time'] and (now - circuit['last_failure_time']) > circuit['recovery_timeout']:
+                circuit['state'] = 'half_open'
+                logger.info("🔄 Circuit breaker switching to half-open state")
+                return False
+            return True
+        elif circuit['state'] == 'half_open':
+            return False
+        
+        return False
+    
+    def _record_circuit_success(self):
+        """Record successful EMD call."""
+        circuit = self._circuit_breaker
+        if circuit['state'] == 'half_open':
+            circuit['state'] = 'closed'
+            circuit['failure_count'] = 0
+            logger.info("✅ Circuit breaker closed - EMD calls restored")
+        elif circuit['state'] == 'closed':
+            circuit['failure_count'] = max(0, circuit['failure_count'] - 1)
+    
+    def _record_circuit_failure(self):
+        """Record failed EMD call."""
+        circuit = self._circuit_breaker
+        circuit['failure_count'] += 1
+        circuit['last_failure_time'] = time.time()
+        
+        if circuit['failure_count'] >= circuit['failure_threshold']:
+            circuit['state'] = 'open'
+            logger.warning(f"🚫 Circuit breaker opened - EMD calls suspended for {circuit['recovery_timeout']}s due to {circuit['failure_count']} consecutive failures")
+    
+    def _get_cached_emd_data(self) -> Dict[str, Any]:
+        """Get cached EMD data if available."""
+        cache = self._emd_status_cache
+        if cache['data'] and cache['timestamp']:
+            age = time.time() - cache['timestamp']
+            # Use extended TTL during circuit breaker scenarios
+            ttl = cache['extended_ttl'] if self._circuit_breaker['state'] != 'closed' else 60
+            if age < ttl:
+                logger.info(f"🎯 Using cached EMD data (age: {age:.1f}s, circuit: {self._circuit_breaker['state']})")
+                return cache['data']
+        return None
+    
+    def _cache_emd_data(self, data: Dict[str, Any]):
+        """Cache EMD data."""
+        self._emd_status_cache['data'] = data
+        self._emd_status_cache['timestamp'] = time.time()
 
-            # Save deployment status
-            with open(self._status_file, 'w') as f:
-                json.dump(self._deployment_status, f, indent=2, default=str)
+    def _generate_external_model_key(
+        self,
+        deployment_method: str,
+        deployment_id: Optional[str] = None,
+        model_name: Optional[str] = None,
+    ) -> str:
+        """Generate a stable key for an external deployment."""
 
-            logger.debug(f"💾 Saved deployment state: {len(self._ec2_deployments)} deployments, {len(self._deployment_status)} statuses")
-        except Exception as e:
-            logger.error(f"❌ Failed to save deployment state: {e}")
+        base_parts = [deployment_method or "external"]
+        if deployment_id:
+            base_parts.append(deployment_id)
+        elif model_name:
+            base_parts.append(model_name)
+        else:
+            base_parts.append(datetime.now().strftime("%m%d%H%M%S"))
 
-    def _load_deployment_state(self):
-        """Load deployment state from files on startup."""
+        slug = "::".join(base_parts)
+        slug = re.sub(r"[^A-Za-z0-9:_-]", "-", slug)
+        return f"ext::{slug.lower()}"
+
+    def _refresh_external_models(self):
+        """Load external deployment endpoints from persistent storage."""
         try:
-            # Load EC2 deployments
-            if self._deployments_file.exists():
-                with open(self._deployments_file, 'r') as f:
-                    self._ec2_deployments = json.load(f)
-                logger.info(f"📂 Loaded {len(self._ec2_deployments)} EC2 deployments from state file")
+            records = self._db.list_deployment_endpoints(status='active')
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.warning("Unable to list deployment endpoints: %s", exc)
+            records = []
 
-            # Load deployment status
-            if self._status_file.exists():
-                with open(self._status_file, 'r') as f:
-                    self._deployment_status = json.load(f)
-                logger.info(f"📂 Loaded {len(self._deployment_status)} deployment statuses from state file")
+        external_map: Dict[str, Dict[str, Any]] = {}
 
-            # Validate loaded deployments against running containers
-            self._validate_loaded_deployments()
+        for record in records:
+            model_key = record.get('model_key') or self._generate_external_model_key(
+                record.get('deployment_method', 'external'),
+                record.get('deployment_id'),
+                record.get('model_name'),
+            )
 
-        except Exception as e:
-            logger.error(f"❌ Failed to load deployment state: {e}")
-            # Initialize with empty state on error
-            self._ec2_deployments = {}
-            self._deployment_status = {}
+            metadata = (record.get('metadata') or {}).copy()
+            deployment_method = record.get('deployment_method', 'External Deployment')
+            endpoint_url = record.get('endpoint_url')
 
-    def _validate_loaded_deployments(self):
-        """Validate that loaded deployments match actual running containers."""
-        if not self._ec2_deployments:
-            return
+            if not endpoint_url:
+                logger.debug("Skipping external deployment %s without endpoint", model_key)
+                continue
 
-        invalid_deployments = []
-        for model_key, deployment_info in self._ec2_deployments.items():
-            container_name = deployment_info.get("container_name")
-            if not container_name or not self._check_container_running(container_name):
-                logger.warning(f"⚠️ Container {container_name} for model {model_key} is not running, marking as failed")
-                invalid_deployments.append(model_key)
+            display_name = (
+                metadata.get('display_name')
+                or record.get('model_name')
+                or record.get('deployment_id')
+                or model_key
+            )
 
-                # Update status to reflect container not running - use not_deployed instead of failed
-                # since this indicates the deployment no longer exists rather than a failure
-                self._deployment_status[model_key] = {
-                    "status": "not_deployed",
-                    "message": "Model not currently deployed",
-                    "tag": None,
-                    "container_name": None
-                }
+            description = metadata.get('description') or f"{deployment_method} endpoint"
 
-        # Remove invalid deployments
-        for model_key in invalid_deployments:
-            del self._ec2_deployments[model_key]
+            # Keep the original model_name from the database as it may be the served model name
+            # For HyperPod/external deployments, this is typically the --served-model-name parameter
+            canonical_model_name = record.get('model_name')
+            canonical_model_path = metadata.get('model_path')
 
-        if invalid_deployments:
-            logger.info(f"🧹 Cleaned up {len(invalid_deployments)} invalid deployments on startup")
-            # Save the cleaned state
-            self._save_deployment_state()
+            # Only set model_path from registry if not already specified
+            if canonical_model_name and not canonical_model_path:
+                resolved_key = self.registry.resolve_model_key(canonical_model_name)
+                registry_model_path = self.registry.get_model_path(resolved_key)
+                if registry_model_path:
+                    canonical_model_path = registry_model_path
 
-        # Also clean up any other stale "failed" statuses that are old
-        self._cleanup_stale_failed_status()
+            if canonical_model_path and not metadata.get('model_path'):
+                metadata['model_path'] = canonical_model_path
 
-    def _cleanup_stale_failed_status(self):
-        """Clean up stale failed status entries that are no longer relevant."""
-        try:
-            stale_statuses = []
-            current_time = datetime.now()
-
-            for model_key, status_info in self._deployment_status.items():
-                # If status is "failed" and model is not currently being deployed
-                if status_info.get("status") == "failed":
-                    # Check if this is a recent failure (within last 10 minutes)
-                    try:
-                        if "started_at" in status_info:
-                            started_time = datetime.fromisoformat(status_info["started_at"])
-                            time_diff = (current_time - started_time).total_seconds()
-                            # If failure is older than 10 minutes, reset to not_deployed
-                            if time_diff > 600:  # 10 minutes
-                                stale_statuses.append(model_key)
-                        else:
-                            # No timestamp, consider it stale
-                            stale_statuses.append(model_key)
-                    except (ValueError, TypeError):
-                        # Invalid timestamp, consider it stale
-                        stale_statuses.append(model_key)
-
-            # Reset stale failed statuses to not_deployed
-            for model_key in stale_statuses:
-                logger.info(f"🧹 Resetting stale failed status for {model_key}")
-                self._deployment_status[model_key] = {
-                    "status": "not_deployed",
-                    "message": "Model not currently deployed",
-                    "tag": None,
-                    "container_name": None
-                }
-
-            if stale_statuses:
-                logger.info(f"🧹 Reset {len(stale_statuses)} stale failed statuses")
-                self._save_deployment_state()
-
-        except Exception as e:
-            logger.error(f"❌ Error cleaning up stale failed statuses: {e}")
-
-    def clear_stale_deployment_status(self) -> Dict[str, Any]:
-        """Manually clear stale deployment statuses. Public method for API use.
-
-        Returns:
-            Result dictionary with success status and cleared count
-        """
-        try:
-            original_count = len([k for k, v in self._deployment_status.items() if v.get("status") == "failed"])
-            self._cleanup_stale_failed_status()
-            new_count = len([k for k, v in self._deployment_status.items() if v.get("status") == "failed"])
-            cleared_count = original_count - new_count
-
-            return {
-                "success": True,
-                "message": f"Cleared {cleared_count} stale deployment statuses",
-                "cleared_count": cleared_count
+            external_map[model_key] = {
+                'name': display_name,
+                'description': description,
+                'deployment_method': deployment_method,
+                'deployment_id': record.get('deployment_id'),
+                'model_name': canonical_model_name,
+                'model_path': metadata.get('model_path'),
+                'endpoint': endpoint_url,
+                'supports_multimodal': metadata.get('supports_multimodal', False),
+                'supports_streaming': True,
+                'always_available': True,
+                'metadata': metadata,
             }
-        except Exception as e:
-            logger.error(f"❌ Error in manual status cleanup: {e}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
 
+        self.registry.set_external_models(external_map)
+        self._external_models = external_map
+    
     def get_all_models(self) -> Dict[str, Dict[str, Any]]:
         """Get all available models.
         
@@ -188,298 +242,738 @@ class ModelService:
         Returns:
             Formatted model list with status information
         """
+        # Refresh external deployments so registry reflects current DB state
+        self._refresh_external_models()
+
         all_models = self.get_all_models()
+        
+        bedrock_models_with_status = {}
+        for key, model_info in all_models["bedrock"].items():
+            info_copy = model_info.copy()
+            info_copy.setdefault("always_available", True)
+            bedrock_models_with_status[key] = info_copy
 
-        # Add deployment status for EC2 models from registry
-        ec2_models_with_status = {}
-        for key, model_info in all_models.get("ec2", {}).items():
-            ec2_model_info = model_info.copy()
-            ec2_model_info["deployment_status"] = self.get_ec2_deployment_status(key)
-            ec2_models_with_status[key] = ec2_model_info
+        # Add deployment status for EMD models
+        emd_models_with_status = {}
+        for key, model_info in all_models["emd"].items():
+            emd_model_info = model_info.copy()
+            emd_model_info.setdefault("always_available", False)
+            emd_model_info["deployment_status"] = self.get_emd_deployment_status(key)
+            
+            # Add launch job status if available
+            launch_jobs = self._db.get_launch_jobs_by_model(key)
+            if launch_jobs:
+                latest_job = launch_jobs[0]  # Most recent
+                emd_model_info["launch_status"] = {
+                    "job_id": latest_job["job_id"],
+                    "method": latest_job["method"],
+                    "status": latest_job["status"],
+                    "endpoint": latest_job.get("endpoint_url"),
+                    "created_at": latest_job.get("created_at")
+                }
+            
+            emd_models_with_status[key] = emd_model_info
 
-        # Add deployed custom models that aren't in registry
-        # Check both _ec2_deployments and _deployment_status for deployed custom models
-        all_potential_custom_models = set()
+        external_models_with_status = {}
+        hyperpod_models_with_status = {}
+        for key, model_info in all_models.get("external", {}).items():
+            deployment_method = (model_info.get("deployment_method") or "").lower()
+            model_name = model_info.get("model_name", "").lower()
 
-        # Add models from _ec2_deployments
-        all_potential_custom_models.update(self._ec2_deployments.keys())
+            # Skip EMD endpoints ONLY if the model is already in the EMD registry
+            # This allows custom EMD deployments to appear
+            if "emd" in deployment_method:
+                # Check if this model exists in the EMD registry
+                is_in_emd_registry = False
+                for emd_key, emd_info in emd_models_with_status.items():
+                    emd_model_path = emd_info.get("model_path", "").lower()
+                    if model_name and (model_name == emd_key.lower() or model_name == emd_model_path):
+                        # This EMD deployment matches a model in the EMD registry
+                        # Update the registry model with the deployment info
+                        emd_models_with_status[emd_key]["deployment_status"] = {
+                            "status": "deployed",
+                            "message": "Endpoint available via external deployment",
+                            "endpoint": model_info.get("endpoint"),
+                            "external_key": key
+                        }
+                        emd_models_with_status[emd_key]["endpoint"] = model_info.get("endpoint")
+                        is_in_emd_registry = True
+                        break
 
-        # Add models from _deployment_status that are deployed/inprogress
-        for model_key, status_info in self._deployment_status.items():
-            if status_info.get("status") in ["deployed", "inprogress"]:
-                all_potential_custom_models.add(model_key)
+                # Skip this external entry if it's already in the EMD registry
+                if is_in_emd_registry:
+                    continue
 
-        for model_key in all_potential_custom_models:
-            # Only add if not already in registry models and not a Bedrock model
-            if (model_key not in ec2_models_with_status and
-                not self.registry.is_bedrock_model(model_key)):
+            external_info = model_info.copy()
+            external_info.setdefault("deployment_status", {
+                "status": "deployed",
+                "message": "Endpoint available",
+                "endpoint": model_info.get("endpoint")
+            })
 
-                # Get deployment info from _ec2_deployments if available
-                deployment_info = self._ec2_deployments.get(model_key, {})
+            target_map = hyperpod_models_with_status if "hyperpod" in deployment_method else external_models_with_status
+            target_map[key] = external_info
 
-                # Get status - either from get_ec2_deployment_status or directly from _deployment_status
-                status = self.get_ec2_deployment_status(model_key)
+        models_payload = {
+            "bedrock": bedrock_models_with_status,
+            "emd": emd_models_with_status,
+            "external": external_models_with_status
+        }
 
-                # If get_ec2_deployment_status says not_deployed, but we know it's in _deployment_status as deployed/inprogress,
-                # trust the _deployment_status (this handles cases where container check fails but model is conceptually deployed)
-                if (status.get("status") == "not_deployed" and
-                    model_key in self._deployment_status and
-                    self._deployment_status[model_key].get("status") in ["deployed", "inprogress"]):
-                    status = self._deployment_status[model_key]
-
-                if status.get("status") in ["deployed", "inprogress"]:
-                    # Create model info for deployed custom model
-                    custom_model_info = {
-                        "name": model_key,  # Use model_key as name for custom models
-                        "description": f"Custom model: {model_key}",
-                        "model_path": deployment_info.get("model_path", model_key),
-                        "huggingface_repo": deployment_info.get("model_path", model_key),
-                        "supports_multimodal": True,  # Assume custom models support multimodal
-                        "supports_streaming": True,
-                        "is_custom": True,  # Flag to indicate this is a custom model
-                        "deployment_status": status
-                    }
-                    ec2_models_with_status[model_key] = custom_model_info
-                    logger.info(f"📋 Added deployed custom model to list: {model_key}")
+        if hyperpod_models_with_status:
+            models_payload["hyperpod"] = hyperpod_models_with_status
 
         return {
             "status": "success",
-            "models": {
-                "bedrock": all_models.get("bedrock", {}),
-                "ec2": ec2_models_with_status
-            }
+            "models": models_payload
         }
+
+    def register_external_endpoint(
+        self,
+        deployment_method: str,
+        endpoint_url: str,
+        *,
+        deployment_id: Optional[str] = None,
+        model_name: Optional[str] = None,
+        model_key: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        status: str = 'active'
+    ) -> Dict[str, Any]:
+        """Register or update an external deployment endpoint."""
+
+        if not endpoint_url:
+            raise ValueError("endpoint_url is required")
+
+        normalized_method = deployment_method or "External Deployment"
+        normalized_method = normalized_method.strip() or "External Deployment"
+
+        if not model_key:
+            model_key = self._generate_external_model_key(normalized_method, deployment_id, model_name)
+
+        self._db.upsert_deployment_endpoint(
+            model_key=model_key,
+            deployment_method=normalized_method,
+            endpoint_url=endpoint_url.strip(),
+            deployment_id=deployment_id,
+            model_name=model_name,
+            metadata=metadata,
+            status=status,
+        )
+
+        self._refresh_external_models()
+
+        return {
+            "model_key": model_key,
+            "model": self.registry.get_model_info(model_key, "external")
+        }
+
+    def get_external_model_info(self, model_key: str) -> Dict[str, Any]:
+        """Return information about an external deployment."""
+        return self.registry.get_model_info(model_key, "external")
     
-    def get_ec2_deployment_status(self, model_key: str) -> Dict[str, Any]:
-        """Get deployment status for an EC2 model.
-
+    def get_emd_deployment_status(self, model_key: str) -> Dict[str, Any]:
+        """Get deployment status for an EMD model.
+        
         Args:
-            model_key: EC2 model key
-
+            model_key: EMD model key
+            
         Returns:
             Deployment status information
         """
-        # Allow both registry EC2 models and custom models
-        # Only reject Bedrock models since they don't use EC2 deployment
-        if self.registry.is_bedrock_model(model_key):
-            return {"status": "unknown", "message": "Bedrock models don't use EC2 deployment"}
-
-        # Check if model is in EC2 deployments
-        if model_key in self._ec2_deployments:
-            deployment_info = self._ec2_deployments[model_key]
-            container_name = deployment_info["container_name"]
-
-            # Check if container is still running
-            if self._check_container_running(container_name):
-                # Check if health check has completed by looking at deployment status
-                if model_key in self._deployment_status and self._deployment_status[model_key].get("status") == "deployed":
+        if not self.registry.is_emd_model(model_key):
+            return {"status": "unknown", "message": "Model not found"}
+        
+        # Check if there's an external model registered with this name
+        for ext_key, ext_info in self._external_models.items():
+            if ext_info.get('name') == model_key:
+                logger.info(f"EMD model {model_key} found as external deployment: {ext_key}")
+                return {
+                    "status": "deployed",
+                    "message": "Model deployed via external registration",
+                    "tag": "external",
+                    "endpoint": ext_info.get('endpoint')
+                }
+        
+        # Try to get real EMD status if SDK is available
+        if EMD_AVAILABLE:
+            try:
+                # Get all deployed models using the same approach as original backend
+                deployed_models = self._get_current_emd_models()
+                
+                if model_key in deployed_models.get("deployed", {}):
+                    model_info = deployed_models["deployed"][model_key]
                     return {
                         "status": "deployed",
                         "message": "Model is deployed and ready",
-                        "tag": deployment_info.get("tag"),
-                        "endpoint": f"http://localhost:{deployment_info.get('port')}"
+                        "tag": model_info.get("tag"),
+                        "endpoint": model_info.get("endpoint")
                     }
-                else:
-                    # Container running but health check not complete
-                    current_status = self._deployment_status.get(model_key, {})
+                elif model_key in deployed_models.get("inprogress", {}):
                     return {
-                        "status": "inprogress",
-                        "message": current_status.get("message", "Model is starting, health check in progress"),
-                        "tag": deployment_info.get("tag"),
-                        "endpoint": f"http://localhost:{deployment_info.get('port')}"
+                        "status": "inprogress",  # Frontend expects 'inprogress'
+                        "message": "Model is being deployed",
+                        "tag": deployed_models["inprogress"][model_key].get("tag")
                     }
-            else:
-                # Container stopped, clean up
-                if model_key in self._ec2_deployments:
-                    del self._ec2_deployments[model_key]
-                self._deployment_status[model_key] = {
-                    "status": "not_deployed",
-                    "message": "Container stopped unexpectedly",
-                    "tag": None
-                }
-
+                elif model_key in deployed_models.get("failed", {}):
+                    return {
+                        "status": "failed",
+                        "message": "Deployment failed",
+                        "tag": deployed_models["failed"][model_key].get("tag")
+                    }
+                
+            except Exception as e:
+                logger.warning(f"Failed to get EMD status for {model_key}: {e}")
+        
         # Fallback to cached status or default
         if model_key in self._deployment_status:
-            return self._deployment_status[model_key]
-
+            cached_status = self._deployment_status[model_key]
+            # Return cached status, which should be updated by _get_current_emd_models if deletion completed
+            return cached_status
+        
         return {
             "status": "not_deployed",
             "message": "Model not deployed",
             "tag": None
         }
     
-    
-    def _get_current_ec2_models(self) -> Dict[str, Any]:
-        """Get current EC2 deployed models.
-
+    def _get_emd_models_from_sagemaker(self) -> Dict[str, Any]:
+        """Fallback to detect EMD models directly from SageMaker when SDK is unavailable.
+        
         Returns:
             Dictionary with deployed, inprogress, and failed models
         """
-        deployed = {}
-        inprogress = {}
-        failed = {}
-
-        # Check EC2 deployments
-        for model_key, deployment_info in self._ec2_deployments.items():
-            container_name = deployment_info["container_name"]
-
-            # Check if container is still running
-            if self._check_container_running(container_name):
-                # Check actual deployment status to see if health check has passed
-                current_status = self._deployment_status.get(model_key, {})
-                if current_status.get("status") == "deployed":
-                    # Health check passed - truly deployed
-                    deployed[model_key] = {
-                        "tag": deployment_info.get("tag"),
-                        "container_name": container_name,
-                        "port": deployment_info.get("port"),
-                        "endpoint": f"http://localhost:{deployment_info.get('port')}"
-                    }
-                else:
-                    # Container running but health check not complete - still in progress
-                    inprogress[model_key] = {
-                        "tag": deployment_info.get("tag"),
-                        "container_name": container_name,
-                        "port": deployment_info.get("port"),
-                        "message": current_status.get("message", "Model is starting, health check in progress")
-                    }
-            else:
-                # Container stopped, mark as failed
-                failed[model_key] = {
-                    "tag": deployment_info.get("tag"),
-                    "container_name": container_name,
-                    "error": "Container stopped unexpectedly"
-                }
-
-        # Check deployment status for models that might be starting but not yet in _ec2_deployments
-        for model_key, status_info in self._deployment_status.items():
-            if (status_info.get("status") == "inprogress" and
-                model_key not in deployed and
-                model_key not in inprogress and
-                model_key not in failed):
-                inprogress[model_key] = {
-                    "tag": status_info.get("tag"),
-                    "container_name": status_info.get("container_name"),
-                    "message": status_info.get("message", "Model deployment in progress")
-                }
-
-        return {
-            "deployed": deployed,
-            "inprogress": inprogress,
-            "failed": failed
-        }
+        try:
+            import boto3
+            sm_client = boto3.client('sagemaker', region_name='us-east-1')
+            
+            deployed = {}
+            inprogress = {}
+            
+            # List SageMaker endpoints matching EMD pattern
+            response = sm_client.list_endpoints(
+                MaxResults=100,
+                NameContains='EMD-Model-'
+            )
+            
+            # Create reverse mapping from model name to model key
+            reverse_mapping = {}
+            for model_key, model_info in self.registry.get_emd_models().items():
+                # EMD endpoints are named: EMD-Model-{model_name}-endpoint or EMD-Model-{model_name}-{tag}-endpoint
+                model_path = model_info.get("model_path", model_key)
+                model_name = model_path.replace("/", "-").lower()
+                reverse_mapping[model_name] = model_key
+            
+            logger.info(f"SageMaker fallback: Found {len(response.get('Endpoints', []))} EMD endpoints")
+            
+            for endpoint in response.get('Endpoints', []):
+                endpoint_name = endpoint['EndpointName']
+                status = endpoint['EndpointStatus']
+                
+                # Try to extract model name from endpoint name
+                # Format: EMD-Model-{model_name}-endpoint or EMD-Model-{model_name}-{tag}-endpoint
+                if endpoint_name.startswith('EMD-Model-'):
+                    parts = endpoint_name.replace('EMD-Model-', '').replace('-endpoint', '').split('-')
+                    # Try different combinations to match model key
+                    for model_name_candidate, model_key in reverse_mapping.items():
+                        if model_name_candidate in endpoint_name.lower():
+                            if status == 'InService':
+                                deployed[model_key] = {
+                                    "tag": "sagemaker",
+                                    "model_id": endpoint_name,
+                                    "status": "InService",
+                                    "endpoint": endpoint_name
+                                }
+                                logger.info(f"SageMaker fallback: Matched {model_key} to endpoint {endpoint_name}")
+                            elif status in ['Creating', 'Updating']:
+                                inprogress[model_key] = {
+                                    "tag": "sagemaker",
+                                    "model_id": endpoint_name,
+                                    "status": status
+                                }
+                            break
+            
+            result = {"deployed": deployed, "inprogress": inprogress, "failed": {}}
+            
+            # Update cache using the correct cache structure
+            self._emd_status_cache['data'] = result
+            self._emd_status_cache['timestamp'] = time.time()
+            
+            logger.info(f"SageMaker fallback: deployed={list(deployed.keys())}, inprogress={list(inprogress.keys())}")
+            return result
+            
+        except Exception as e:
+            logger.warning(f"SageMaker fallback failed: {e}")
+            return {"deployed": {}, "inprogress": {}, "failed": {}}
     
-    def get_current_ec2_models(self) -> List[str]:
-        """Get list of currently deployed EC2 models.
-
+    def _retry_with_exponential_backoff(self, func, max_retries=3, base_delay=1):
+        """Retry function with exponential backoff for throttling errors."""
+        for attempt in range(max_retries + 1):
+            try:
+                return func()
+            except Exception as e:
+                error_str = str(e).lower()
+                if 'throttling' in error_str or 'rate exceeded' in error_str:
+                    if attempt < max_retries:
+                        delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
+                        logger.warning(f"Throttling detected, retrying in {delay:.1f}s (attempt {attempt + 1}/{max_retries + 1})")
+                        time.sleep(delay)
+                        continue
+                    else:
+                        logger.error(f"Max retries ({max_retries}) exceeded for throttling error: {e}")
+                        # Return empty result instead of failing completely
+                        return {"deployed": {}, "inprogress": {}, "failed": {}}
+                else:
+                    # Non-throttling error, re-raise immediately
+                    raise e
+        return {"deployed": {}, "inprogress": {}, "failed": {}}
+    
+    def _get_current_emd_models(self) -> Dict[str, Any]:
+        """Get current EMD models using the same approach as original backend.
+        
+        Returns:
+            Dictionary with deployed, inprogress, and failed models
+        """
+        # Check circuit breaker and use cached data if available
+        if self._should_circuit_break():
+            cached_data = self._get_cached_emd_data()
+            if cached_data:
+                return cached_data
+            else:
+                logger.warning("🚫 Circuit breaker active but no cached data available")
+                return {"deployed": {}, "inprogress": {}, "failed": {}}
+        
+        # Try to use cached data first (normal 60s TTL when circuit is closed)
+        cached_data = self._get_cached_emd_data()
+        if cached_data:
+            return cached_data
+        
+        # If EMD SDK is not available, try direct SageMaker query as fallback
+        if not EMD_AVAILABLE:
+            logger.info("EMD SDK not available, using SageMaker fallback")
+            return self._get_emd_models_from_sagemaker()
+        
+        def _get_status():
+            status = get_model_status()
+            logger.info(f"EMD SDK get_model_status returned: {status}")
+            return status
+        
+        try:
+            # Use retry wrapper for AWS API calls that might get throttled
+            status = self._retry_with_exponential_backoff(_get_status, max_retries=2, base_delay=0.5)
+            
+            # Create reverse mapping from model_path to model_key
+            reverse_mapping = {}
+            for model_key, model_info in self.registry.get_emd_models().items():
+                model_path = model_info.get("model_path", model_key)
+                reverse_mapping[model_path] = model_key
+            
+            # print(f"🔍 DEBUG: Reverse mapping: {reverse_mapping}")
+            # print(f"🔍 DEBUG: Models in EMD status - completed: {[m.get('model_id') for m in status.get('completed', [])]}")
+            # print(f"🔍 DEBUG: Models in EMD status - inprogress: {[m.get('model_id') for m in status.get('inprogress', [])]}")
+            
+            deployed = {}
+            inprogress = {}
+            failed = {}
+            
+            # First, process completed models (higher priority)
+            for model in status.get("completed", []):
+                model_id = model.get("model_id")
+                model_tag = model.get("model_tag")
+                stack_status = model.get("stack_status", "")  # Use stack_status, not status
+                
+                if model_id in reverse_mapping:
+                    model_key = reverse_mapping[model_id]
+                    if "CREATE_COMPLETE" in stack_status:
+                        deployed[model_key] = {
+                            "tag": model_tag,
+                            "model_id": model_id,
+                            "status": stack_status,
+                            "endpoint": extract_endpoint_from_model_entry(model)
+                        }
+                    elif "FAILED" in stack_status:
+                        failed[model_key] = {
+                            "tag": model_tag,
+                            "model_id": model_id,
+                            "status": stack_status
+                        }
+            
+            # Process in-progress models (only if not already in deployed/failed)
+            for model in status.get("inprogress", []):
+                model_id = model.get("model_id")
+                model_tag = model.get("model_tag")
+                stack_status = model.get("stack_status", "")  # Use stack_status, not status
+                
+                if model_id in reverse_mapping:
+                    model_key = reverse_mapping[model_id]
+                    
+                    # Skip if already processed as deployed or failed
+                    if model_key in deployed or model_key in failed:
+                        continue
+                    
+                    # Check execution_info for pipeline status (more accurate than stack_status for in-progress)
+                    execution_info = model.get("execution_info", {})
+                    pipeline_status = execution_info.get("status", "")
+                    
+                    # If pipeline failed, move to failed category
+                    if pipeline_status == "Failed":
+                        failed[model_key] = {
+                            "tag": model_tag,
+                            "model_id": model_id,
+                            "status": pipeline_status,
+                            "stage": model.get("stage_name", "")
+                        }
+                    else:
+                        # Still in progress
+                        inprogress[model_key] = {
+                            "tag": model_tag,
+                            "model_id": model_id,
+                            "status": stack_status or pipeline_status,
+                            "stage": model.get("stage_name", "")
+                        }
+            
+            # Check for models that were in "deleting" status but are no longer in EMD
+            # These should be marked as "not_deployed" since deletion completed
+            all_emd_model_keys = set(reverse_mapping.values())
+            current_emd_model_keys = set(deployed.keys()) | set(inprogress.keys()) | set(failed.keys())
+            deleted_model_keys = all_emd_model_keys - current_emd_model_keys
+            
+            # Clear deleting status for models that are no longer in EMD
+            for model_key in deleted_model_keys:
+                if model_key in self._deployment_status:
+                    current_status = self._deployment_status[model_key].get("status")
+                    if current_status == "deleting":
+                        # Model was being deleted and is now gone from EMD - deletion completed
+                        self._deployment_status[model_key] = {
+                            "status": "not_deployed",
+                            "message": "Model successfully deleted",
+                            "tag": None
+                        }
+                        logger.info(f"✅ Model {model_key} deletion completed - marked as not_deployed")
+                        print(f"✅ DEBUG: Model {model_key} deletion completed - marked as not_deployed")
+            
+            result = {
+                "deployed": deployed,
+                "inprogress": inprogress,
+                "failed": failed
+            }
+            # print(f"🔍 DEBUG: Processed EMD status - deployed: {deployed}, inprogress: {inprogress}, failed: {failed}")
+            
+            # Cache successful result and record circuit breaker success
+            self._cache_emd_data(result)
+            self._record_circuit_success()
+            
+            return result
+            
+        except Exception as e:
+            error_str = str(e).lower()
+            
+            # Record circuit breaker failure
+            self._record_circuit_failure()
+            
+            if 'throttling' in error_str or 'rate exceeded' in error_str or 'timeout' in error_str:
+                logger.warning(f"🔥 AWS API issue detected (circuit: {self._circuit_breaker['state']}): {e}")
+                
+                # Try to return cached data during failures
+                cached_data = self._get_cached_emd_data()
+                if cached_data:
+                    logger.info("🎯 Returning cached data due to AWS API failure")
+                    return cached_data
+            else:
+                logger.error(f"Failed to get current EMD models: {e}")
+            
+            return {"deployed": {}, "inprogress": {}, "failed": {}}
+    
+    def get_current_emd_models(self) -> List[str]:
+        """Get list of currently deployed EMD models.
+        
         Returns:
             List of deployed model keys
         """
         try:
-            current_models = self._get_current_ec2_models()
+            current_models = self._get_current_emd_models()
             return list(current_models.get("deployed", {}).keys())
         except Exception as e:
-            logger.error(f"Failed to get current EC2 models: {e}")
+            logger.error(f"Failed to get current EMD models: {e}")
             return []
     
-    def check_multiple_model_status(self, models: List[str]) -> Dict[str, Any]:
-        """Check deployment status for multiple models.
+    def initialize_emd(self, region: str = "us-east-1") -> Dict[str, Any]:
+        """Initialize EMD environment.
+        
+        Args:
+            region: AWS region
+            
+        Returns:
+            Initialization result
+        """
+        try:
+            # Mock implementation - in production this would use EMD SDK
+            logger.info(f"Initializing EMD environment in region {region}")
+            return {
+                "success": True,
+                "message": f"EMD environment initialized in {region}",
+                "region": region
+            }
+        except Exception as e:
+            logger.error(f"Failed to initialize EMD: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
+    def deploy_emd_model(self, model_key: str, instance_type: str = "g5.2xlarge",
+                        engine_type: str = "vllm", service_type: str = "sagemaker_realtime") -> Dict[str, Any]:
+        """Deploy an EMD model.
+        
+        Args:
+            model_key: Model to deploy
+            instance_type: AWS instance type
+            engine_type: Inference engine type
+            service_type: Service type (sagemaker_realtime, sagemaker_async, ecs, local)
+            
+        Returns:
+            Deployment result
+        """
+        if not self.registry.is_emd_model(model_key):
+            return {
+                "success": False,
+                "error": f"Model {model_key} not found in EMD registry"
+            }
+        
+        model_config = self.registry.get_model_info(model_key, "emd")
+        emd_model = EMDModel(model_key, model_config)
+        
+        # Validate deployment configuration
+        is_valid, error_msg = emd_model.validate_deployment_config(instance_type, engine_type)
+        if not is_valid:
+            return {
+                "success": False,
+                "error": error_msg
+            }
+        
+        # Generate deployment tag
+        deployment_tag = emd_model.generate_tag()
+        
+        # Update deployment status
+        self._deployment_status[model_key] = {
+            "status": "inprogress",  # Frontend expects 'inprogress'
+            "message": f"Deploying {model_key} with tag {deployment_tag}",
+            "tag": deployment_tag,
+            "instance_type": instance_type,
+            "engine_type": engine_type,
+            "started_at": datetime.now().isoformat()
+        }
+        
+        # Trigger actual EMD deployment
+        if EMD_AVAILABLE:
+            try:
+                model_path = model_config.get("model_path", model_key)
+                
+                # Map frontend engine types to EMD framework types
+                framework_mapping = {
+                    "vllm": "vllm",
+                    "sglang": "sglang", 
+                    "tgi": "tgi",
+                    "transformers": "hf"
+                }
+                framework_type = framework_mapping.get(engine_type, engine_type)
 
+                logger.info(f"Starting EMD deployment for {model_key} (model_path: {model_path}) with tag {deployment_tag}")
+                print(f"🚀 DEBUG: Starting EMD deployment for {model_key} (model_path: {model_path}) with tag {deployment_tag}")
+                
+                if framework_type == 'vllm':
+                    extra_params = {
+                            "engine_params": {
+                                "cli_args": "--enable-prompt-tokens-details"  # This enables response to contain token usage info.
+                            }
+                        }
+                else:
+                    extra_params = {}
+                
+                print(f"extra_params: {extra_params}")
+                
+                # Call EMD deployment with correct parameters matching CLI format
+                result = emd_deploy(
+                    model_id=model_path,
+                    instance_type=instance_type,
+                    engine_type=framework_type,
+                    service_type=service_type,  # Use the service_type parameter from API request
+                    framework_type="fastapi",  # Default framework type
+                    model_tag=deployment_tag,
+                    extra_params=extra_params,
+                    waiting_until_deploy_complete=False  # Don't wait, return immediately
+                )
+                
+                logger.info(f"EMD deployment initiated for {model_key}: {result}")
+                
+                # Update status to inprogress (matches frontend expectation)
+                self._deployment_status[model_key] = {
+                    "status": "inprogress",  # Frontend expects 'inprogress' not 'deploying'
+                    "message": f"Deployment in progress for {model_key}",
+                    "tag": deployment_tag,
+                    "instance_type": instance_type,
+                    "engine_type": engine_type,
+                    "started_at": datetime.now().isoformat()
+                }
+                
+                return {
+                    "success": True,
+                    "message": f"Deployment started for {model_key}",
+                    "tag": deployment_tag,
+                    "model_key": model_key,
+                    "deployment_result": result
+                }
+                
+            except Exception as e:
+                logger.error(f"Failed to deploy {model_key} via EMD: {e}")
+                print(f"❌ DEBUG: Failed to deploy {model_key} via EMD: {e}")
+                print(f"❌ DEBUG: Error type: {type(e)}")
+                print(f"❌ DEBUG: Error args: {e.args}")
+                # Update status to failed
+                self._deployment_status[model_key] = {
+                    "status": "failed",
+                    "message": f"Deployment failed: {str(e)}",
+                    "tag": deployment_tag,
+                    "error": str(e)
+                }
+                return {
+                    "success": False,
+                    "error": f"Deployment failed: {str(e)}",
+                    "model_key": model_key
+                }
+        else:
+            logger.warning("EMD SDK not available - deployment will be mocked")
+            logger.info(f"Mock deployment started for {model_key} with tag {deployment_tag}")
+            
+            return {
+                "success": True,
+                "message": f"Mock deployment started for {model_key}",
+                "tag": deployment_tag,
+                "model_key": model_key,
+                "note": "EMD SDK not available - this is a mock deployment"
+            }
+    
+    def check_multiple_model_status(self, models: List[str]) -> Dict[str, Any]:
+        """Check deployment status for multiple models with throttling protection.
+        
         Args:
             models: List of model keys to check
-
+            
         Returns:
             Status results for all models
         """
-        model_status = {}
-
-        # Get all models (both registry EC2 models and custom models)
-        # Consider any model that's not a bedrock model as a potential EC2/custom model
-        ec2_models = [model_key for model_key in models if not self.registry.is_bedrock_model(model_key)]
-        ec2_status_cache = {}
-
-        if ec2_models:
-            try:
-                # Single call to get all EC2 statuses
-                current_ec2_models = self._get_current_ec2_models()
-
-                # Cache the results for all EC2 models
-                for model_key in ec2_models:
-                    if model_key in current_ec2_models.get("deployed", {}):
-                        model_info = current_ec2_models["deployed"][model_key]
-                        ec2_status_cache[model_key] = {
-                            "status": "deployed",
-                            "message": "Model is deployed and ready",
-                            "tag": model_info.get("tag"),
-                            "endpoint": model_info.get("endpoint")
-                        }
-                    elif model_key in current_ec2_models.get("inprogress", {}):
-                        ec2_status_cache[model_key] = {
-                            "status": "inprogress",
-                            "message": "Model is being deployed",
-                            "tag": current_ec2_models["inprogress"][model_key].get("tag")
-                        }
-                    elif model_key in current_ec2_models.get("failed", {}):
-                        ec2_status_cache[model_key] = {
-                            "status": "failed",
-                            "message": "Deployment failed",
-                            "tag": current_ec2_models["failed"][model_key].get("tag")
-                        }
-                    else:
-                        # Check cached status or default
-                        if model_key in self._deployment_status:
-                            ec2_status_cache[model_key] = self._deployment_status[model_key]
+        def _check_status():
+            model_status = {}
+            
+            # Get all EMD model statuses in a single call to reduce API calls
+            emd_models = [model_key for model_key in models if self.registry.is_emd_model(model_key)]
+            emd_status_cache = {}
+            
+            if emd_models and EMD_AVAILABLE:
+                try:
+                    # Single call to get all EMD statuses
+                    current_emd_models = self._get_current_emd_models()
+                    
+                    # Cache the results for all EMD models
+                    for model_key in emd_models:
+                        if model_key in current_emd_models.get("deployed", {}):
+                            model_info = current_emd_models["deployed"][model_key]
+                            emd_status_cache[model_key] = {
+                                "status": "deployed",
+                                "message": "Model is deployed and ready",
+                                "tag": model_info.get("tag"),
+                                "endpoint": model_info.get("endpoint")
+                            }
+                        elif model_key in current_emd_models.get("inprogress", {}):
+                            emd_status_cache[model_key] = {
+                                "status": "inprogress",
+                                "message": "Model is being deployed",
+                                "tag": current_emd_models["inprogress"][model_key].get("tag")
+                            }
+                        elif model_key in current_emd_models.get("failed", {}):
+                            emd_status_cache[model_key] = {
+                                "status": "failed",
+                                "message": "Deployment failed",
+                                "tag": current_emd_models["failed"][model_key].get("tag")
+                            }
                         else:
-                            ec2_status_cache[model_key] = {
+                            # Check cached status or default
+                            if model_key in self._deployment_status:
+                                emd_status_cache[model_key] = self._deployment_status[model_key]
+                            else:
+                                emd_status_cache[model_key] = {
+                                    "status": "not_deployed",
+                                    "message": "Model not deployed",
+                                    "tag": None
+                                }
+                except Exception as e:
+                    logger.warning(f"Failed to get batch EMD status: {e}")
+                    # Fallback to cached status for all EMD models
+                    for model_key in emd_models:
+                        if model_key in self._deployment_status:
+                            emd_status_cache[model_key] = self._deployment_status[model_key]
+                        else:
+                            emd_status_cache[model_key] = {
                                 "status": "not_deployed",
-                                "message": "Model not deployed",
+                                "message": "Status check failed - may need to refresh",
                                 "tag": None
                             }
-            except Exception as e:
-                logger.warning(f"Failed to get batch EC2 status: {e}")
-                # Fallback to cached status for all EC2 models
-                for model_key in ec2_models:
-                    if model_key in self._deployment_status:
-                        ec2_status_cache[model_key] = self._deployment_status[model_key]
+            
+            # Process all models using the cached EMD data
+            for model_key in models:
+                if self.registry.is_emd_model(model_key):
+                    if model_key in emd_status_cache:
+                        status_info = emd_status_cache[model_key]
                     else:
-                        ec2_status_cache[model_key] = {
+                        # Fallback for models not in cache
+                        status_info = {
                             "status": "not_deployed",
-                            "message": "Status check failed - may need to refresh",
+                            "message": "Model not deployed",
                             "tag": None
                         }
 
-        # Process all models using the cached EC2 data
-        for model_key in models:
-            if not self.registry.is_bedrock_model(model_key):
-                # Handle both registry EC2 models and custom models
-                if model_key in ec2_status_cache:
-                    status_info = ec2_status_cache[model_key]
-                else:
-                    # Fallback for models not in cache
-                    status_info = {
-                        "status": "not_deployed",
-                        "message": "Model not deployed",
-                        "tag": None
-                    }
+                    if status_info.get("status") in {None, "not_deployed", "unknown"} and self._external_models:
+                        for ext_key, ext_info in self._external_models.items():
+                            ext_name = ext_info.get('name') or ext_info.get('model_name')
+                            if ext_name == model_key:
+                                status_info = {
+                                    "status": "deployed",
+                                    "message": "Endpoint available via external deployment",
+                                    "tag": ext_info.get('metadata', {}).get('deployment_tag') or ext_info.get('deployment_id'),
+                                    "endpoint": ext_info.get('endpoint'),
+                                    "external_key": ext_key
+                                }
+                                break
 
-                # Map our status format to what frontend expects
-                model_status[model_key] = {
-                    "status": self._map_status_for_frontend(status_info.get("status")),
-                    "message": status_info.get("message", ""),
-                    "tag": status_info.get("tag"),
-                    "endpoint": status_info.get("endpoint")
-                }
-            elif self.registry.is_bedrock_model(model_key):
-                model_status[model_key] = {
-                    "status": "available",
-                    "message": "Bedrock model is always available"
-                }
-            else:
-                model_status[model_key] = {
-                    "status": "unknown",
-                    "message": "Model not found"
-                }
+                    # Map our status format to what frontend expects
+                    model_status[model_key] = {
+                        "status": self._map_status_for_frontend(status_info.get("status")),
+                        "message": status_info.get("message", ""),
+                        "tag": status_info.get("tag"),
+                        "endpoint": status_info.get("endpoint")
+                    }
+                elif self.registry.is_bedrock_model(model_key):
+                    model_status[model_key] = {
+                        "status": "available",
+                        "message": "Bedrock model is always available"
+                    }
+                elif self.registry.is_external_model(model_key):
+                    external_info = self.registry.get_model_info(model_key, "external")
+                    model_status[model_key] = {
+                        "status": "available",
+                        "message": external_info.get('description', 'Endpoint available'),
+                        "endpoint": external_info.get('endpoint')
+                    }
+                else:
+                    model_status[model_key] = {
+                        "status": "unknown",
+                        "message": "Model not found"
+                    }
+            return model_status
+
         try:
+            # Use retry wrapper for status checks that might get throttled
+            model_status = self._retry_with_exponential_backoff(_check_status, max_retries=2, base_delay=0.3)
+            
             return {
                 "status": "success",
                 "model_status": model_status  # Frontend expects 'model_status' not 'results'
@@ -489,22 +983,15 @@ class ModelService:
             # Return partial results for known models
             fallback_status = {}
             for model_key in models:
-                if self.registry.is_bedrock_model(model_key):
-                    fallback_status[model_key] = {
-                        "status": "available",
-                        "message": "Bedrock model is always available"
-                    }
-                else:
-                    # Treat any non-Bedrock model as EC2/custom model
-                    fallback_status[model_key] = {
-                        "status": "not_deployed",
-                        "message": "Status check failed - refresh may help"
-                    }
-
+                fallback_status[model_key] = {
+                    "status": "not_deployed" if self.registry.is_emd_model(model_key) else "available",
+                    "message": "Status check failed - refresh may help" if self.registry.is_emd_model(model_key) else "Bedrock model is always available"
+                }
+            
             return {
                 "status": "partial_success",
                 "model_status": fallback_status,
-                "warning": "Some status checks failed"
+                "warning": "Some status checks failed due to API limits"
             }
     
     def _map_status_for_frontend(self, backend_status: str) -> str:
@@ -528,515 +1015,162 @@ class ModelService:
         }
         return status_mapping.get(backend_status, "unknown")
     
+    def get_emd_info(self) -> Dict[str, Any]:
+        """Get EMD environment information.
+        
+        Returns:
+            EMD environment info
+        """
+        try:
+            config = get_config()
+            return {
+                "status": "success",
+                "base_url": config.get("models.emd.base_url", "http://localhost:8000"),
+                "current_tag": self._current_emd_tag,
+                "available": EMD_AVAILABLE,
+                "deployed_models": self.get_current_emd_models()
+            }
+        except Exception as e:
+            logger.error(f"Error getting EMD info: {e}")
+            return {
+                "status": "error",
+                "message": str(e)
+            }
     
-
-    def deploy_model_on_ec2(self, model_key: str, instance_type: str = "g5.2xlarge",
-                           engine_type: str = "vllm", service_type: str = "vllm_realtime",
-                           port: int = 8000, tp_size: int = 1, dp_size: int = 1,
-                           gpu_memory_utilization: float = 0.9, max_model_len: int = 2048) -> Dict[str, Any]:
-        """Deploy a model using Docker on EC2.
-
+    def set_emd_tag(self, tag: str) -> Dict[str, Any]:
+        """Set EMD deployment tag.
+        
         Args:
-            model_key: Model to deploy
-            instance_type: AWS instance type (for reference only)
-            engine_type: Inference engine type (vllm, sglang)
-            service_type: Service type
-            port: Port to expose the service
-            tp_size: Tensor parallelism size
-            dp_size: Data parallelism size
-            gpu_memory_utilization: GPU memory utilization fraction (0.1-1.0)
-            max_model_len: Maximum model sequence length
-
+            tag: Deployment tag to set
+            
         Returns:
-            Deployment result
-        """
-        # Check if model is in registry, if not treat as custom model
-        if self.registry.is_ec2_model(model_key):
-            # Model is in registry, use registry configuration
-            model_config = self.registry.get_model_info(model_key, "ec2")
-            huggingface_repo = model_config.get("huggingface_repo", model_key)
-            model_path = model_config.get("model_path", model_key)
-        else:
-            # Custom model - use model_key as Hugging Face repo name directly
-            huggingface_repo = model_key
-            model_path = model_key
-            logger.info(f"🤗 Deploying custom model: {model_key} (not in registry)")
-
-        # Generate deployment tag
-        deployment_tag = f"{model_key}-{int(time.time())}"
-        # Sanitize model_key for container name (replace slashes and underscores)
-        safe_model_name = model_key.replace('/', '-').replace('_', '-').lower()
-        container_name = f"{safe_model_name}-{int(time.time())}"
-
-        # Check if model is already deployed
-        if model_key in self._ec2_deployments:
-            existing_container = self._ec2_deployments[model_key]
-            if self._check_container_running(existing_container["container_name"]):
-                return {
-                    "success": False,
-                    "error": f"Model {model_key} is already deployed in container {existing_container['container_name']}"
-                }
-
-        # Update deployment status to starting
-        self._deployment_status[model_key] = {
-            "status": "inprogress",
-            "message": f"Starting Docker deployment for {model_key}",
-            "tag": deployment_tag,
-            "container_name": container_name,
-            "port": port,
-            "started_at": datetime.now().isoformat()
-        }
-
-        try:
-            logger.info(f"🚀 Starting Docker deployment for {model_key} with model path {model_path} using {engine_type}")
-            logger.info(f"📊 Deployment config: instance_type={instance_type}, service_type={service_type}, port={port}")
-            logger.info(f"🔧 Resource config: tp_size={tp_size}, dp_size={dp_size}, gpu_memory_utilization={gpu_memory_utilization}, max_model_len={max_model_len}")
-
-            # Construct Docker command based on framework
-            if engine_type.lower() == "sglang":
-                # SGLang deployment
-                docker_cmd = [
-                    "docker", "run", "-d",
-                    "--gpus", "all",
-                    "--shm-size", "32g",
-                    "-v", f"{self._get_hf_cache_dir()}:/root/.cache/huggingface",
-                    "-p", f"{port}:{port}",
-                    "--ipc=host",
-                    "--name", container_name
-                ]
-
-                # Add HuggingFace token if available
-                hf_token = self._get_hf_token()
-                if hf_token:
-                    docker_cmd.extend(["--env", f"HF_TOKEN={hf_token}"])
-
-                # Add SGLang image and launch command
-                docker_cmd.extend([
-                    "lmsysorg/sglang:latest",
-                    "python3", "-m", "sglang.launch_server",
-                    "--model-path", huggingface_repo,
-                    "--host", "0.0.0.0",
-                    "--port", str(port),
-                    "--mem-fraction-static", str(gpu_memory_utilization),
-                    "--max-total-tokens", str(max_model_len)
-                ])
-
-                # Add TP/DP parameters for SGLang
-                if tp_size > 1:
-                    docker_cmd.extend(["--tp-size", str(tp_size)])
-                if dp_size > 1:
-                    docker_cmd.extend(["--dp-size", str(dp_size)])
-
-            else:
-                # vLLM deployment (default)
-                docker_cmd = [
-                    "docker", "run", "-d",
-                    "--runtime", "nvidia",
-                    "--gpus", "all",
-                    "-v", f"{self._get_hf_cache_dir()}:/root/.cache/huggingface",
-                    "-p", f"{port}:{port}",
-                    "--ipc=host",
-                    "--name", container_name
-                ]
-
-                # Add HuggingFace token if available
-                hf_token = self._get_hf_token()
-                if hf_token:
-                    docker_cmd.extend(["--env", f"HUGGING_FACE_HUB_TOKEN={hf_token}"])
-
-                # Add vLLM image and model arguments
-                docker_cmd.extend([
-                    "vllm/vllm-openai:latest",
-                    "--model", huggingface_repo,
-                    "--host", "0.0.0.0",
-                    "--port", str(port),
-                    "--enable-prompt-tokens-details",
-                    "--trust-remote-code",
-                    "--gpu-memory-utilization", str(gpu_memory_utilization),
-                    "--max-model-len", str(max_model_len)
-                ])
-
-                # Add TP/DP parameters for vLLM
-                if tp_size > 1:
-                    docker_cmd.extend(["--tensor-parallel-size", str(tp_size)])
-                if dp_size > 1:
-                    docker_cmd.extend(["--pipeline-parallel-size", str(dp_size)])
-
-            logger.info(f"🐳 Running Docker command: {' '.join(docker_cmd)}")
-
-            # Start Docker container
-            result = subprocess.run(docker_cmd, capture_output=True, text=True, timeout=1800)
-
-            if result.returncode == 0:
-                container_id = result.stdout.strip()
-                logger.info(f"✅ Docker container started successfully: {container_id}")
-
-                # Store deployment info
-                self._ec2_deployments[model_key] = {
-                    "container_name": container_name,
-                    "container_id": container_id,
-                    "port": port,
-                    "model_path": model_path,
-                    "tag": deployment_tag,
-                    "engine_type": engine_type,
-                    "tp_size": tp_size,
-                    "dp_size": dp_size,
-                    "gpu_memory_utilization": gpu_memory_utilization,
-                    "max_model_len": max_model_len,
-                    "started_at": datetime.now().isoformat()
-                }
-
-                # Save deployment state to persist across restarts
-                self._save_deployment_state()
-
-                # Start status monitoring thread
-                self._start_ec2_status_monitoring(model_key, container_name, port)
-
-                # Update status
-                self._deployment_status[model_key] = {
-                    "status": "inprogress",
-                    "message": f"Docker container starting, waiting for model to load...",
-                    "tag": deployment_tag,
-                    "container_name": container_name,
-                    "container_id": container_id,
-                    "port": port,
-                    "engine_type": engine_type,
-                    "tp_size": tp_size,
-                    "dp_size": dp_size,
-                    "gpu_memory_utilization": gpu_memory_utilization,
-                    "max_model_len": max_model_len,
-                    "started_at": datetime.now().isoformat()
-                }
-
-                return {
-                    "success": True,
-                    "message": f"Docker deployment started for {model_key}",
-                    "tag": deployment_tag,
-                    "container_name": container_name,
-                    "container_id": container_id,
-                    "port": port,
-                    "model_key": model_key
-                }
-
-            else:
-                error_msg = result.stderr or result.stdout or "Unknown Docker error"
-                logger.error(f"❌ Docker deployment failed: {error_msg}")
-
-                self._deployment_status[model_key] = {
-                    "status": "failed",
-                    "message": f"Docker deployment failed: {error_msg}",
-                    "tag": deployment_tag,
-                    "error": error_msg
-                }
-
-                return {
-                    "success": False,
-                    "error": f"Docker deployment failed: {error_msg}",
-                    "model_key": model_key
-                }
-
-        except subprocess.TimeoutExpired:
-            logger.error(f"❌ Docker deployment timeout for {model_key}")
-            self._deployment_status[model_key] = {
-                "status": "failed",
-                "message": "Docker deployment timeout",
-                "tag": deployment_tag,
-                "error": "Deployment timeout after 30 seconds"
-            }
-            return {
-                "success": False,
-                "error": "Docker deployment timeout",
-                "model_key": model_key
-            }
-        except Exception as e:
-            logger.error(f"❌ Docker deployment error for {model_key}: {e}")
-            self._deployment_status[model_key] = {
-                "status": "failed",
-                "message": f"Docker deployment error: {str(e)}",
-                "tag": deployment_tag,
-                "error": str(e)
-            }
-            return {
-                "success": False,
-                "error": f"Docker deployment error: {str(e)}",
-                "model_key": model_key
-            }
-
-    def _get_hf_cache_dir(self) -> str:
-        """Get HuggingFace cache directory."""
-        import os
-        # Check multiple possible locations for HuggingFace cache
-        possible_paths = [
-            "/home/ubuntu/.cache/huggingface",  # Common on EC2 instances
-            os.path.expanduser("~/.cache/huggingface"),  # Current user
-            "/root/.cache/huggingface"  # Root user
-        ]
-
-        for path in possible_paths:
-            if os.path.exists(path):
-                return path
-
-        # Default to ubuntu path (most common on EC2)
-        return "/home/ubuntu/.cache/huggingface"
-
-    def _get_hf_token(self) -> str:
-        """Get HuggingFace token from environment."""
-        import os
-        return os.environ.get("HUGGING_FACE_HUB_TOKEN", os.environ.get("HF_TOKEN", ""))
-
-    def _check_container_running(self, container_name: str) -> bool:
-        """Check if Docker container is running."""
-        try:
-            result = subprocess.run(
-                ["docker", "inspect", container_name, "--format", "{{.State.Running}}"],
-                capture_output=True, text=True, timeout=10
-            )
-            return result.returncode == 0 and result.stdout.strip().lower() == "true"
-        except:
-            return False
-
-    def _start_ec2_status_monitoring(self, model_key: str, container_name: str, port: int):
-        """Start a background thread to monitor EC2 deployment status."""
-        def monitor_status():
-            max_wait_time = 600  # 10 minutes max wait
-            check_interval = 10  # Check every 10 seconds
-            start_time = time.time()
-
-            while time.time() - start_time < max_wait_time:
-                try:
-                    # Check if container is still running
-                    if not self._check_container_running(container_name):
-                        logger.error(f"❌ Container {container_name} stopped unexpectedly")
-                        self._deployment_status[model_key] = {
-                            "status": "failed",
-                            "message": "Docker container stopped unexpectedly",
-                            "tag": self._deployment_status[model_key].get("tag"),
-                            "container_name": container_name
-                        }
-                        break
-
-                    # Check if model server is ready by making a health check
-                    if self._check_model_health(port):
-                        logger.info(f"✅ Model {model_key} is ready and healthy")
-                        self._deployment_status[model_key] = {
-                            "status": "deployed",
-                            "message": f"Model {model_key} deployed successfully on EC2",
-                            "tag": self._deployment_status[model_key].get("tag"),
-                            "container_name": container_name,
-                            "port": port,
-                            "endpoint": f"http://localhost:{port}"
-                        }
-                        # Save state when deployment becomes ready
-                        self._save_deployment_state()
-                        break
-
-                    time.sleep(check_interval)
-
-                except Exception as e:
-                    logger.warning(f"Status check error for {model_key}: {e}")
-                    time.sleep(check_interval)
-
-            else:
-                # Timeout reached
-                logger.error(f"❌ Deployment timeout for {model_key} after {max_wait_time}s")
-                self._deployment_status[model_key] = {
-                    "status": "failed",
-                    "message": f"Deployment timeout after {max_wait_time} seconds",
-                    "tag": self._deployment_status[model_key].get("tag"),
-                    "container_name": container_name
-                }
-
-            # Clean up monitoring thread
-            if model_key in self._ec2_status_checkers:
-                del self._ec2_status_checkers[model_key]
-
-        # Start monitoring thread
-        monitor_thread = threading.Thread(target=monitor_status, daemon=True)
-        monitor_thread.start()
-        self._ec2_status_checkers[model_key] = monitor_thread
-        logger.info(f"🔍 Started status monitoring for {model_key}")
-
-    def _check_model_health(self, port: int) -> bool:
-        """Check if the model server is healthy and ready."""
-        try:
-            import requests
-            health_url = f"http://localhost:{port}/health"
-            response = requests.get(health_url, timeout=5)
-            return response.status_code == 200
-        except:
-            # Try alternative endpoints that vLLM might expose
-            try:
-                import requests
-                models_url = f"http://localhost:{port}/v1/models"
-                response = requests.get(models_url, timeout=5)
-                return response.status_code == 200
-            except:
-                return False
-
-    def stop_ec2_model(self, model_key: str) -> Dict[str, Any]:
-        """Stop an EC2 Docker deployment."""
-        if model_key not in self._ec2_deployments:
-            return {
-                "success": False,
-                "error": f"Model {model_key} not found in EC2 deployments"
-            }
-
-        deployment_info = self._ec2_deployments[model_key]
-        container_name = deployment_info["container_name"]
-
-        try:
-            logger.info(f"🛑 Stopping Docker container for {model_key}: {container_name}")
-
-            # Stop and remove container
-            stop_result = subprocess.run(
-                ["docker", "stop", container_name],
-                capture_output=True, text=True, timeout=30
-            )
-
-            subprocess.run(
-                ["docker", "rm", container_name],
-                capture_output=True, text=True, timeout=30
-            )
-
-            if stop_result.returncode == 0:
-                logger.info(f"✅ Docker container stopped successfully: {container_name}")
-
-                # Clean up tracking
-                del self._ec2_deployments[model_key]
-                if model_key in self._ec2_status_checkers:
-                    del self._ec2_status_checkers[model_key]
-
-                # Update status
-                self._deployment_status[model_key] = {
-                    "status": "not_deployed",
-                    "message": "Model stopped successfully",
-                    "tag": None
-                }
-
-                return {
-                    "success": True,
-                    "message": f"Model {model_key} stopped successfully",
-                    "model_key": model_key
-                }
-            else:
-                error_msg = stop_result.stderr or "Unknown error stopping container"
-                logger.error(f"❌ Failed to stop container {container_name}: {error_msg}")
-                return {
-                    "success": False,
-                    "error": f"Failed to stop container: {error_msg}",
-                    "model_key": model_key
-                }
-
-        except Exception as e:
-            logger.error(f"❌ Error stopping EC2 model {model_key}: {e}")
-            return {
-                "success": False,
-                "error": f"Error stopping model: {str(e)}",
-                "model_key": model_key
-            }
-
-    def register_existing_deployment(self, model_key: str, container_name: str, port: int, tag: str = None) -> Dict[str, Any]:
-        """Register an existing Docker deployment that wasn't deployed through the platform.
-
-        Args:
-            model_key: Model key in the registry (e.g., "qwen3-8b")
-            container_name: Name of the running Docker container
-            port: Port the container is running on
-            tag: Optional deployment tag
-
-        Returns:
-            Success/failure result
+            Operation result
         """
         try:
-            # Allow both registry EC2 models and custom models
-            # Only reject Bedrock models since they don't use EC2 deployment
-            if self.registry.is_bedrock_model(model_key):
-                return {
-                    "success": False,
-                    "error": f"Model {model_key} is a Bedrock model and doesn't use EC2 deployment"
-                }
-
-            # Check if container is actually running
-            if not self._check_container_running(container_name):
-                return {
-                    "success": False,
-                    "error": f"Container {container_name} is not running"
-                }
-
-            # Check if already registered
-            if model_key in self._ec2_deployments:
-                existing = self._ec2_deployments[model_key]
-                if existing["container_name"] == container_name:
-                    return {
-                        "success": True,
-                        "message": f"Model {model_key} already registered with container {container_name}",
-                        "model_key": model_key
-                    }
-                else:
-                    return {
-                        "success": False,
-                        "error": f"Model {model_key} already registered with different container {existing['container_name']}"
-                    }
-
-            # Generate tag if not provided
-            if not tag:
-                tag = f"manual-{int(time.time())}"
-
-            # Get container ID
-            try:
-                container_id_result = subprocess.run(
-                    ["docker", "inspect", container_name, "--format", "{{.Id}}"],
-                    capture_output=True, text=True, timeout=10
-                )
-                container_id = container_id_result.stdout.strip() if container_id_result.returncode == 0 else "unknown"
-            except:
-                container_id = "unknown"
-
-            # Register the deployment
-            # Get model info from registry if available, otherwise use model_key as path
-            if self.registry.is_ec2_model(model_key):
-                model_info = self.registry.get_model_info(model_key)
-                model_path = model_info.get("model_path", model_key)
-            else:
-                # Custom model - use model_key as path
-                model_path = model_key
-
-            self._ec2_deployments[model_key] = {
-                "container_name": container_name,
-                "container_id": container_id,
-                "port": port,
-                "model_path": model_path,
-                "tag": tag,
-                "deployment_time": time.time(),
-                "registered_manually": True
-            }
-
-            # Set deployment status as deployed (since container is running)
-            self._deployment_status[model_key] = {
-                "status": "deployed",
-                "message": "Model is deployed and ready (registered manually)",
-                "tag": tag,
-                "endpoint": f"http://localhost:{port}"
-            }
-
-            logger.info(f"✅ Manually registered existing deployment: {model_key} -> {container_name}:{port}")
-
-            # Save state after manual registration
-            self._save_deployment_state()
-
+            self._current_emd_tag = tag
+            logger.info(f"Set EMD tag to: {tag}")
             return {
                 "success": True,
-                "message": f"Successfully registered existing deployment for {model_key}",
-                "model_key": model_key,
-                "container_name": container_name,
-                "port": port,
+                "message": f"EMD tag set to {tag}",
                 "tag": tag
             }
-
         except Exception as e:
-            logger.error(f"❌ Error registering existing deployment: {e}")
+            logger.error(f"Error setting EMD tag: {e}")
             return {
                 "success": False,
-                "error": f"Error registering deployment: {str(e)}"
+                "error": str(e)
             }
-
+    
+    def delete_emd_model(self, model_key: str) -> Dict[str, Any]:
+        """Delete an EMD model deployment.
+        
+        Args:
+            model_key: Model to delete
+            
+        Returns:
+            Deletion result
+        """
+        if not self.registry.is_emd_model(model_key):
+            return {
+                "success": False,
+                "error": f"Model {model_key} not found in EMD registry"
+            }
+        
+        # Get current deployment info to find the tag
+        current_status = self.get_emd_deployment_status(model_key)
+        model_tag = current_status.get("tag")
+        
+        if not model_tag:
+            # Try to get tag from current EMD models
+            try:
+                current_models = self._get_current_emd_models()
+                for category in ["deployed", "inprogress", "failed"]:
+                    if model_key in current_models.get(category, {}):
+                        model_tag = current_models[category][model_key].get("tag")
+                        break
+            except Exception as e:
+                logger.warning(f"Failed to get current tag for {model_key}: {e}")
+        
+        if not model_tag:
+            return {
+                "success": False,
+                "error": f"Cannot find deployment tag for model {model_key}. Model may not be deployed."
+            }
+        
+        model_config = self.registry.get_model_info(model_key, "emd")
+        model_path = model_config.get("model_path", model_key)
+        
+        # Update status to indicate deletion in progress
+        self._deployment_status[model_key] = {
+            "status": "deleting",
+            "message": f"Deleting {model_key} with tag {model_tag}",
+            "tag": model_tag,
+            "started_at": datetime.now().isoformat()
+        }
+        
+        # Trigger actual EMD deletion
+        if EMD_AVAILABLE:
+            try:
+                logger.info(f"Starting EMD deletion for {model_key} (model_path: {model_path}) with tag {model_tag}")
+                print(f"🗑️ DEBUG: Starting EMD deletion for {model_key} (model_path: {model_path}) with tag {model_tag}")
+                
+                # Call EMD destroy using the new recommended format
+                model_identifier = f"{model_path}/{model_tag}"
+                result = emd_destroy(
+                    model_identifier=model_identifier,
+                    waiting_until_complete=False  # Don't wait, return immediately
+                )
+                
+                logger.info(f"EMD deletion initiated for {model_key}: {result}")
+                print(f"🗑️ DEBUG: EMD deletion result for {model_key}: {result}")
+                
+                # Update status to indicate deletion in progress
+                self._deployment_status[model_key] = {
+                    "status": "deleting",
+                    "message": f"Deletion in progress for {model_key}",
+                    "tag": model_tag,
+                    "started_at": datetime.now().isoformat()
+                }
+                
+                return {
+                    "success": True,
+                    "message": f"Deletion started for {model_key}",
+                    "tag": model_tag,
+                    "model_key": model_key,
+                    "deletion_result": result
+                }
+                
+            except Exception as e:
+                logger.error(f"Failed to delete {model_key} via EMD: {e}")
+                print(f"❌ DEBUG: Failed to delete {model_key} via EMD: {e}")
+                
+                # Update status to failed
+                self._deployment_status[model_key] = {
+                    "status": "delete_failed",
+                    "message": f"Deletion failed: {str(e)}",
+                    "tag": model_tag,
+                    "error": str(e)
+                }
+                return {
+                    "success": False,
+                    "error": f"Deletion failed: {str(e)}",
+                    "model_key": model_key
+                }
+        else:
+            logger.warning("EMD SDK not available - deletion will be mocked")
+            logger.info(f"Mock deletion started for {model_key} with tag {model_tag}")
+            
+            # For mock, immediately mark as not deployed
+            self._deployment_status[model_key] = {
+                "status": "not_deployed",
+                "message": "Model deleted (mock)",
+                "tag": None
+            }
+            
+            return {
+                "success": True,
+                "message": f"Mock deletion completed for {model_key}",
+                "tag": model_tag,
+                "model_key": model_key,
+                "note": "EMD SDK not available - this is a mock deletion"
+            }

@@ -4,6 +4,7 @@ import {
   RobotOutlined, 
   CloudOutlined, 
   ThunderboltOutlined,
+  DeploymentUnitOutlined,
   CheckCircleOutlined
 } from '@ant-design/icons';
 
@@ -18,204 +19,152 @@ const PlaygroundModelSelector = ({
 }) => {
   const [loading, setLoading] = useState(false);
   const [modelStatus, setModelStatus] = useState({});
-  const [modelCategories, setModelCategories] = useState({
+  const [modelCategories, setModelCategories] = useState({});
+
+  const categoryPresets = React.useMemo(() => ({
     bedrock: {
       title: 'Bedrock 模型',
       icon: <CloudOutlined />,
       color: '#1890ff',
-      models: []
+      alwaysAvailable: true
     },
-    ec2: {
-      title: 'EC2 部署模型',
+    emd: {
+      title: 'EMD 部署模型',
       icon: <ThunderboltOutlined />,
       color: '#52c41a',
-      models: []
+      alwaysAvailable: false
+    },
+    hyperpod: {
+      title: 'HyperPod 集群模型',
+      icon: <DeploymentUnitOutlined />,
+      color: '#722ed1',
+      alwaysAvailable: false
+    },
+    external: {
+      title: '外部部署',
+      icon: <RobotOutlined />,
+      color: '#fa8c16',
+      alwaysAvailable: true
     }
-  });
+  }), []);
 
-  // 从后端获取模型列表
-  const fetchModelList = async () => {
-    try {
-      const response = await fetch('/api/model-list');
-      if (response.ok) {
-        const data = await response.json();
-        if (data.status === 'success' && data.models) {
-          // 处理Bedrock模型
-          if (data.models.bedrock) {
-            const bedrockModels = Object.entries(data.models.bedrock).map(([key, info]) => ({
-              key,
-              name: info.name,
-              description: info.description,
-              alwaysAvailable: true
-            }));
-            
-            setModelCategories(prev => {
-              const newState = {
-                ...prev,
-                bedrock: {
-                  ...prev.bedrock,
-                  models: bedrockModels
-                }
-              };
-              return newState;
-            });
-          }
-          
-          // 处理EC2模型
-          if (data.models.ec2) {
-            const ec2Models = Object.entries(data.models.ec2).map(([key, info]) => ({
-              key,
-              name: info.name,
-              description: info.description,
-              alwaysAvailable: false
-            }));
+  const buildCategories = React.useCallback((modelsData = {}) => {
+    const categories = {};
+    const modelKeys = [];
 
-            setModelCategories(prev => {
-              const newState = {
-                ...prev,
-                ec2: {
-                  ...prev.ec2,
-                  models: ec2Models
-                }
-              };
-              return newState;
-            });
+    Object.entries(modelsData).forEach(([categoryKey, categoryModels]) => {
+      const preset = categoryPresets[categoryKey] || {
+        title: categoryKey,
+        icon: <RobotOutlined />,
+        color: '#722ed1',
+        alwaysAvailable: true
+      };
+
+      const entries = Object.entries(categoryModels || {}).filter(([_, info]) => {
+        if (categoryKey === 'external') {
+          const method = (info.deployment_method || '').toLowerCase();
+          if (method.includes('emd')) {
+            return false;
           }
-          
-          // 在成功获取模型列表后检查模型状态
-          return true;
         }
-      } else {
-      }
-      return false;
-    } catch (error) {
-      return false;
-    }
-  };
+        return true;
+      });
 
-  // 检查模型状态
-  // const checkModelStatus = async () => {
-  //   if (!visible) return;
-    
-  //   setLoading(true);
-  //   try {
-  //     // 获取所有模型列表
-  //     const allModels = [
-  //       ...modelCategories.bedrock.models.map(m => m.key),
-  //       ...modelCategories.emd.models.map(m => m.key)
-  //     ];
-      
-  //     const response = await fetch('/api/check-model-status', {
-  //       method: 'POST',
-  //       headers: {
-  //         'Content-Type': 'application/json'
-  //       },
-  //       body: JSON.stringify({ models: allModels })
-  //     });
-      
-  //     if (response.ok) {
-  //       const data = await response.json();
-  //       setModelStatus(data.model_status || {});
-  //     }
-  //   } catch (error) {
-  //     console.error('检查模型状态失败:', error);
-  //     message.error('获取模型状态失败');
-  //   } finally {
-  //     setLoading(false);
-  //   }
-  // };
+      const models = entries.map(([key, info]) => {
+        modelKeys.push(key);
+        const statusInfo = info.deployment_status || {};
+        const alwaysAvailable = Object.prototype.hasOwnProperty.call(info, 'always_available')
+          ? Boolean(info.always_available)
+          : (preset.alwaysAvailable ?? true);
+
+        return {
+          key,
+          name: info.name || key,
+          description: info.description || '',
+          alwaysAvailable,
+          deployment_method: info.deployment_method,
+          status: statusInfo,
+          raw: info
+        };
+      });
+
+      if (models.length > 0) {
+        categories[categoryKey] = {
+          title: preset.title,
+          icon: preset.icon,
+          color: preset.color,
+          models
+        };
+      }
+    });
+
+    return { categories, modelKeys };
+  }, [categoryPresets]);
 
   useEffect(() => {
-    if (visible) {
-      const initData = async () => {
-        console.log('[Debug-PlaygroundSelector] 初始化组件数据');
-        
-        try {
-          // 直接获取数据并处理，而不使用中间状态
-          setLoading(true);
-          const response = await fetch('/api/model-list');
-          
-          if (response.ok) {
-            const data = await response.json();
-            console.log('[Debug-PlaygroundSelector] 获取到模型列表数据:', data);
-            
-            if (data.status === 'success' && data.models) {
-              // 构建bedrock模型列表
-              const bedrockModels = data.models.bedrock ? 
-                Object.entries(data.models.bedrock).map(([key, info]) => ({
-                  key,
-                  name: info.name,
-                  description: info.description,
-                  alwaysAvailable: true
-                })) : [];
-                
-              // 构建EC2模型列表
-              const ec2Models = data.models.ec2 ?
-                Object.entries(data.models.ec2).map(([key, info]) => ({
-                  key,
-                  name: info.name,
-                  description: info.description,
-                  alwaysAvailable: false
-                })) : [];
+    if (!visible) {
+      return;
+    }
 
-              console.log('[Debug-PlaygroundSelector] 处理后的模型列表:', { bedrockModels, ec2Models });
+    let cancelled = false;
 
-              // 更新模型分类信息
-              setModelCategories({
-                bedrock: {
-                  title: 'Bedrock 模型',
-                  icon: <CloudOutlined />,
-                  color: '#1890ff',
-                  models: bedrockModels
-                },
-                ec2: {
-                  title: 'EC2 部署模型',
-                  icon: <ThunderboltOutlined />,
-                  color: '#52c41a',
-                  models: ec2Models
-                }
-              });
+    const initData = async () => {
+      setLoading(true);
+      try {
+        const response = await fetch('/api/model-list');
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
 
-              // 立即准备模型列表并发送请求
-              const allModels = [...bedrockModels.map(m => m.key), ...ec2Models.map(m => m.key)];
-              console.log('[Debug-PlaygroundSelector] 将发送到后端的模型列表:', allModels);
-                
-              if (allModels.length > 0) {
-                // 直接调用API检查状态，而不使用中间函数
-                const statusResponse = await fetch('/api/check-model-status', {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json'
-                  },
-                  body: JSON.stringify({ models: allModels })
-                });
-                  
-                if (statusResponse.ok) {
-                  const statusData = await statusResponse.json();
-                  console.log('[Debug-PlaygroundSelector] 获取到模型状态响应:', statusData);
-                    
-                  if (statusData.model_status) {
-                    setModelStatus(statusData.model_status);
-                  }
-                } else {
-                  console.log('[Debug-PlaygroundSelector] 状态检查失败, HTTP状态码:', statusResponse.status);
-                  const errorText = await statusResponse.text();
-                  console.log('[Debug-PlaygroundSelector] 错误内容:', errorText);
-                }
-              }
-            }
+        const data = await response.json();
+        if (data.status !== 'success' || !data.models) {
+          throw new Error(data.message || '获取模型数据失败');
+        }
+
+        const { categories, modelKeys } = buildCategories(data.models);
+        if (!cancelled) {
+          setModelCategories(categories);
+        }
+
+        if (modelKeys.length === 0) {
+          if (!cancelled) {
+            setModelStatus({});
           }
-        } catch (error) {
-          console.error('[Debug-PlaygroundSelector] 初始化数据异常:', error);
-          message.error('获取模型数据失败');
-        } finally {
+          return;
+        }
+
+        const statusResponse = await fetch('/api/check-model-status', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ models: modelKeys })
+        });
+
+        if (!statusResponse.ok) {
+          const errorText = await statusResponse.text();
+          throw new Error(errorText || `Status check failed with ${statusResponse.status}`);
+        }
+
+        const statusData = await statusResponse.json();
+        if (!cancelled && statusData.model_status) {
+          setModelStatus(statusData.model_status);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.error('[PlaygroundModelSelector] 初始化数据异常:', error);
+          message.error(error?.message || '获取模型数据失败');
+        }
+      } finally {
+        if (!cancelled) {
           setLoading(false);
         }
-      };
-      
-      initData();
-    }
-  }, [visible]);
+      }
+    };
+
+    initData();
+    return () => {
+      cancelled = true;
+    };
+  }, [visible, buildCategories]);
 
   // 判断模型是否可用
   const isModelAvailable = (model) => {

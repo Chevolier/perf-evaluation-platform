@@ -10,6 +10,7 @@ model_bp = Blueprint('model', __name__)
 # Initialize service
 model_service = ModelService()
 
+
 @model_bp.route('/model-list', methods=['GET'])
 def get_model_list():
     """Get list of all available models."""
@@ -19,67 +20,60 @@ def get_model_list():
         logger.error(f"Error getting model list: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
-@model_bp.route('/ec2/current-models', methods=['GET'])
-def get_current_ec2_models():
-    """Get currently deployed EC2 models."""
+
+@model_bp.route('/emd/current-models', methods=['GET'])
+def get_current_emd_models():
+    """Get currently deployed EMD models."""
     try:
-        deployed_models = model_service.get_current_ec2_models()
+        deployed_models = model_service.get_current_emd_models()
         return jsonify({
             "status": "success",
             "deployed": deployed_models
         })
     except Exception as e:
-        logger.error(f"Error getting current EC2 models: {e}")
+        logger.error(f"Error getting current EMD models: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@model_bp.route('/emd/init', methods=['POST'])
+def init_emd():
+    """Initialize EMD environment."""
+    try:
+        data = request.get_json() or {}
+        region = data.get('region', 'us-east-1')
+        result = model_service.initialize_emd(region)
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Error initializing EMD: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 @model_bp.route('/deploy-models', methods=['POST'])
 def deploy_models():
-    """Deploy models using EC2 Docker deployment."""
+    """Deploy EMD models."""
     try:
         data = request.get_json() or {}
         models = data.get('models', [])
-        instance_type = data.get('instance_type', 'g5.2xlarge')
+        instance_type = data.get('instance_type', 'ml.g5.2xlarge')
         engine_type = data.get('engine_type', 'vllm')
-        service_type = data.get('service_type', 'vllm_realtime')
+        service_type = data.get('service_type', 'sagemaker_realtime')
 
-        # Get TP/DP parameters for EC2 deployment
-        tp_size = data.get('tp_size', 1)
-        dp_size = data.get('dp_size', 1)
-
-        # Get GPU memory utilization and max model length parameters
-        gpu_memory_utilization = data.get('gpu_memory_utilization', 0.9)
-        max_model_len = data.get('max_model_len', 2048)
-
-        logger.info(f"🚀 Deploy request received:")
-        logger.info(f"  Models: {models}")
-        logger.info(f"  Instance type: {instance_type}")
-        logger.info(f"  Engine type: {engine_type}")
-        logger.info(f"  Service type: {service_type}")
-        logger.info(f"  TP size: {tp_size}")
-        logger.info(f"  DP size: {dp_size}")
-        logger.info(f"  GPU memory utilization: {gpu_memory_utilization}")
-        logger.info(f"  Max model length: {max_model_len}")
+        logger.info("🚀 Deploy request received:")
+        logger.info("  Models: %s", models)
+        logger.info("  Instance type: %s", instance_type)
+        logger.info("  Engine type: %s", engine_type)
+        logger.info("  Service type: %s", service_type)
 
         results = {}
         for model_key in models:
-            logger.info(f"🚀 Deploying model: {model_key}")
-
-            # Use EC2 Docker deployment only
-            port = 8000  # Default port, could be made configurable
-            result = model_service.deploy_model_on_ec2(
-                model_key=model_key,
-                instance_type=instance_type,
-                engine_type=engine_type,
-                service_type=service_type,
-                port=port,
-                tp_size=tp_size,
-                dp_size=dp_size,
-                gpu_memory_utilization=gpu_memory_utilization,
-                max_model_len=max_model_len
+            logger.info("🚀 Deploying model: %s", model_key)
+            result = model_service.deploy_emd_model(
+                model_key,
+                instance_type,
+                engine_type,
+                service_type,
             )
-
-            logger.info(f"🚀 Deployment result for {model_key}: {result}")
+            logger.info("🚀 Deployment result for %s: %s", model_key, result)
             results[model_key] = result
 
         return jsonify({
@@ -89,6 +83,50 @@ def deploy_models():
     except Exception as e:
         logger.error(f"Error deploying models: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@model_bp.route('/register-deployment-endpoint', methods=['POST'])
+def register_deployment_endpoint():
+    """Register an external deployment endpoint (HyperPod, EKS, EC2, etc.)."""
+    try:
+        data = request.get_json() or {}
+
+        deployment_method = data.get('deployment_method')
+        endpoint_url = data.get('endpoint_url')
+        deployment_id = data.get('deployment_id')
+        model_name = data.get('model_name')
+        model_key = data.get('model_key')
+        metadata = data.get('metadata') if isinstance(data.get('metadata'), dict) else None
+        status = data.get('status', 'active')
+
+        if not deployment_method or not endpoint_url:
+            return jsonify({
+                "status": "error",
+                "message": "deployment_method and endpoint_url are required"
+            }), 400
+
+        result = model_service.register_external_endpoint(
+            deployment_method=deployment_method,
+            endpoint_url=endpoint_url,
+            deployment_id=deployment_id,
+            model_name=model_name,
+            model_key=model_key,
+            metadata=metadata,
+            status=status
+        )
+
+        return jsonify({
+            "status": "success",
+            "model_key": result["model_key"],
+            "model": result["model"]
+        })
+
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+    except Exception as exc:  # pragma: no cover
+        logger.exception("Error registering deployment endpoint: %s", exc)
+        return jsonify({"status": "error", "message": str(exc)}), 500
+
 
 @model_bp.route('/check-model-status', methods=['POST'])
 def check_model_status():
@@ -102,24 +140,37 @@ def check_model_status():
         logger.error(f"Error checking model status: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
-@model_bp.route('/ec2/status', methods=['GET'])
-def get_ec2_status():
-    """Get EC2 deployment status."""
+
+@model_bp.route('/emd/status', methods=['GET'])
+def get_emd_status():
+    """Get EMD environment status."""
     try:
-        # Return current EC2 models status
-        deployed_models = model_service.get_current_ec2_models()
-        return jsonify({
-            "status": "success",
-            "available": True,  # EC2 is always available
-            "deployed_models": deployed_models
-        })
+        status_info = model_service.get_emd_info()
+        return jsonify(status_info)
     except Exception as e:
-        logger.error(f"Error getting EC2 status: {e}")
+        logger.error(f"Error getting EMD status: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
-@model_bp.route('/stop-model', methods=['POST'])
-def stop_model():
-    """Stop an EC2 model deployment."""
+
+@model_bp.route('/emd/config/tag', methods=['POST'])
+def set_emd_tag():
+    """Set EMD deployment tag."""
+    try:
+        data = request.get_json() or {}
+        tag = data.get('tag')
+        if not tag:
+            return jsonify({"success": False, "error": "Tag is required"}), 400
+
+        result = model_service.set_emd_tag(tag)
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Error setting EMD tag: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@model_bp.route('/delete-model', methods=['POST'])
+def delete_model():
+    """Delete an EMD model deployment."""
     try:
         data = request.get_json() or {}
         model_key = data.get('model_key')
@@ -127,46 +178,8 @@ def stop_model():
         if not model_key:
             return jsonify({"success": False, "error": "Model key is required"}), 400
 
-        result = model_service.stop_ec2_model(model_key)
+        result = model_service.delete_emd_model(model_key)
         return jsonify(result)
     except Exception as e:
-        logger.error(f"Error stopping model: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@model_bp.route('/register-deployment', methods=['POST'])
-def register_existing_deployment():
-    """Register an existing Docker deployment that wasn't deployed through the platform."""
-    try:
-        data = request.get_json() or {}
-        model_key = data.get('model_key')
-        container_name = data.get('container_name')
-        port = data.get('port')
-        tag = data.get('tag')
-
-        if not all([model_key, container_name, port]):
-            return jsonify({
-                "success": False,
-                "error": "model_key, container_name, and port are required"
-            }), 400
-
-        try:
-            port = int(port)
-        except ValueError:
-            return jsonify({"success": False, "error": "Port must be a valid integer"}), 400
-
-        result = model_service.register_existing_deployment(model_key, container_name, port, tag)
-        return jsonify(result)
-
-    except Exception as e:
-        logger.error(f"Error registering existing deployment: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@model_bp.route('/clear-stale-status', methods=['POST'])
-def clear_stale_status():
-    """Clear stale deployment statuses (failed statuses older than 10 minutes)."""
-    try:
-        result = model_service.clear_stale_deployment_status()
-        return jsonify(result)
-    except Exception as e:
-        logger.error(f"Error clearing stale status: {e}")
+        logger.error(f"Error deleting model: {e}")
         return jsonify({"success": False, "error": str(e)}), 500

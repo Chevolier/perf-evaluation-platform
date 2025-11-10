@@ -42,8 +42,9 @@ def main():
     
     print(f"🚀 Starting Inference Platform ({environment} mode)")
     print(f"📡 Server: http://{host}:{port}")
-    
-    app.run(host=host, port=port, debug=debug)
+
+    # Enable threaded mode and streaming support
+    app.run(host=host, port=port, debug=debug, threaded=True)
 
 if __name__ == '__main__':
     main()

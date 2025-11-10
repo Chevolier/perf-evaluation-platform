@@ -36,34 +36,37 @@ class EMDModel:
     
     def validate_deployment_config(self, instance_type: str, engine_type: str) -> Tuple[bool, str]:
         """Validate deployment configuration.
-        
+
         Args:
-            instance_type: AWS instance type
+            instance_type: AWS instance type (with or without ml. prefix)
             engine_type: Inference engine type
-            
+
         Returns:
             Tuple of (is_valid, error_message)
         """
-        # Valid instance types for EMD deployment
+        # Valid instance types for EMD deployment (bare names)
         valid_instances = [
             "g5.xlarge", "g5.2xlarge", "g5.4xlarge", "g5.8xlarge",
             "g5.12xlarge", "g5.16xlarge", "g5.24xlarge", "g5.48xlarge",
             "p4d.24xlarge", "p4de.24xlarge", "p5.48xlarge"
         ]
-        
+
         # Valid engine types
         valid_engines = ["vllm", "tgi", "sagemaker"]
-        
-        if instance_type not in valid_instances:
+
+        # Normalize instance type by removing ml. prefix if present
+        normalized_instance = instance_type.replace("ml.", "", 1) if instance_type.startswith("ml.") else instance_type
+
+        if normalized_instance not in valid_instances:
             return False, f"Invalid instance type: {instance_type}"
-        
+
         if engine_type not in valid_engines:
             return False, f"Invalid engine type: {engine_type}"
-        
+
         # Special validations for multimodal models
         if self.supports_multimodal and engine_type == "tgi":
             return False, "Multimodal models are not supported with TGI engine"
-        
+
         return True, "Configuration is valid"
     
     def get_deployment_config(self, instance_type: str = "g5.2xlarge", 

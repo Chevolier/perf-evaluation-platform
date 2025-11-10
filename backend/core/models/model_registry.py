@@ -1,9 +1,80 @@
 """Model registry containing all supported model definitions."""
 
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 
-# EC2 Models Configuration (formerly EMD models)
+# EMD (Elastic Model Deployment) Models Configuration
+# Used for SageMaker/HyperPod managed deployments
+EMD_MODELS = {
+    "qwen2.5-7b-instruct": {
+        "name": "Qwen2.5-7B-Instruct",
+        "description": "Qwen2.5模型",
+        "model_path": "Qwen2.5-7B-Instruct",
+        "supports_multimodal": False,
+        "supports_streaming": True,
+        "supported_methods": ["SAGEMAKER_ENDPOINT", "HYPERPOD", "EKS", "EC2"],
+        "supported_engines": ["vllm", "sglang"],
+        "constraints": {
+            "min_gpus": 1,
+            "recommended_instance_types": ["ml.g5.2xlarge", "ml.g5.4xlarge"]
+        }
+    },
+    "qwen3-0.6b": {
+        "name": "Qwen3-0.6B",
+        "description": "最新Qwen3模型，0.6B参数，高效轻量",
+        "model_path": "Qwen3-0.6B",
+        "supports_multimodal": False,
+        "supports_streaming": True,
+        "supported_methods": ["SAGEMAKER_ENDPOINT", "HYPERPOD", "EKS", "EC2"],
+        "supported_engines": ["vllm", "sglang"],
+        "constraints": {
+            "min_gpus": 1,
+            "recommended_instance_types": ["ml.g5.xlarge", "ml.g5.2xlarge"]
+        }
+    },
+    "qwen3-8b": {
+        "name": "Qwen3-8B",
+        "description": "最新Qwen3模型，8B参数，强大性能",
+        "model_path": "Qwen3-8B",
+        "supports_multimodal": False,
+        "supports_streaming": True,
+        "supported_methods": ["SAGEMAKER_ENDPOINT", "HYPERPOD", "EKS", "EC2"],
+        "supported_engines": ["vllm", "sglang"],
+        "constraints": {
+            "min_gpus": 1,
+            "recommended_instance_types": ["ml.g5.2xlarge", "ml.g5.4xlarge"]
+        }
+    },
+    "qwen2-vl-7b": {
+        "name": "Qwen2-VL-7B-Instruct",
+        "description": "通义千问视觉语言模型，7B参数",
+        "model_path": "Qwen2-VL-7B-Instruct",
+        "supports_multimodal": True,
+        "supports_streaming": True,
+        "supported_methods": ["SAGEMAKER_ENDPOINT", "HYPERPOD", "EKS", "EC2"],
+        "supported_engines": ["vllm", "sglang"],
+        "constraints": {
+            "min_gpus": 1,
+            "recommended_instance_types": ["ml.g5.2xlarge", "ml.g5.4xlarge"]
+        }
+    },
+    "qwen2.5-vl-32b": {
+        "name": "Qwen2.5-VL-32B-Instruct",
+        "description": "通义千问视觉语言模型，32B参数",
+        "model_path": "Qwen2.5-VL-32B-Instruct",
+        "supports_multimodal": True,
+        "supports_streaming": True,
+        "supported_methods": ["SAGEMAKER_ENDPOINT", "HYPERPOD", "EKS", "EC2"],
+        "supported_engines": ["vllm", "sglang"],
+        "constraints": {
+            "min_gpus": 2,
+            "recommended_instance_types": ["ml.g5.4xlarge", "ml.g5.8xlarge", "ml.p4d.24xlarge"]
+        }
+    },
+}
+
+
+# EC2 Models Configuration (Manual HuggingFace deployments)
 # Order: Qwen3 series → Qwen3-VL series → Qwen2.5 series → Llama series → DeepSeek series
 EC2_MODELS = {
     # Qwen3 series
@@ -88,27 +159,123 @@ EC2_MODELS = {
 
 # Bedrock Models Configuration
 BEDROCK_MODELS = {
-    "claude4": {
-        "name": "Claude 4",
-        "description": "Anthropic Claude 4",
-        "model_id": "anthropic.claude-3-5-sonnet-20241022-v2:0",
+    "claude45-sonnet": {
+        "name": "Claude Sonnet 4.5",
+        "description": "Latest Claude Sonnet 4.5 model (US inference profile)",
+        "model_id": "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
         "supports_multimodal": True,
         "supports_streaming": True,
         "max_tokens": 8192
     },
-    "claude35": {
+    "claude45-haiku": {
+        "name": "Claude Haiku 4.5",
+        "description": "Latest Claude Haiku 4.5 model (US inference profile)",
+        "model_id": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "supports_multimodal": True,
+        "supports_streaming": True,
+        "max_tokens": 8192
+    },
+    "claude4-opus": {
+        "name": "Claude Opus 4.1",
+        "description": "Claude Opus 4.1 model (US inference profile)",
+        "model_id": "us.anthropic.claude-opus-4-1-20250805-v1:0",
+        "supports_multimodal": True,
+        "supports_streaming": True,
+        "max_tokens": 8192
+    },
+    "claude4-opus-base": {
+        "name": "Claude Opus 4",
+        "description": "Claude Opus 4 base model (US inference profile)",
+        "model_id": "us.anthropic.claude-opus-4-20250514-v1:0",
+        "supports_multimodal": True,
+        "supports_streaming": True,
+        "max_tokens": 8192
+    },
+    "claude4-sonnet": {
+        "name": "Claude Sonnet 4",
+        "description": "Claude Sonnet 4 model (US inference profile)",
+        "model_id": "us.anthropic.claude-sonnet-4-20250514-v1:0",
+        "supports_multimodal": True,
+        "supports_streaming": True,
+        "max_tokens": 8192
+    },
+    "claude37-sonnet": {
+        "name": "Claude 3.7 Sonnet",
+        "description": "Claude 3.7 Sonnet model (US inference profile)",
+        "model_id": "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+        "supports_multimodal": True,
+        "supports_streaming": True,
+        "max_tokens": 8192
+    },
+    "claude35-sonnet-v2": {
+        "name": "Claude 3.5 Sonnet v2",
+        "description": "Claude 3.5 Sonnet v2 (October 2024) - LEGACY - US inference profile",
+        "model_id": "us.anthropic.claude-3-5-sonnet-20241022-v2:0",
+        "supports_multimodal": True,
+        "supports_streaming": True,
+        "max_tokens": 8192
+    },
+    "claude35-sonnet": {
         "name": "Claude 3.5 Sonnet",
-        "description": "Anthropic Claude 3.5 Sonnet",
-        "model_id": "anthropic.claude-3-5-sonnet-20241022-v2:0",
+        "description": "Claude 3.5 Sonnet original (June 2024) - LEGACY - US inference profile",
+        "model_id": "us.anthropic.claude-3-5-sonnet-20240620-v1:0",
         "supports_multimodal": True,
         "supports_streaming": True,
         "max_tokens": 8192
     },
-    "nova": {
-        "name": "Nova Pro",
-        "description": "Amazon Nova Pro",
-        "model_id": "amazon.nova-pro-v1:0",
+    "claude35-haiku": {
+        "name": "Claude 3.5 Haiku",
+        "description": "Claude 3.5 Haiku (October 2024) - US inference profile",
+        "model_id": "us.anthropic.claude-3-5-haiku-20241022-v1:0",
         "supports_multimodal": True,
+        "supports_streaming": True,
+        "max_tokens": 8192
+    },
+    "claude3-haiku": {
+        "name": "Claude 3 Haiku",
+        "description": "Claude 3 Haiku (March 2024) - US inference profile",
+        "model_id": "us.anthropic.claude-3-haiku-20240307-v1:0",
+        "supports_multimodal": True,
+        "supports_streaming": True,
+        "max_tokens": 4096
+    },
+    "claude3-opus": {
+        "name": "Claude 3 Opus",
+        "description": "Claude 3 Opus (February 2024) - LEGACY - US inference profile",
+        "model_id": "us.anthropic.claude-3-opus-20240229-v1:0",
+        "supports_multimodal": True,
+        "supports_streaming": True,
+        "max_tokens": 4096
+    },
+    "nova-premier": {
+        "name": "Nova Premier",
+        "description": "Amazon Nova Premier - Most capable - US inference profile",
+        "model_id": "us.amazon.nova-premier-v1:0",
+        "supports_multimodal": True,
+        "supports_streaming": True,
+        "max_tokens": 5000
+    },
+    "nova-pro": {
+        "name": "Nova Pro",
+        "description": "Amazon Nova Pro - Balanced performance - US inference profile",
+        "model_id": "us.amazon.nova-pro-v1:0",
+        "supports_multimodal": True,
+        "supports_streaming": True,
+        "max_tokens": 5000
+    },
+    "nova-lite": {
+        "name": "Nova Lite",
+        "description": "Amazon Nova Lite - Fast and cost-effective - US inference profile",
+        "model_id": "us.amazon.nova-lite-v1:0",
+        "supports_multimodal": True,
+        "supports_streaming": True,
+        "max_tokens": 5000
+    },
+    "nova-micro": {
+        "name": "Nova Micro",
+        "description": "Amazon Nova Micro - Smallest and fastest - US inference profile",
+        "model_id": "us.amazon.nova-micro-v1:0",
+        "supports_multimodal": False,
         "supports_streaming": True,
         "max_tokens": 5000
     }
@@ -117,23 +284,35 @@ BEDROCK_MODELS = {
 
 class ModelRegistry:
     """Registry for managing all available models."""
-    
+
     def __init__(self):
         """Initialize the model registry."""
+        self._emd_models = EMD_MODELS.copy()
         self._ec2_models = EC2_MODELS.copy()
         self._bedrock_models = BEDROCK_MODELS.copy()
-    
+        self._external_models: Dict[str, Dict[str, Any]] = {}
+
     def get_all_models(self) -> Dict[str, Dict[str, Any]]:
         """Get all available models organized by type.
-        
+
         Returns:
             Dictionary containing all models organized by type
         """
         return {
             "bedrock": self._bedrock_models,
-            "ec2": self._ec2_models
+            "emd": self._emd_models,
+            "ec2": self._ec2_models,
+            "external": self._external_models
         }
-    
+
+    def get_emd_models(self) -> Dict[str, Dict[str, Any]]:
+        """Get all EMD models.
+
+        Returns:
+            Dictionary of EMD models
+        """
+        return self._emd_models.copy()
+
     def get_ec2_models(self) -> Dict[str, Dict[str, Any]]:
         """Get all EC2 models.
 
@@ -141,35 +320,63 @@ class ModelRegistry:
             Dictionary of EC2 models
         """
         return self._ec2_models.copy()
-    
+
     def get_bedrock_models(self) -> Dict[str, Dict[str, Any]]:
         """Get all Bedrock models.
-        
+
         Returns:
             Dictionary of Bedrock models
         """
         return self._bedrock_models.copy()
-    
+
+    def get_external_models(self) -> Dict[str, Dict[str, Any]]:
+        """Get all externally registered deployments."""
+        return self._external_models.copy()
+
     def get_model_info(self, model_key: str, model_type: str = None) -> Dict[str, Any]:
         """Get information about a specific model.
 
         Args:
-            model_key: Key identifying the model
-            model_type: Type of model ('ec2' or 'bedrock'). If None, searches both.
+            model_key: Key identifying the model (or model_id/model_path)
+            model_type: Type of model ('emd', 'ec2', or 'bedrock'). If None, searches all.
 
         Returns:
             Model information dictionary or empty dict if not found
         """
+        # Resolve the key first in case it's a model_id or model_path
+        resolved_key = self.resolve_model_key(model_key)
+
+        if model_type == "emd" or model_type is None:
+            if resolved_key in self._emd_models:
+                return self._emd_models[resolved_key].copy()
+
         if model_type == "ec2" or model_type is None:
-            if model_key in self._ec2_models:
-                return self._ec2_models[model_key].copy()
+            if resolved_key in self._ec2_models:
+                return self._ec2_models[resolved_key].copy()
 
         if model_type == "bedrock" or model_type is None:
-            if model_key in self._bedrock_models:
-                return self._bedrock_models[model_key].copy()
+            if resolved_key in self._bedrock_models:
+                return self._bedrock_models[resolved_key].copy()
+
+        if model_type == "external" or model_type is None:
+            if resolved_key in self._external_models:
+                return self._external_models[resolved_key].copy()
 
         return {}
-    
+
+    def is_emd_model(self, model_key: str) -> bool:
+        """Check if a model is an EMD model.
+
+        Args:
+            model_key: Model key to check
+
+        Returns:
+            True if model is an EMD model
+        """
+        # Resolve the key first in case it's a model_path
+        resolved_key = self.resolve_model_key(model_key)
+        return resolved_key in self._emd_models
+
     def is_ec2_model(self, model_key: str) -> bool:
         """Check if a model is an EC2 model.
 
@@ -179,21 +386,69 @@ class ModelRegistry:
         Returns:
             True if model is an EC2 model
         """
-        return model_key in self._ec2_models
-    
+        resolved_key = self.resolve_model_key(model_key)
+        return resolved_key in self._ec2_models
+
+    def resolve_model_key(self, model_identifier: str) -> str:
+        """Resolve a model identifier to its registry key.
+
+        Handles both model keys (e.g., 'claude35-sonnet-v2') and model_ids
+        (e.g., 'us.anthropic.claude-3-5-sonnet-20241022-v2:0').
+
+        Args:
+            model_identifier: Model key or model_id
+
+        Returns:
+            Resolved model key, or original identifier if not found
+        """
+        # Check if it's already a valid key
+        if (model_identifier in self._bedrock_models or
+            model_identifier in self._emd_models or
+            model_identifier in self._ec2_models or
+            model_identifier in self._external_models):
+            return model_identifier
+
+        # Try to find by model_id in Bedrock models
+        for key, info in self._bedrock_models.items():
+            if info.get('model_id') == model_identifier:
+                return key
+
+        # Try to find by model_path in EMD models
+        for key, info in self._emd_models.items():
+            if info.get('model_path') == model_identifier:
+                return key
+
+        # Try to find by model_path in EC2 models
+        for key, info in self._ec2_models.items():
+            if info.get('model_path') == model_identifier:
+                return key
+
+        # Not found, return original
+        return model_identifier
+
     def is_bedrock_model(self, model_key: str) -> bool:
         """Check if a model is a Bedrock model.
-        
+
         Args:
             model_key: Model key to check
-            
+
         Returns:
             True if model is a Bedrock model
         """
-        return model_key in self._bedrock_models
-    
+        # Resolve the key first in case it's a model_id
+        resolved_key = self.resolve_model_key(model_key)
+        return resolved_key in self._bedrock_models
+
+    def is_external_model(self, model_key: str) -> bool:
+        """Check if a model is an externally registered deployment."""
+        return model_key in self._external_models
+
+    def set_external_models(self, models: Dict[str, Dict[str, Any]]) -> None:
+        """Replace the external deployment registry."""
+        self._external_models = models.copy()
+
     def get_model_path(self, model_key: str) -> str:
-        """Get the model path for EC2 models or model ID for Bedrock models.
+        """Get the model path for EMD/EC2 models or model ID for Bedrock models.
 
         Args:
             model_key: Model key
@@ -201,35 +456,76 @@ class ModelRegistry:
         Returns:
             Model path or ID, empty string if not found
         """
+        if model_key in self._emd_models:
+            return self._emd_models[model_key].get("model_path", "")
         if model_key in self._ec2_models:
             return self._ec2_models[model_key].get("model_path", "")
-        elif model_key in self._bedrock_models:
+        if model_key in self._bedrock_models:
             return self._bedrock_models[model_key].get("model_id", "")
+        if model_key in self._external_models:
+            model_info = self._external_models[model_key]
+            return model_info.get("model_path") or model_info.get("model_name") or ""
         return ""
-    
+
     def supports_multimodal(self, model_key: str) -> bool:
         """Check if a model supports multimodal input.
-        
+
         Args:
             model_key: Model key to check
-            
+
         Returns:
             True if model supports multimodal input
         """
         model_info = self.get_model_info(model_key)
         return model_info.get("supports_multimodal", False)
-    
+
     def supports_streaming(self, model_key: str) -> bool:
         """Check if a model supports streaming output.
-        
+
         Args:
             model_key: Model key to check
-            
+
         Returns:
             True if model supports streaming
         """
         model_info = self.get_model_info(model_key)
         return model_info.get("supports_streaming", False)
+
+    def get_supported_methods(self, model_key: str) -> List[str]:
+        """Get supported launch methods for a model.
+
+        Args:
+            model_key: Model key to check
+
+        Returns:
+            List of supported launch methods
+        """
+        model_info = self.get_model_info(model_key)
+        return model_info.get("supported_methods", [])
+
+    def get_supported_engines(self, model_key: str) -> List[str]:
+        """Get supported inference engines for a model.
+
+        Args:
+            model_key: Model key to check
+
+        Returns:
+            List of supported inference engines
+        """
+        model_info = self.get_model_info(model_key)
+        return model_info.get("supported_engines", [])
+
+    def get_constraints(self, model_key: str) -> Dict[str, Any]:
+        """Get launch constraints for a model.
+
+        Args:
+            model_key: Model key to check
+
+        Returns:
+            Dictionary of launch constraints
+        """
+        model_info = self.get_model_info(model_key)
+        return model_info.get("constraints", {})
 
 
 # Global model registry instance

@@ -14,7 +14,6 @@ import {
   Divider,
   message,
   Empty,
-  Alert,
   Tag,
   Modal,
   Select,
@@ -30,14 +29,13 @@ import {
   SettingOutlined,
   LinkOutlined,
   RocketOutlined,
-  CloseOutlined,
   EyeOutlined,
   DeleteOutlined
 } from '@ant-design/icons';
 import PlaygroundResultsDisplay from '../components/PlaygroundResultsDisplay';
 import PlaygroundModelSelector from '../components/PlaygroundModelSelector';
 
-const { Title, Text, Paragraph } = Typography;
+const { Title, Text } = Typography;
 const { TextArea } = Input;
 
 const PlaygroundPage = ({
@@ -48,23 +46,11 @@ const PlaygroundPage = ({
   onParamsChange,
   onModelChange
 }) => {
-  // Load inference results from localStorage and clean up incomplete results
+  // Load inference results from localStorage
   const [inferenceResults, setInferenceResults] = useState(() => {
     try {
       const saved = localStorage.getItem('playground_inferenceResults');
-      if (saved) {
-        const parsedResults = JSON.parse(saved);
-        // Clean up incomplete results (those without proper status)
-        const cleanResults = {};
-        Object.entries(parsedResults).forEach(([modelName, result]) => {
-          // Only keep results with complete status
-          if (result && ['success', 'error', 'not_deployed'].includes(result.status)) {
-            cleanResults[modelName] = result;
-          }
-        });
-        return cleanResults;
-      }
-      return {};
+      return saved ? JSON.parse(saved) : {};
     } catch (error) {
       console.error('Failed to load inference results from localStorage:', error);
       return {};
@@ -101,19 +87,16 @@ const PlaygroundPage = ({
       const saved = localStorage.getItem('playground_manualConfig');
       return saved ? JSON.parse(saved) : {
         api_url: '',
-        model_name: '',
-        endpoint_name: ''
+        model_name: ''
       };
     } catch (error) {
       console.error('Failed to load manual config from localStorage:', error);
       return {
         api_url: '',
-        model_name: '',
-        endpoint_name: ''
+        model_name: ''
       };
     }
   });
-
 
   const fileInputRef = useRef(null);
 
@@ -152,31 +135,17 @@ const PlaygroundPage = ({
   }, [originalFiles]);
 
 
-  // Clear inference results cache
-  const clearInferenceCache = useCallback(() => {
-    console.log('🧹 Clearing inference results cache');
-    setInferenceResults({});
-    setIsInferring(false);
-    try {
-      localStorage.removeItem('playground_inferenceResults');
-    } catch (error) {
-      console.error('Failed to clear inference results cache:', error);
-    }
-  }, []);
-
   // Handle page refresh (Command+R on Mac, F5 on Windows/Linux)
   const handlePageRefresh = useCallback((event) => {
     // Check for refresh key combinations
     if ((event.metaKey && event.key === 'r') || event.key === 'F5') {
       event.preventDefault();
-
-      // Clear inference cache on refresh to prevent stuck "处理中" states
-      clearInferenceCache();
-
-      // Allow normal page refresh
+      
+      // Allow normal page refresh without clearing state
+      // State will be preserved through localStorage and restored on page load
       window.location.reload();
     }
-  }, [clearInferenceCache]);
+  }, []);
 
   // Add keyboard event listener for refresh
   useEffect(() => {
@@ -402,7 +371,7 @@ const PlaygroundPage = ({
         message.warning('请先选择至少一个模型');
         return;
       }
-    } else if (inputMode === 'manual') {
+    } else {
       if (!manualConfig.api_url.trim() || !manualConfig.model_name.trim()) {
         message.warning('请填写API URL和模型名称');
         return;
@@ -414,15 +383,6 @@ const PlaygroundPage = ({
         message.warning('请输入有效的API URL');
         return;
       }
-    } else if (inputMode === 'sagemaker') {
-      if (!manualConfig.endpoint_name.trim()) {
-        message.warning('请填写SageMaker端点名称');
-        return;
-      }
-      if (!manualConfig.model_name.trim()) {
-        message.warning('请填写模型显示名称（Huggingface模型名称）');
-        return;
-      }
     }
 
     if (!dataset.prompt.trim()) {
@@ -431,7 +391,21 @@ const PlaygroundPage = ({
     }
 
     setIsInferring(true);
-    setInferenceResults({});
+    
+    // Initialize results immediately with streaming status to avoid long loading screen
+    const initialResults = {};
+    const modelsToProcess = inputMode === 'dropdown'
+      ? selectedModels
+      : [manualConfig.model_name || manualConfig.model || manualConfig.api_url || 'Manual API'];
+    modelsToProcess.forEach(model => {
+      initialResults[model] = {
+        status: 'streaming',
+        partialContent: '',
+        model,
+        label: model
+      };
+    });
+    setInferenceResults(initialResults);
 
 
     const requestData = {
@@ -445,15 +419,10 @@ const PlaygroundPage = ({
     // Handle different input modes
     if (inputMode === 'dropdown') {
       requestData.models = selectedModels;
-    } else if (inputMode === 'manual') {
+    } else {
       requestData.manual_config = {
         api_url: manualConfig.api_url,
         model_name: manualConfig.model_name
-      };
-    } else if (inputMode === 'sagemaker') {
-      requestData.sagemaker_config = {
-        endpoint_name: manualConfig.endpoint_name,
-        model_name: manualConfig.model_name || manualConfig.endpoint_name
       };
     }
 
@@ -464,7 +433,8 @@ const PlaygroundPage = ({
       const response = await fetch('/api/multi-inference', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'Accept': 'text/event-stream'
         },
         body: JSON.stringify(requestData)
       });
@@ -475,60 +445,211 @@ const PlaygroundPage = ({
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value, { stream: true });
-        console.log('📦 Received chunk:', JSON.stringify(chunk));
-        
-        buffer += chunk;
-        const lines = buffer.split('\n');
-        
-        // Keep the last potentially incomplete line in buffer
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          console.log('📄 Processing line:', JSON.stringify(line));
-          
-          if (line.startsWith('data: ')) {
-            try {
-              const jsonStr = line.slice(6).trim();
-              console.log('🔍 Parsing JSON:', jsonStr);
-              
-              if (jsonStr) {
-                const data = JSON.parse(jsonStr);
-                console.log('✅ Parsed data:', data);
-                
-                if (data.type === 'complete') {
-                  console.log('🏁 Stream complete');
-                  setIsInferring(false);
-                  break;
-                } else if (data.model) {
-                  console.log('📊 Updating results for model:', data.model);
-                  setInferenceResults(prev => ({
-                    ...prev,
-                    [data.model]: data
-                  }));
-                } else if (data.type === 'heartbeat') {
-                  console.log('💓 Heartbeat received');
-                }
-              }
-            } catch (e) {
-              console.error('❌ 解析SSE数据失败:', e, 'Line:', line);
-            }
-          } else if (line.trim()) {
-            console.log('⚠️ Non-SSE line received:', line);
-          }
-        }
+      const body = response.body;
+      if (!body) {
+        throw new Error('Streaming response body is not available');
       }
-      
-      console.log('🎯 Stream processing finished');
-      setIsInferring(false);
+
+      const reader = body.getReader();
+      const decoder = new TextDecoder('utf-8');  // Explicitly specify UTF-8
+
+      console.log('🎯 Starting to read streaming response...');
+
+      const processStream = async () => {
+        let buffer = '';
+        let processedLineCount = 0;
+
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) {
+              console.log('✅ Stream reading completed');
+              break;
+            }
+
+            // CRITICAL: Use { stream: true } to handle multi-byte UTF-8 characters across chunks
+            const chunk = decoder.decode(value, { stream: true });
+            console.log('📦 Raw chunk received:', chunk.length, 'chars');
+
+            buffer += chunk;
+            const lines = buffer.split('\n');
+
+            // Keep the last potentially incomplete line in buffer
+            buffer = lines.pop() || '';
+
+            console.log('📝 Processing', lines.length, 'lines from buffer');
+
+            let processedLines = false;
+
+            for (const line of lines) {
+              if (!line.trim()) continue; // Skip empty lines
+              processedLineCount += 1;
+              processedLines = true;
+
+              console.log('📄 Processing line:', line.substring(0, 100) + (line.length > 100 ? '...' : ''));
+
+              if (line.startsWith('data: ')) {
+                try {
+                  const jsonStr = line.slice(6).trim();
+
+                  if (jsonStr) {
+                    const data = JSON.parse(jsonStr);
+                    console.log('✅ Parsed streaming data:', data.type, data.model, data.delta ? `"${data.delta}"` : '');
+
+                    if (data.type === 'complete') {
+                      console.log('🏁 Stream complete');
+                      return;
+                    } else if (data.type === 'heartbeat') {
+                      console.log('💓 Heartbeat received:', data.elapsed_seconds || 0, 'seconds', data.message || '');
+
+                      // Show heartbeat messages to user for long waits
+                      if (data.message) {
+                        setInferenceResults(prev => {
+                          const updated = { ...prev };
+                          // Update all pending models with the status message
+                          Object.keys(updated).forEach(key => {
+                            if (updated[key].status === 'streaming' && !updated[key].partialContent) {
+                              updated[key] = {
+                                ...updated[key],
+                                statusMessage: data.message,
+                                elapsedSeconds: data.elapsed_seconds
+                              };
+                            }
+                          });
+                          return updated;
+                        });
+                      }
+                    } else {
+                      const modelKey = data.model_key || data.model;
+                      if (!modelKey) {
+                        console.warn('⚠️ Streaming payload missing model key:', data);
+                        continue;
+                      }
+
+                      const displayName = data.label || data.display_name || data.model || modelKey;
+
+                      if (data.type === 'chunk') {
+                        console.log('✍️ Streaming chunk for model:', displayName, data.delta);
+                        setInferenceResults(prev => {
+                          const previousEntry = prev[modelKey] || {};
+                          const previousContent = previousEntry.partialContent || '';
+                          const deltaText = data.delta || '';
+                          const newContent = `${previousContent}${deltaText}`;
+
+                          console.log(`🔄 Updating ${displayName}: "${deltaText}" -> Total: "${newContent.substring(0, 50)}..."`);
+
+                          const updatedEntry = {
+                            ...previousEntry,
+                            status: data.status || 'streaming',
+                            partialContent: newContent,
+                            lastChunk: data,
+                            model: modelKey,
+                            label: displayName,
+                            displayName,
+                            api_url: data.api_url || previousEntry.api_url,
+                            provider: data.provider || previousEntry.provider,
+                            lastUpdated: Date.now() // Force re-render
+                          };
+
+                          return {
+                            ...prev,
+                            [modelKey]: updatedEntry
+                          };
+                        });
+                      } else if (data.type === 'result') {
+                        console.log('📚 Final result for model:', displayName);
+                        setInferenceResults(prev => {
+                          const previousEntry = prev[modelKey] || {};
+                          const partialContent = previousEntry.partialContent || '';
+                          let resultPayload = data.result ? { ...data.result } : undefined;
+
+                          if (resultPayload) {
+                            if (!resultPayload.content && partialContent) {
+                              resultPayload.content = partialContent;
+                            }
+                          } else {
+                            resultPayload = { content: partialContent || '' };
+                          }
+
+                          return {
+                            ...prev,
+                            [modelKey]: {
+                              ...previousEntry,
+                              ...data,
+                              model: modelKey,
+                              label: displayName,
+                              displayName,
+                              status: data.status || 'success',
+                              result: resultPayload,
+                              partialContent: undefined,
+                              streamCompleted: true
+                            }
+                          };
+                        });
+                      } else if (data.type === 'error') {
+                        console.log('❗ Error result for model:', displayName, data.message);
+                        setInferenceResults(prev => ({
+                          ...prev,
+                          [modelKey]: {
+                            ...(prev[modelKey] || {}),
+                            ...data,
+                            model: modelKey,
+                            label: displayName,
+                            status: 'error',
+                            partialContent: undefined
+                          }
+                        }));
+                      } else {
+                        console.log('📊 Updating results for model:', displayName);
+                        setInferenceResults(prev => ({
+                          ...prev,
+                          [modelKey]: {
+                            ...(prev[modelKey] || {}),
+                            ...data,
+                            model: modelKey,
+                            label: displayName
+                          }
+                        }));
+                      }
+                    }
+                  }
+                } catch (e) {
+                  console.error('❌ 解析SSE数据失败:', e, 'Line:', line);
+                }
+              } else if (line.trim()) {
+                console.log('⚠️ Non-SSE line received:', line);
+              }
+
+              if (processedLineCount % 20 === 0) {
+                await new Promise(resolve => {
+                  if (typeof window !== 'undefined' && window.requestAnimationFrame) {
+                    window.requestAnimationFrame(() => resolve());
+                  } else {
+                    setTimeout(resolve, 0);
+                  }
+                });
+              }
+            }
+
+            if (processedLines) {
+              await new Promise(resolve => setTimeout(resolve, 0));
+            }
+          }
+        } finally {
+          console.log('🎯 Stream processing finished');
+          try {
+            reader.releaseLock();
+          } catch (releaseError) {
+            console.debug('Unable to release stream reader lock:', releaseError);
+          }
+          setIsInferring(false);
+        }
+      };
+
+      processStream().catch(error => {
+        console.error('推理请求失败:', error);
+        message.error('推理请求失败，请检查网络连接');
+      });
     } catch (error) {
       console.error('推理请求失败:', error);
       message.error('推理请求失败，请检查网络连接');
@@ -556,15 +677,13 @@ const PlaygroundPage = ({
                 {/* 模型输入方式选择 */}
                 <div>
                   <Text strong style={{ marginBottom: 8, display: 'block' }}>模型输入方式：</Text>
-                  <Radio.Group
-                    value={inputMode}
+                  <Radio.Group 
+                    value={inputMode} 
                     onChange={(e) => {
                       setInputMode(e.target.value);
                       // Clear configurations when switching modes
                       if (e.target.value === 'manual') {
-                        setManualConfig({ api_url: '', model_name: '', endpoint_name: '' });
-                      } else if (e.target.value === 'sagemaker') {
-                        setManualConfig({ api_url: '', model_name: '', endpoint_name: '' });
+                        setManualConfig({ api_url: '', model_name: '' });
                       }
                     }}
                   >
@@ -577,13 +696,7 @@ const PlaygroundPage = ({
                     <Radio value="manual">
                       <Space>
                         <LinkOutlined />
-                        手动输入API
-                      </Space>
-                    </Radio>
-                    <Radio value="sagemaker">
-                      <Space>
-                        <RobotOutlined />
-                        SageMaker端点
+                        手动输入
                       </Space>
                     </Radio>
                   </Radio.Group>
@@ -596,8 +709,8 @@ const PlaygroundPage = ({
                       <div style={{ textAlign: 'center', padding: '20px' }}>
                         <Text type="secondary">尚未选择任何模型</Text>
                         <div style={{ marginTop: 12 }}>
-                          <Button
-                            type="primary"
+                          <Button 
+                            type="primary" 
                             icon={<RobotOutlined />}
                             onClick={() => setModelSelectorVisible(true)}
                           >
@@ -617,8 +730,8 @@ const PlaygroundPage = ({
                             </Tag>
                           ))}
                         </div>
-                        <Button
-                          size="small"
+                        <Button 
+                          size="small" 
                           onClick={() => setModelSelectorVisible(true)}
                         >
                           重新选择
@@ -626,7 +739,7 @@ const PlaygroundPage = ({
                       </div>
                     )}
                   </>
-                ) : inputMode === 'manual' ? (
+                ) : (
                   <Space direction="vertical" style={{ width: '100%' }}>
                     <div>
                       <Text strong>API URL：</Text>
@@ -656,40 +769,6 @@ const PlaygroundPage = ({
                       />
                       <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
                         请输入准确的模型名称，如: gpt-3.5-turbo, claude-3-sonnet-20240229
-                      </Text>
-                    </div>
-                  </Space>
-                ) : (
-                  <Space direction="vertical" style={{ width: '100%' }}>
-                    <div>
-                      <Text strong>SageMaker端点名称：</Text>
-                      <Input
-                        name="endpoint_name"
-                        autoComplete="endpoint-name"
-                        value={manualConfig.endpoint_name}
-                        onChange={(e) => setManualConfig({ ...manualConfig, endpoint_name: e.target.value })}
-                        placeholder="Qwen3-Coder-30B-A3B-Instruct-2025-10-13-05-30-15-995"
-                        style={{ marginTop: 4, width: '100%' }}
-                        prefix={<RobotOutlined />}
-                      />
-                      <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
-                        请输入SageMaker端点名称，支持vLLM、TGI等推理框架部署的端点
-                      </Text>
-                    </div>
-                    <div>
-                      <Text strong>模型显示名称：</Text>
-                      <Input
-                        name="model_name"
-                        autoComplete="model-display-name"
-                        value={manualConfig.model_name}
-                        onChange={(e) => setManualConfig({ ...manualConfig, model_name: e.target.value })}
-                        placeholder="例如：Qwen/Qwen2.5-Coder-32B-Instruct （必填）"
-                        style={{ marginTop: 4, width: '100%' }}
-                        prefix={<RocketOutlined />}
-                        required
-                      />
-                      <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
-                        原始模型在Huggingface上的完整名称，例如 Qwen/Qwen2.5-Coder-32B-Instruct
                       </Text>
                     </div>
                   </Space>
@@ -966,11 +1045,7 @@ const PlaygroundPage = ({
               icon={<PlayCircleOutlined />}
               onClick={handleStartInference}
               loading={isInferring}
-              disabled={
-                inputMode === 'dropdown' ? selectedModels.length === 0 :
-                inputMode === 'manual' ? (!manualConfig.api_url.trim() || !manualConfig.model_name.trim()) :
-                inputMode === 'sagemaker' ? (!manualConfig.endpoint_name.trim() || !manualConfig.model_name.trim()) : false
-              }
+              disabled={inputMode === 'dropdown' ? selectedModels.length === 0 : (!manualConfig.api_url.trim() || !manualConfig.model_name.trim())}
               style={{ width: '100%' }}
             >
               {isInferring ? '推理中...' : '开始推理'}
@@ -980,24 +1055,11 @@ const PlaygroundPage = ({
 
         {/* 右侧：结果展示 */}
         <Col xs={24} lg={14} style={{ height: '100%' }}>
-          <Card
-            title="推理结果"
+          <Card 
+            title="推理结果" 
             size="small"
             style={{ height: '100%' }}
-            bodyStyle={{ maxHeight: 'calc(100vh - 200px)', overflowY: 'auto', padding: '16px' }}
-            extra={
-              Object.keys(inferenceResults).length > 0 && (
-                <Button
-                  type="text"
-                  size="small"
-                  icon={<ClearOutlined />}
-                  onClick={clearInferenceCache}
-                  style={{ color: '#999' }}
-                >
-                  清除结果
-                </Button>
-              )
-            }
+            styles={{ body: { maxHeight: 'calc(100vh - 200px)', overflowY: 'auto', padding: '16px' } }}
           >
             {Object.keys(inferenceResults).length === 0 && !isInferring ? (
               <Empty

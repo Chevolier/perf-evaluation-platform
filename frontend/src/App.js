@@ -1,11 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Layout, Typography, Menu, Modal, Button } from 'antd';
-import { 
-  SettingOutlined, 
-  PlayCircleOutlined, 
+import { Layout, Typography, Menu } from 'antd';
+import {
+  SettingOutlined,
+  PlayCircleOutlined,
   ThunderboltOutlined,
   RobotOutlined,
-  LineChartOutlined,
   BarChartOutlined
 } from '@ant-design/icons';
 import ModelSelectionModal from './components/ModelSelectionModal';
