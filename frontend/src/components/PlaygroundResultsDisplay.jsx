@@ -314,11 +314,18 @@ const PlaygroundResultsDisplay = ({ results, loading }) => {
               )}
 
               {!showContent && isStreaming && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: 12 }}>
-                  <Spin size="small" />
-                  <Text type="secondary" style={{ fontSize: '12px' }}>
-                    等待首个响应...
-                  </Text>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Spin size="small" />
+                    <Text type="secondary" style={{ fontSize: '12px' }}>
+                      {result.statusMessage || '等待首个响应...'}
+                    </Text>
+                  </div>
+                  {result.elapsedSeconds && result.elapsedSeconds > 10 && (
+                    <Text type="secondary" style={{ fontSize: '11px', fontStyle: 'italic', paddingLeft: '24px' }}>
+                      已等待 {result.elapsedSeconds} 秒 (EMD/HyperPod 冷启动可能需要 30-60 秒)
+                    </Text>
+                  )}
                 </div>
               )}
 

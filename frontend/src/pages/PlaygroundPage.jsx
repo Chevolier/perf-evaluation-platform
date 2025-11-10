@@ -500,7 +500,25 @@ const PlaygroundPage = ({
                       console.log('🏁 Stream complete');
                       return;
                     } else if (data.type === 'heartbeat') {
-                      console.log('💓 Heartbeat received');
+                      console.log('💓 Heartbeat received:', data.elapsed_seconds || 0, 'seconds', data.message || '');
+
+                      // Show heartbeat messages to user for long waits
+                      if (data.message) {
+                        setInferenceResults(prev => {
+                          const updated = { ...prev };
+                          // Update all pending models with the status message
+                          Object.keys(updated).forEach(key => {
+                            if (updated[key].status === 'streaming' && !updated[key].partialContent) {
+                              updated[key] = {
+                                ...updated[key],
+                                statusMessage: data.message,
+                                elapsedSeconds: data.elapsed_seconds
+                              };
+                            }
+                          });
+                          return updated;
+                        });
+                      }
                     } else {
                       const modelKey = data.model_key || data.model;
                       if (!modelKey) {

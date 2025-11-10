@@ -32,9 +32,9 @@ class InferenceService:
         self._aws_account_id: Optional[str] = None
         delay_ms = os.environ.get('STREAMING_CHUNK_DELAY_MS')
         try:
-            self._chunk_delay_seconds = max(float(delay_ms) / 1000.0, 0.0) if delay_ms is not None else 0.05
+            self._chunk_delay_seconds = max(float(delay_ms) / 1000.0, 0.0) if delay_ms is not None else 0.0
         except (TypeError, ValueError):
-            self._chunk_delay_seconds = 0.05
+            self._chunk_delay_seconds = 0.0
 
     
     def multi_inference(self, data: Dict[str, Any]) -> Generator[str, None, None]:
@@ -105,12 +105,26 @@ class InferenceService:
 
         logger.info(f"Starting to wait for {total_models} models: {models}")
 
+        heartbeat_count = 0
         while completed < total_models:
             try:
                 result = result_queue.get(timeout=1)
             except queue.Empty:
                 # Send heartbeat to keep connection alive (SSE format)
-                yield f"data: {json.dumps({'type': 'heartbeat', 'completed': completed, 'total': total_models})}\n\n"
+                heartbeat_count += 1
+                heartbeat_msg = {'type': 'heartbeat', 'completed': completed, 'total': total_models, 'elapsed_seconds': heartbeat_count}
+
+                # Add helpful status messages for long waits
+                if heartbeat_count == 5:
+                    heartbeat_msg['message'] = 'Initializing model endpoints...'
+                elif heartbeat_count == 15:
+                    heartbeat_msg['message'] = 'Loading model weights into GPU memory (this may take up to 60s for cold starts)...'
+                elif heartbeat_count == 30:
+                    heartbeat_msg['message'] = 'Still loading... EMD/HyperPod endpoints may need additional time for first request'
+                elif heartbeat_count == 45:
+                    heartbeat_msg['message'] = 'Almost ready... this is normal for cold model endpoints'
+
+                yield f"data: {json.dumps(heartbeat_msg)}\n\n"
                 continue
 
             event_type = result.get('type') if isinstance(result, dict) else None
@@ -784,9 +798,6 @@ class InferenceService:
                                         'provider': 'bedrock'
                                     })
                                     self._delay_stream_chunk()
-                                    # Add small delay for visible streaming
-                                    import time
-                                    time.sleep(0.05)
 
                                 usage_info = self._merge_usage_dicts(
                                     usage_info,
@@ -1475,9 +1486,6 @@ class InferenceService:
                             'api_url': api_url
                         })
                         self._delay_stream_chunk()
-                        # Add small delay for visible streaming
-                        import time
-                        time.sleep(0.05)
 
                     usage = self._merge_usage_dicts(
                         usage,

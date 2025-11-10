@@ -159,18 +159,42 @@ EC2_MODELS = {
 
 # Bedrock Models Configuration
 BEDROCK_MODELS = {
-    "claude4-sonnet": {
-        "name": "Claude Sonnet 4",
-        "description": "Latest Claude Sonnet 4 model (US inference profile)",
-        "model_id": "us.anthropic.claude-sonnet-4-20250514-v1:0",
+    "claude45-sonnet": {
+        "name": "Claude Sonnet 4.5",
+        "description": "Latest Claude Sonnet 4.5 model (US inference profile)",
+        "model_id": "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "supports_multimodal": True,
+        "supports_streaming": True,
+        "max_tokens": 8192
+    },
+    "claude45-haiku": {
+        "name": "Claude Haiku 4.5",
+        "description": "Latest Claude Haiku 4.5 model (US inference profile)",
+        "model_id": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
         "supports_multimodal": True,
         "supports_streaming": True,
         "max_tokens": 8192
     },
     "claude4-opus": {
         "name": "Claude Opus 4.1",
-        "description": "Latest Claude Opus 4.1 model (US inference profile)",
+        "description": "Claude Opus 4.1 model (US inference profile)",
         "model_id": "us.anthropic.claude-opus-4-1-20250805-v1:0",
+        "supports_multimodal": True,
+        "supports_streaming": True,
+        "max_tokens": 8192
+    },
+    "claude4-opus-base": {
+        "name": "Claude Opus 4",
+        "description": "Claude Opus 4 base model (US inference profile)",
+        "model_id": "us.anthropic.claude-opus-4-20250514-v1:0",
+        "supports_multimodal": True,
+        "supports_streaming": True,
+        "max_tokens": 8192
+    },
+    "claude4-sonnet": {
+        "name": "Claude Sonnet 4",
+        "description": "Claude Sonnet 4 model (US inference profile)",
+        "model_id": "us.anthropic.claude-sonnet-4-20250514-v1:0",
         "supports_multimodal": True,
         "supports_streaming": True,
         "max_tokens": 8192
@@ -185,7 +209,7 @@ BEDROCK_MODELS = {
     },
     "claude35-sonnet-v2": {
         "name": "Claude 3.5 Sonnet v2",
-        "description": "Claude 3.5 Sonnet v2 (October 2024) - US inference profile",
+        "description": "Claude 3.5 Sonnet v2 (October 2024) - LEGACY - US inference profile",
         "model_id": "us.anthropic.claude-3-5-sonnet-20241022-v2:0",
         "supports_multimodal": True,
         "supports_streaming": True,
@@ -193,7 +217,7 @@ BEDROCK_MODELS = {
     },
     "claude35-sonnet": {
         "name": "Claude 3.5 Sonnet",
-        "description": "Claude 3.5 Sonnet original (June 2024) - US inference profile",
+        "description": "Claude 3.5 Sonnet original (June 2024) - LEGACY - US inference profile",
         "model_id": "us.anthropic.claude-3-5-sonnet-20240620-v1:0",
         "supports_multimodal": True,
         "supports_streaming": True,
@@ -217,25 +241,41 @@ BEDROCK_MODELS = {
     },
     "claude3-opus": {
         "name": "Claude 3 Opus",
-        "description": "Claude 3 Opus (February 2024) - US inference profile",
+        "description": "Claude 3 Opus (February 2024) - LEGACY - US inference profile",
         "model_id": "us.anthropic.claude-3-opus-20240229-v1:0",
         "supports_multimodal": True,
         "supports_streaming": True,
         "max_tokens": 4096
     },
+    "nova-premier": {
+        "name": "Nova Premier",
+        "description": "Amazon Nova Premier - Most capable - US inference profile",
+        "model_id": "us.amazon.nova-premier-v1:0",
+        "supports_multimodal": True,
+        "supports_streaming": True,
+        "max_tokens": 5000
+    },
     "nova-pro": {
         "name": "Nova Pro",
-        "description": "Amazon Nova Pro - US inference profile",
+        "description": "Amazon Nova Pro - Balanced performance - US inference profile",
         "model_id": "us.amazon.nova-pro-v1:0",
         "supports_multimodal": True,
         "supports_streaming": True,
         "max_tokens": 5000
     },
-    "nova-premier": {
-        "name": "Nova Premier",
-        "description": "Amazon Nova Premier - US inference profile",
-        "model_id": "us.amazon.nova-premier-v1:0",
+    "nova-lite": {
+        "name": "Nova Lite",
+        "description": "Amazon Nova Lite - Fast and cost-effective - US inference profile",
+        "model_id": "us.amazon.nova-lite-v1:0",
         "supports_multimodal": True,
+        "supports_streaming": True,
+        "max_tokens": 5000
+    },
+    "nova-micro": {
+        "name": "Nova Micro",
+        "description": "Amazon Nova Micro - Smallest and fastest - US inference profile",
+        "model_id": "us.amazon.nova-micro-v1:0",
+        "supports_multimodal": False,
         "supports_streaming": True,
         "max_tokens": 5000
     }
