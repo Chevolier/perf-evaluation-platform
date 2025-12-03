@@ -188,19 +188,43 @@ class InferenceService:
                 raise ValueError("AWS credentials not configured. Please configure AWS credentials.")
             
             # Prepare request body based on model type
-            text_prompt = data.get('text', '')
-            frames = data.get('frames', [])
+            text_prompt = data.get('text') or data.get('prompt') or ''
+            frames = data.get('frames') or data.get('images') or []
             max_tokens = data.get('max_tokens', 1000)
             temperature = data.get('temperature', 0.7)
-            
+            messages = data.get('messages')
+
             # Build message content
             message_content = []
-            
-            # Add text content
-            if text_prompt:
+
+            # If messages are provided directly, use the first user message's content
+            if messages:
+                for msg in messages:
+                    if msg.get('role') == 'user':
+                        content = msg.get('content', '')
+                        if isinstance(content, str):
+                            text_prompt = content
+                        elif isinstance(content, list):
+                            # Already structured content
+                            for item in content:
+                                if isinstance(item, dict):
+                                    message_content.append(item)
+                                elif isinstance(item, str):
+                                    message_content.append({"type": "text", "text": item})
+                        break
+
+            # Add text content if we have a text prompt and haven't added content yet
+            if text_prompt and not message_content:
                 message_content.append({
                     "type": "text",
                     "text": text_prompt
+                })
+
+            # Ensure we have at least some content
+            if not message_content:
+                message_content.append({
+                    "type": "text",
+                    "text": "Hello"
                 })
             
             # Add image content for multimodal models
@@ -229,16 +253,37 @@ class InferenceService:
                     ]
                 }
             elif 'nova' in model.lower() or 'amazon' in model_id.lower():
-                # Amazon Nova format
+                # Amazon Nova format - uses different content structure
+                # Nova expects content as list of {"text": "..."} without "type" field
+                nova_content = []
+                for item in message_content:
+                    if item.get('type') == 'text':
+                        nova_content.append({"text": item.get('text', '')})
+                    elif item.get('type') == 'image':
+                        # Nova image format
+                        source = item.get('source', {})
+                        nova_content.append({
+                            "image": {
+                                "format": source.get('media_type', 'image/jpeg').split('/')[-1],
+                                "source": {
+                                    "bytes": source.get('data', '')
+                                }
+                            }
+                        })
+
+                # Ensure we have at least some text content
+                if not nova_content:
+                    nova_content.append({"text": "Hello"})
+
                 request_body = {
                     "messages": [
                         {
                             "role": "user",
-                            "content": message_content
+                            "content": nova_content
                         }
                     ],
                     "inferenceConfig": {
-                        "max_new_tokens": max_tokens,
+                        "maxTokens": max_tokens,
                         "temperature": temperature
                     }
                 }

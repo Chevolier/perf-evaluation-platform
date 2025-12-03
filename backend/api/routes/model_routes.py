@@ -1,172 +1,166 @@
 """API routes for model management."""
 
-from flask import Blueprint, request, jsonify
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+from typing import List, Optional
 from services.model_service import ModelService
 from utils import get_logger
 
 logger = get_logger(__name__)
-model_bp = Blueprint('model', __name__)
+model_router = APIRouter(prefix="/api", tags=["models"])
 
 # Initialize service
 model_service = ModelService()
 
-@model_bp.route('/model-list', methods=['GET'])
+
+class DeployModelsRequest(BaseModel):
+    models: List[str] = []
+    instance_type: str = "g5.2xlarge"
+    engine_type: str = "vllm"
+    service_type: str = "vllm_realtime"
+    tp_size: int = 1
+    dp_size: int = 1
+    gpu_memory_utilization: float = 0.9
+    max_model_len: int = 2048
+
+
+class CheckModelStatusRequest(BaseModel):
+    models: List[str] = []
+
+
+class StopModelRequest(BaseModel):
+    model_key: str
+
+
+class RegisterDeploymentRequest(BaseModel):
+    model_key: str
+    container_name: str
+    port: int
+    tag: Optional[str] = None
+
+
+@model_router.get("/model-list")
 def get_model_list():
     """Get list of all available models."""
     try:
-        return jsonify(model_service.get_model_list())
+        return model_service.get_model_list()
     except Exception as e:
         logger.error(f"Error getting model list: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
-@model_bp.route('/ec2/current-models', methods=['GET'])
+
+@model_router.get("/ec2/current-models")
 def get_current_ec2_models():
     """Get currently deployed EC2 models."""
     try:
         deployed_models = model_service.get_current_ec2_models()
-        return jsonify({
-            "status": "success",
-            "deployed": deployed_models
-        })
+        return {"status": "success", "deployed": deployed_models}
     except Exception as e:
         logger.error(f"Error getting current EC2 models: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@model_bp.route('/deploy-models', methods=['POST'])
-def deploy_models():
+@model_router.post("/deploy-models")
+def deploy_models(data: DeployModelsRequest):
     """Deploy models using EC2 Docker deployment."""
     try:
-        data = request.get_json() or {}
-        models = data.get('models', [])
-        instance_type = data.get('instance_type', 'g5.2xlarge')
-        engine_type = data.get('engine_type', 'vllm')
-        service_type = data.get('service_type', 'vllm_realtime')
-
-        # Get TP/DP parameters for EC2 deployment
-        tp_size = data.get('tp_size', 1)
-        dp_size = data.get('dp_size', 1)
-
-        # Get GPU memory utilization and max model length parameters
-        gpu_memory_utilization = data.get('gpu_memory_utilization', 0.9)
-        max_model_len = data.get('max_model_len', 2048)
-
         logger.info(f"🚀 Deploy request received:")
-        logger.info(f"  Models: {models}")
-        logger.info(f"  Instance type: {instance_type}")
-        logger.info(f"  Engine type: {engine_type}")
-        logger.info(f"  Service type: {service_type}")
-        logger.info(f"  TP size: {tp_size}")
-        logger.info(f"  DP size: {dp_size}")
-        logger.info(f"  GPU memory utilization: {gpu_memory_utilization}")
-        logger.info(f"  Max model length: {max_model_len}")
+        logger.info(f"  Models: {data.models}")
+        logger.info(f"  Instance type: {data.instance_type}")
+        logger.info(f"  Engine type: {data.engine_type}")
+        logger.info(f"  Service type: {data.service_type}")
+        logger.info(f"  TP size: {data.tp_size}")
+        logger.info(f"  DP size: {data.dp_size}")
+        logger.info(f"  GPU memory utilization: {data.gpu_memory_utilization}")
+        logger.info(f"  Max model length: {data.max_model_len}")
 
         results = {}
-        for model_key in models:
+        for model_key in data.models:
             logger.info(f"🚀 Deploying model: {model_key}")
 
-            # Use EC2 Docker deployment only
-            port = 8000  # Default port, could be made configurable
+            port = 8000
             result = model_service.deploy_model_on_ec2(
                 model_key=model_key,
-                instance_type=instance_type,
-                engine_type=engine_type,
-                service_type=service_type,
+                instance_type=data.instance_type,
+                engine_type=data.engine_type,
+                service_type=data.service_type,
                 port=port,
-                tp_size=tp_size,
-                dp_size=dp_size,
-                gpu_memory_utilization=gpu_memory_utilization,
-                max_model_len=max_model_len
+                tp_size=data.tp_size,
+                dp_size=data.dp_size,
+                gpu_memory_utilization=data.gpu_memory_utilization,
+                max_model_len=data.max_model_len
             )
 
             logger.info(f"🚀 Deployment result for {model_key}: {result}")
             results[model_key] = result
 
-        return jsonify({
-            "status": "success",
-            "results": results
-        })
+        return {"status": "success", "results": results}
     except Exception as e:
         logger.error(f"Error deploying models: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
-@model_bp.route('/check-model-status', methods=['POST'])
-def check_model_status():
+
+@model_router.post("/check-model-status")
+def check_model_status(data: CheckModelStatusRequest):
     """Check status of multiple models."""
     try:
-        data = request.get_json() or {}
-        models = data.get('models', [])
-        result = model_service.check_multiple_model_status(models)
-        return jsonify(result)
+        result = model_service.check_multiple_model_status(data.models)
+        return result
     except Exception as e:
         logger.error(f"Error checking model status: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
-@model_bp.route('/ec2/status', methods=['GET'])
+
+@model_router.get("/ec2/status")
 def get_ec2_status():
     """Get EC2 deployment status."""
     try:
-        # Return current EC2 models status
         deployed_models = model_service.get_current_ec2_models()
-        return jsonify({
+        return {
             "status": "success",
-            "available": True,  # EC2 is always available
+            "available": True,
             "deployed_models": deployed_models
-        })
+        }
     except Exception as e:
         logger.error(f"Error getting EC2 status: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
-@model_bp.route('/stop-model', methods=['POST'])
-def stop_model():
+
+@model_router.post("/stop-model")
+def stop_model(data: StopModelRequest):
     """Stop an EC2 model deployment."""
     try:
-        data = request.get_json() or {}
-        model_key = data.get('model_key')
+        if not data.model_key:
+            raise HTTPException(status_code=400, detail="Model key is required")
 
-        if not model_key:
-            return jsonify({"success": False, "error": "Model key is required"}), 400
-
-        result = model_service.stop_ec2_model(model_key)
-        return jsonify(result)
+        result = model_service.stop_ec2_model(data.model_key)
+        return result
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error stopping model: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
-@model_bp.route('/register-deployment', methods=['POST'])
-def register_existing_deployment():
+
+@model_router.post("/register-deployment")
+def register_existing_deployment(data: RegisterDeploymentRequest):
     """Register an existing Docker deployment that wasn't deployed through the platform."""
     try:
-        data = request.get_json() or {}
-        model_key = data.get('model_key')
-        container_name = data.get('container_name')
-        port = data.get('port')
-        tag = data.get('tag')
-
-        if not all([model_key, container_name, port]):
-            return jsonify({
-                "success": False,
-                "error": "model_key, container_name, and port are required"
-            }), 400
-
-        try:
-            port = int(port)
-        except ValueError:
-            return jsonify({"success": False, "error": "Port must be a valid integer"}), 400
-
-        result = model_service.register_existing_deployment(model_key, container_name, port, tag)
-        return jsonify(result)
-
+        result = model_service.register_existing_deployment(
+            data.model_key, data.container_name, data.port, data.tag
+        )
+        return result
     except Exception as e:
         logger.error(f"Error registering existing deployment: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
-@model_bp.route('/clear-stale-status', methods=['POST'])
+
+@model_router.post("/clear-stale-status")
 def clear_stale_status():
     """Clear stale deployment statuses (failed statuses older than 10 minutes)."""
     try:
         result = model_service.clear_stale_deployment_status()
-        return jsonify(result)
+        return result
     except Exception as e:
         logger.error(f"Error clearing stale status: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))

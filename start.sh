@@ -31,7 +31,7 @@ trap cleanup SIGINT SIGTERM EXIT
 echo "1. Starting backend..."
 cd backend
 source .venv/bin/activate
-python run_backend.py > ../logs/backend.out 2>&1 &
+uvicorn app:app --host 0.0.0.0 --port 5000 --reload > ../logs/backend.out 2>&1 &
 BACKEND_PID=$!
 echo "✓ Backend started (PID: $BACKEND_PID)"
 cd ..
@@ -50,6 +50,7 @@ echo ""
 echo "🌐 Platform is starting up..."
 echo "🖥️  Frontend: http://localhost:3000"
 echo "📊 Backend: http://localhost:5000"
+echo "📚 API Docs: http://localhost:5000/docs"
 echo ""
 echo "📋 Logs:"
 echo "   Frontend: logs/frontend.out"

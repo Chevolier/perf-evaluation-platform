@@ -1,5 +1,6 @@
-flask==3.0.0
-flask-cors==4.0.0
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+pydantic
 requests==2.32.5
 boto3==1.36.0
 sagemaker==2.250.0
@@ -9,6 +10,8 @@ pillow==10.3.0
 ffmpeg-python==0.2.0
 # evalscope==2.0.0
 kubernetes==33.1.0
-vllm==0.10.2
+vllm
 litellm==1.78.0
-litellm[proxy]
+# litellm[proxy]
+pyyaml==6.0.2
+transformers>=4.40.0
