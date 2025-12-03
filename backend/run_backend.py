@@ -10,16 +10,16 @@ project_root = Path(__file__).parent
 src_path = project_root
 sys.path.insert(0, str(src_path))
 
-from backend.app import create_app
-from backend.config import get_environment
+from app import create_app
+from config import get_environment
 
 def main():
     """Main entry point."""
     environment = get_environment()
     
     # Set up logging BEFORE creating the app to ensure all module imports are logged
-    from backend.config import get_config
-    from backend.utils import setup_logging
+    from config import get_config
+    from utils import setup_logging
     
     config = get_config()
     config.load_config(environment)
@@ -33,7 +33,7 @@ def main():
     app = create_app(environment)
     
     # Get configuration
-    from backend.config import get_config
+    from config import get_config
     config = get_config()
     
     host = config.get('server.host', '0.0.0.0')

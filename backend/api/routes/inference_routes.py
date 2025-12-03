@@ -1,8 +1,8 @@
 """API routes for model inference."""
 
 from flask import Blueprint, request, Response
-from ...services.inference_service import InferenceService
-from ...utils import get_logger
+from services.inference_service import InferenceService
+from utils import get_logger
 
 logger = get_logger(__name__)
 inference_bp = Blueprint('inference', __name__)

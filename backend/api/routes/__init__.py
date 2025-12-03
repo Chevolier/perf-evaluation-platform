@@ -39,7 +39,7 @@ def register_blueprints(app: Flask) -> None:
         root_logger.info("🧪 DIRECT ROOT LOGGER TEST FROM ENDPOINT")
         
         # Test named logger
-        from ...utils import get_logger
+        from utils import get_logger
         test_logger = get_logger("debug_endpoint")
         test_logger.warning("🧪 NAMED LOGGER TEST FROM ENDPOINT")
         

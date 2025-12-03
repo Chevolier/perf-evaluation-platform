@@ -1,8 +1,8 @@
 """API routes for stress testing functionality."""
 
 from flask import Blueprint, request, jsonify, make_response
-from ...services.stress_test_service import StressTestService
-from ...utils import get_logger
+from services.stress_test_service import StressTestService
+from utils import get_logger
 
 logger = get_logger(__name__)
 stress_test_bp = Blueprint('stress_test', __name__)

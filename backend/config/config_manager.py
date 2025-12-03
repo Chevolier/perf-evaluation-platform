@@ -4,7 +4,7 @@ import os
 import yaml
 from pathlib import Path
 from typing import Dict, Any, Optional
-from ..utils.helpers import deep_merge_dicts
+from utils.helpers import deep_merge_dicts
 
 
 class ConfigManager:

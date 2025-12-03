@@ -7,8 +7,8 @@ import base64
 from typing import Dict, Any, List, Generator
 from datetime import datetime
 
-from ..core.models import model_registry
-from ..utils import get_logger
+from core.models import model_registry
+from utils import get_logger
 from transformers import AutoTokenizer
 
 
@@ -327,7 +327,7 @@ class InferenceService:
         try:
             import requests
             import json
-            from ..api.routes.model_routes import model_service
+            from api.routes.model_routes import model_service
 
             # Check if model is deployed
             deployment_status = model_service.get_ec2_deployment_status(model)

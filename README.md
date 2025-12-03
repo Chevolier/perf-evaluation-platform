@@ -59,7 +59,7 @@ Recommended instance g5.2xlarge.
 
 ```bash
 # Run the setup script 
-./scripts/start.sh
+./start.sh
 ```
 
 This will automatically install backend and frontend packages and start the service.
@@ -70,9 +70,12 @@ This will automatically install backend and frontend packages and start the serv
 
 ```bash
 # Create Python environment
-conda create -n perf-eval python=3.10 -y
-conda activate perf-eval
-pip install -r requirements.txt
+cd backend
+
+uv venv --python 3.10
+source .venv/bin/activate
+uv pip install --upgrade pip
+uv pip install -r requirements.txt
 
 # Configure AWS credentials
 aws configure

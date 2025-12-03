@@ -11,8 +11,8 @@ from datetime import datetime
 
 # EMD functionality removed - only EC2 deployment supported
 
-from ..core.models import model_registry
-from ..utils import get_logger
+from core.models import model_registry
+from utils import get_logger
 
 logger = get_logger(__name__)
 

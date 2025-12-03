@@ -15,8 +15,8 @@ from typing import Dict, Any, Optional
 from pathlib import Path
 import re
 
-from ..utils import get_logger
-from .model_service import ModelService
+from utils import get_logger
+from services.model_service import ModelService
 
 logger = get_logger(__name__)
 
@@ -861,8 +861,8 @@ class StressTestService:
         Returns:
             Real test results from evalscope
         """
-        from ..core.models import model_registry
-        from ..services.model_service import ModelService
+        from core.models import model_registry
+        from services.model_service import ModelService
 
         num_requests_list = test_params.get('num_requests', [50])
         concurrency_list = test_params.get('concurrency', [5])
@@ -1439,9 +1439,9 @@ except Exception as e:
         Returns:
             Path to the output directory
         """
-        from ..core.models import model_registry
+        from core.models import model_registry
         import os
-        
+
         # Get model information from registry if available, otherwise use model_key for custom models
         model_info = model_registry.get_model_info(model_key)
         if model_info:
@@ -1924,8 +1924,8 @@ except Exception as e:
         import json
         import os
         from datetime import datetime
-        from ..core.models import model_registry
-        
+        from core.models import model_registry
+
         try:
             # Get model information from registry if available, otherwise use defaults for custom models
             model_info = model_registry.get_model_info(model_key)

@@ -3,14 +3,49 @@
 echo "🚀 Setting up Performance Evaluation Platform"
 echo "=========================================="
 
-# Check Python version
-python_version=$(python3 --version 2>&1)
-if [[ $? -eq 0 ]]; then
-    echo "✓ Python found: $python_version"
-else
-    echo "❌ Python 3 not found. Please install Python 3.8+"
-    exit 1
+echo "🚀 Setting up backend environment ..."
+
+cd backend
+# Check if uv is installed
+if ! command -v uv &> /dev/null; then
+    echo "❌ uv is not installed. Installing uv..."
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    
+    # Add uv to PATH for this session
+    export PATH="\$HOME/.local/bin:\$PATH"
+    source ~/.local/bin/env
+    
+    # Check again after installation
+    if ! command -v uv &> /dev/null; then
+        echo "❌ Failed to install uv. Please install it manually from https://github.com/astral-sh/uv"
+        exit 1
+    fi
+    
+    echo "✅ uv installed successfully"
 fi
+
+echo "✅ Prerequisites check passed"
+
+# Install dependencies
+echo "📦 Installing dependencies..."
+if [ ! -d ".venv" ]; then
+    echo "Creating virtual environment with Python 3.10..."
+    uv venv --python 3.10
+fi
+
+source .venv/bin/activate
+
+# Install Python dependencies
+echo "Installing Python dependencies..."
+uv pip install --upgrade pip
+uv pip install -r requirements.txt
+uv pip install -e evalscope
+
+echo "✓ Backend setup complete!"
+
+# Setup frontend
+echo ""
+echo "🎨 Setting up frontend..."
 
 # Install Node.js
 # Download and install nvm:
@@ -38,31 +73,6 @@ else
     exit 1
 fi
 
-# Setup backend
-echo ""
-echo "📦 Setting up backend..."
-cd backend
-
-# Create virtual environment
-if [ ! -d "venv" ]; then
-    echo "Creating Python virtual environment..."
-    python3 -m venv venv
-fi
-
-# Activate virtual environment
-source venv/bin/activate
-
-# Install Python dependencies
-echo "Installing Python dependencies..."
-pip install --upgrade pip
-pip install -r ../requirements.txt
-pip install -e evalscope
-
-echo "✓ Backend setup complete!"
-
-# Setup frontend
-echo ""
-echo "🎨 Setting up frontend..."
 cd ../frontend
 
 # Install Node.js dependencies
@@ -95,4 +105,4 @@ echo "🚀 Starting the platform..."
 # Create logs directory if it doesn't exist
 mkdir -p logs
 
-echo "Start the platform by running scripts/start.sh"
+echo "Start the platform by running start.sh"

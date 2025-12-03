@@ -4,9 +4,9 @@ import os
 from flask import Flask
 from flask_cors import CORS
 
-from .config import get_config
-from .utils import setup_logging
-from .api import register_blueprints
+from config import get_config
+from utils import setup_logging
+from api import register_blueprints
 
 
 def create_app(environment=None):

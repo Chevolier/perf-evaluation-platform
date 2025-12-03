@@ -1,8 +1,8 @@
 """API routes for model management."""
 
 from flask import Blueprint, request, jsonify
-from ...services.model_service import ModelService
-from ...utils import get_logger
+from services.model_service import ModelService
+from utils import get_logger
 
 logger = get_logger(__name__)
 model_bp = Blueprint('model', __name__)
