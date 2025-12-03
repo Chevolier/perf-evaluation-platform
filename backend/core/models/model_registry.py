@@ -88,29 +88,29 @@ EC2_MODELS = {
 
 # Bedrock Models Configuration
 BEDROCK_MODELS = {
-    "claude4": {
-        "name": "Claude 4",
-        "description": "Anthropic Claude 4",
-        "model_id": "anthropic.claude-3-5-sonnet-20241022-v2:0",
+    "claude-sonnet-4.5": {
+        "name": "Claude Sonnet 4.5",
+        "description": "Anthropic Claude Sonnet 4.5",
+        "model_id": "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
         "supports_multimodal": True,
         "supports_streaming": True,
-        "max_tokens": 8192
+        "max_tokens": 16384
     },
-    "claude35": {
-        "name": "Claude 3.5 Sonnet",
-        "description": "Anthropic Claude 3.5 Sonnet",
-        "model_id": "anthropic.claude-3-5-sonnet-20241022-v2:0",
+    "claude-haiku-4.5": {
+        "name": "Claude Haiku 4.5",
+        "description": "Anthropic Claude Haiku 4.5",
+        "model_id": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
         "supports_multimodal": True,
         "supports_streaming": True,
-        "max_tokens": 8192
+        "max_tokens": 16384
     },
     "nova": {
-        "name": "Nova Pro",
-        "description": "Amazon Nova Pro",
-        "model_id": "amazon.nova-pro-v1:0",
+        "name": "Nova 2 Lite",
+        "description": "Amazon Nova 2 Lite",
+        "model_id": "global.amazon.nova-2-lite-v1:0",
         "supports_multimodal": True,
         "supports_streaming": True,
-        "max_tokens": 5000
+        "max_tokens": 16384
     }
 }
 

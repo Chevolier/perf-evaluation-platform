@@ -105,4 +105,4 @@ echo "🚀 Starting the platform..."
 # Create logs directory if it doesn't exist
 mkdir -p logs
 
-echo "Start the platform by running start.sh"
+echo "Start the platform by running ./start.sh"

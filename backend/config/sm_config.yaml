@@ -1,0 +1,8 @@
+model_list:
+  - model_name: Qwen/Qwen3-Coder-30B-A3B-Instruct
+    litellm_params:
+      model: sagemaker/Qwen3-Coder-30B-A3B-Instruct-2025-10-28-01-07-54-288
+      drop_params: True
+      aws_access_key_id:
+      aws_secret_access_key:
+      aws_region_name:
