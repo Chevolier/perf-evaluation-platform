@@ -109,6 +109,146 @@ class ModelService:
         # Also clean up any other stale "failed" statuses that are old
         self._cleanup_stale_failed_status()
 
+        # Auto-detect running vLLM containers that aren't tracked
+        self._auto_detect_running_containers()
+
+    def _auto_detect_running_containers(self):
+        """Auto-detect running vLLM Docker containers and register them."""
+        try:
+            # List all running containers with vllm in the image name or command
+            result = subprocess.run(
+                ["docker", "ps", "--format", "{{.Names}}\t{{.Ports}}\t{{.Image}}"],
+                capture_output=True, text=True, timeout=10
+            )
+
+            if result.returncode != 0:
+                return
+
+            for line in result.stdout.strip().split('\n'):
+                if not line:
+                    continue
+
+                parts = line.split('\t')
+                if len(parts) < 3:
+                    continue
+
+                container_name, ports, image = parts
+
+                # Skip if already tracked
+                already_tracked = any(
+                    d.get("container_name") == container_name
+                    for d in self._ec2_deployments.values()
+                )
+                if already_tracked:
+                    continue
+
+                # Check if this looks like a vLLM container
+                if 'vllm' not in image.lower() and 'vllm' not in container_name.lower():
+                    continue
+
+                # Extract port from ports string (e.g., "0.0.0.0:8000->8000/tcp")
+                port = 8000  # default
+                if ports:
+                    import re
+                    port_match = re.search(r':(\d+)->', ports)
+                    if port_match:
+                        port = int(port_match.group(1))
+
+                # Try to get the model name from container environment or name
+                model_key = self._extract_model_key_from_container(container_name)
+                if not model_key:
+                    continue
+
+                # Check if health check passes
+                if self._check_model_health(port):
+                    logger.info(f"🔍 Auto-detected running vLLM container: {container_name} for model {model_key} on port {port}")
+
+                    # Register the deployment
+                    self._ec2_deployments[model_key] = {
+                        "container_name": container_name,
+                        "container_id": self._get_container_id(container_name),
+                        "port": port,
+                        "tag": "auto-detected",
+                        "deployed_at": datetime.now().isoformat()
+                    }
+
+                    self._deployment_status[model_key] = {
+                        "status": "deployed",
+                        "message": f"Auto-detected running container {container_name}",
+                        "tag": "auto-detected",
+                        "container_name": container_name,
+                        "port": port
+                    }
+
+                    self._save_deployment_state()
+
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to auto-detect running containers: {e}")
+
+    def _extract_model_key_from_container(self, container_name: str) -> str:
+        """Extract model key from container name or environment."""
+        try:
+            # Try to get model from container environment
+            result = subprocess.run(
+                ["docker", "inspect", container_name, "--format", "{{range .Config.Env}}{{println .}}{{end}}"],
+                capture_output=True, text=True, timeout=10
+            )
+
+            if result.returncode == 0:
+                for line in result.stdout.split('\n'):
+                    # Look for MODEL or SERVED_MODEL_NAME environment variable
+                    if line.startswith('MODEL=') or line.startswith('SERVED_MODEL_NAME='):
+                        model_path = line.split('=', 1)[1]
+                        # Extract model name from path (e.g., "Qwen/Qwen3-8B" -> "qwen3-8b")
+                        model_name = model_path.split('/')[-1].lower().replace('_', '-')
+                        return model_name
+
+            # Try to get model from container command args
+            result = subprocess.run(
+                ["docker", "inspect", container_name, "--format", "{{json .Config.Cmd}}"],
+                capture_output=True, text=True, timeout=10
+            )
+
+            if result.returncode == 0:
+                import json as json_module
+                try:
+                    cmd_args = json_module.loads(result.stdout)
+                    if cmd_args:
+                        for i, arg in enumerate(cmd_args):
+                            if arg == '--model' and i + 1 < len(cmd_args):
+                                model_path = cmd_args[i + 1]
+                                model_name = model_path.split('/')[-1].lower().replace('_', '-')
+                                return model_name
+                            elif arg.startswith('--model='):
+                                model_path = arg.split('=', 1)[1]
+                                model_name = model_path.split('/')[-1].lower().replace('_', '-')
+                                return model_name
+                except:
+                    pass
+
+            # Fallback: extract from container name
+            # Common patterns: vllm-qwen3-8b, qwen3-8b-vllm, etc.
+            name_lower = container_name.lower()
+            name_lower = name_lower.replace('vllm-', '').replace('-vllm', '').replace('_vllm', '').replace('vllm_', '')
+            if name_lower:
+                return name_lower
+
+        except Exception as e:
+            logger.debug(f"Failed to extract model key from container {container_name}: {e}")
+
+        return None
+
+    def _get_container_id(self, container_name: str) -> str:
+        """Get container ID from container name."""
+        try:
+            result = subprocess.run(
+                ["docker", "inspect", container_name, "--format", "{{.Id}}"],
+                capture_output=True, text=True, timeout=10
+            )
+            return result.stdout.strip() if result.returncode == 0 else "unknown"
+        except:
+            return "unknown"
+
     def _cleanup_stale_failed_status(self):
         """Clean up stale failed status entries that are no longer relevant."""
         try:
@@ -268,6 +408,7 @@ class ModelService:
         if model_key in self._ec2_deployments:
             deployment_info = self._ec2_deployments[model_key]
             container_name = deployment_info["container_name"]
+            port = deployment_info.get("port", 8000)
 
             # Check if container is still running
             if self._check_container_running(container_name):
@@ -277,17 +418,36 @@ class ModelService:
                         "status": "deployed",
                         "message": "Model is deployed and ready",
                         "tag": deployment_info.get("tag"),
-                        "endpoint": f"http://localhost:{deployment_info.get('port')}"
+                        "endpoint": f"http://localhost:{port}"
                     }
                 else:
-                    # Container running but health check not complete
-                    current_status = self._deployment_status.get(model_key, {})
-                    return {
-                        "status": "inprogress",
-                        "message": current_status.get("message", "Model is starting, health check in progress"),
-                        "tag": deployment_info.get("tag"),
-                        "endpoint": f"http://localhost:{deployment_info.get('port')}"
-                    }
+                    # Container running but status not "deployed" - do an active health check
+                    if self._check_model_health(port):
+                        # Health check passed! Update status to deployed
+                        logger.info(f"✅ Health check passed for {model_key}, updating status to deployed")
+                        self._deployment_status[model_key] = {
+                            "status": "deployed",
+                            "message": f"Model {model_key} deployed successfully",
+                            "tag": deployment_info.get("tag"),
+                            "container_name": container_name,
+                            "port": port
+                        }
+                        self._save_deployment_state()
+                        return {
+                            "status": "deployed",
+                            "message": "Model is deployed and ready",
+                            "tag": deployment_info.get("tag"),
+                            "endpoint": f"http://localhost:{port}"
+                        }
+                    else:
+                        # Health check not passing yet
+                        current_status = self._deployment_status.get(model_key, {})
+                        return {
+                            "status": "inprogress",
+                            "message": current_status.get("message", "Model is starting, health check in progress"),
+                            "tag": deployment_info.get("tag"),
+                            "endpoint": f"http://localhost:{port}"
+                        }
             else:
                 # Container stopped, clean up
                 if model_key in self._ec2_deployments:
@@ -297,6 +457,7 @@ class ModelService:
                     "message": "Container stopped unexpectedly",
                     "tag": None
                 }
+                self._save_deployment_state()
 
         # Fallback to cached status or default
         if model_key in self._deployment_status:
@@ -320,8 +481,9 @@ class ModelService:
         failed = {}
 
         # Check EC2 deployments
-        for model_key, deployment_info in self._ec2_deployments.items():
+        for model_key, deployment_info in list(self._ec2_deployments.items()):
             container_name = deployment_info["container_name"]
+            port = deployment_info.get("port", 8000)
 
             # Check if container is still running
             if self._check_container_running(container_name):
@@ -332,17 +494,36 @@ class ModelService:
                     deployed[model_key] = {
                         "tag": deployment_info.get("tag"),
                         "container_name": container_name,
-                        "port": deployment_info.get("port"),
-                        "endpoint": f"http://localhost:{deployment_info.get('port')}"
+                        "port": port,
+                        "endpoint": f"http://localhost:{port}"
                     }
                 else:
-                    # Container running but health check not complete - still in progress
-                    inprogress[model_key] = {
-                        "tag": deployment_info.get("tag"),
-                        "container_name": container_name,
-                        "port": deployment_info.get("port"),
-                        "message": current_status.get("message", "Model is starting, health check in progress")
-                    }
+                    # Container running but status not "deployed" - do active health check
+                    if self._check_model_health(port):
+                        # Health check passed! Update status and add to deployed
+                        logger.info(f"✅ Health check passed for {model_key}, updating status to deployed")
+                        self._deployment_status[model_key] = {
+                            "status": "deployed",
+                            "message": f"Model {model_key} deployed successfully",
+                            "tag": deployment_info.get("tag"),
+                            "container_name": container_name,
+                            "port": port
+                        }
+                        self._save_deployment_state()
+                        deployed[model_key] = {
+                            "tag": deployment_info.get("tag"),
+                            "container_name": container_name,
+                            "port": port,
+                            "endpoint": f"http://localhost:{port}"
+                        }
+                    else:
+                        # Health check not passing yet - still in progress
+                        inprogress[model_key] = {
+                            "tag": deployment_info.get("tag"),
+                            "container_name": container_name,
+                            "port": port,
+                            "message": current_status.get("message", "Model is starting, health check in progress")
+                        }
             else:
                 # Container stopped, mark as failed
                 failed[model_key] = {
@@ -391,6 +572,9 @@ class ModelService:
         Returns:
             Status results for all models
         """
+        # Auto-detect any new running containers before checking status
+        self._auto_detect_running_containers()
+
         model_status = {}
 
         # Get all models (both registry EC2 models and custom models)

@@ -106,7 +106,7 @@ def setup_logging(
 
 def _configure_flask_logging(root_logger, log_level, formatter):
     """Configure Flask and Werkzeug logging to use the same handlers as root logger.
-    
+
     Args:
         root_logger: The configured root logger
         log_level: Logging level
@@ -117,11 +117,11 @@ def _configure_flask_logging(root_logger, log_level, formatter):
     flask_logger.setLevel(log_level)
     flask_logger.handlers = []  # Remove default handlers
     flask_logger.propagate = True  # Ensure it propagates to root logger
-    
+
     # Configure other common loggers to propagate to root
     loggers_to_configure = [
         'flask',
-        'werkzeug', 
+        'werkzeug',
         'backend',
         'backend.services',
         'backend.services.stress_test_service',
@@ -129,12 +129,40 @@ def _configure_flask_logging(root_logger, log_level, formatter):
         'backend.core',
         'inference_platform'
     ]
-    
+
     for logger_name in loggers_to_configure:
         child_logger = logging.getLogger(logger_name)
         child_logger.setLevel(log_level)
         child_logger.propagate = True  # Ensure propagation to root logger
         # Don't add handlers - let them inherit from root
+
+    # Suppress noisy third-party loggers
+    noisy_loggers = [
+        'botocore',
+        'boto3',
+        'urllib3',
+        'botocore.hooks',
+        'botocore.loaders',
+        'botocore.auth',
+        'botocore.endpoint',
+        'botocore.parsers',
+        'botocore.retryhandler',
+        'botocore.httpsession',
+        'botocore.credentials',
+        'botocore.configprovider',
+        'botocore.regions',
+        'botocore.utils',
+        'urllib3.connectionpool',
+        's3transfer',
+        'asyncio',
+        'httpcore',
+        'httpx',
+        'uvicorn.access',
+    ]
+
+    for logger_name in noisy_loggers:
+        noisy_logger = logging.getLogger(logger_name)
+        noisy_logger.setLevel(logging.WARNING)  # Only show warnings and above
 
 
 def get_logger(name: str) -> logging.Logger:
