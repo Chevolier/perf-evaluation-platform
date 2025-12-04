@@ -33,13 +33,8 @@ const ModelHubPage = () => {
   const [deploymentLoading, setDeploymentLoading] = useState(false);
   
   
-  // Always start with empty model status to force fresh fetch
-  const [modelStatus, setModelStatus] = useState(() => {
-    // Clear any cached status to ensure fresh data on every load
-    localStorage.removeItem('modelHub_modelStatus');
-    localStorage.removeItem('modelHub_cacheTimestamp');
-    return {};
-  });
+  // Start with empty model status - backend caching handles freshness
+  const [modelStatus, setModelStatus] = useState({});
   
   const [selectedModel, setSelectedModel] = useState(() => {
     try {
@@ -287,42 +282,42 @@ const ModelHubPage = () => {
     return () => clearTimeout(timeoutId);
   }, [selectedModel, customModelName, deploymentConfig]);
 
-  // Always fetch fresh data - no caching to ensure correct status
-  const fetchModelData = useCallback(async () => {
+  // Fetch model data with optional force refresh
+  const fetchModelData = useCallback(async (forceRefresh = false) => {
     try {
-      console.log('🚀 Fetching fresh model data (no cache)');
-      
+      console.log(`🚀 Fetching model data (forceRefresh: ${forceRefresh})`);
+
       // Add timeout handling to prevent hanging on throttled requests
       const fetchWithTimeout = (url, options = {}, timeout = 10000) => {
         return Promise.race([
           fetch(url, options),
-          new Promise((_, reject) => 
+          new Promise((_, reject) =>
             setTimeout(() => reject(new Error('Request timeout')), timeout)
           )
         ]);
       };
-      
+
       // First fetch model list to get the available models
       console.log('🔍 DEBUG: Fetching model list first...');
       const modelListResponse = await fetchWithTimeout('/api/model-list', {}, 15000);
 
       let deployableModelKeys = [];
-      
+
       // Process model list response
       if (modelListResponse.ok) {
         const data = await modelListResponse.json();
-        
+
         if (data.status === 'success' && data.models) {
-          
+
           // Process models with memoized transformation
-          const bedrockModels = data.models.bedrock ? 
+          const bedrockModels = data.models.bedrock ?
             Object.entries(data.models.bedrock).map(([key, info]) => ({
               key,
               name: info.name,
               description: info.description,
               alwaysAvailable: true
             })) : [];
-            
+
           const ec2Models = data.models.ec2 ?
             Object.entries(data.models.ec2).map(([key, info]) => ({
               key,
@@ -330,11 +325,11 @@ const ModelHubPage = () => {
               description: info.description,
               alwaysAvailable: false
             })) : [];
-            
+
           // Extract deployable model keys for status check
           deployableModelKeys = ec2Models.map(m => m.key);
           console.log('🔍 DEBUG: deployableModelKeys extracted:', deployableModelKeys);
-            
+
           // Batch UI updates to reduce re-renders
           React.startTransition(() => {
             setModelCategories({
@@ -347,23 +342,24 @@ const ModelHubPage = () => {
                 models: ec2Models
               }
             });
-            
-            // Keep loading state until status is fetched
-            // setInitialLoading(false); // Don't stop loading yet
           });
         }
       }
-      
+
       // Now fetch status for deployable models
+      // Use force_refresh to control whether backend uses cache
       console.log('🔍 DEBUG: Fetching status for deployable models:', deployableModelKeys);
       if (deployableModelKeys.length > 0) {
         try {
           const statusResponse = await fetchWithTimeout('/api/check-model-status', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ models: deployableModelKeys })
-          }, 10000);
-          
+            body: JSON.stringify({
+              models: deployableModelKeys,
+              force_refresh: forceRefresh  // Only force refresh on manual refresh
+            })
+          }, forceRefresh ? 30000 : 5000);  // Longer timeout for force refresh
+
           if (statusResponse.ok) {
             const data = await statusResponse.json();
             console.log('🔍 DEBUG: Status response data:', data);
@@ -401,8 +397,6 @@ const ModelHubPage = () => {
         // No deployable models, stop loading
         setInitialLoading(false);
       }
-      
-      // No caching - always use fresh data
     } catch (error) {
       console.error('Failed to fetch model data:', error);
     } finally {
@@ -411,7 +405,8 @@ const ModelHubPage = () => {
   }, [categoryTemplates]);
 
   useEffect(() => {
-    fetchModelData();
+    // Initial load uses cached data for fast response
+    fetchModelData(false);
   }, [fetchModelData]);
 
   // Polling for models in deleting or deploying status
@@ -610,15 +605,11 @@ const ModelHubPage = () => {
           <Button
             icon={<ReloadOutlined />}
             onClick={() => {
-              console.log('🔄 Manual refresh triggered - clearing cache');
-              // Clear localStorage cache to force fresh data
-              localStorage.removeItem('modelHub_modelStatus');
-              localStorage.removeItem('modelHub_cacheTimestamp');
+              console.log('🔄 Manual refresh triggered - force refresh');
               // Set loading state to show "检查中..." instead of "检查失败"
               setInitialLoading(true);
-              // Don't clear modelStatus immediately - let fetchModelData handle it
-              // Trigger fresh data fetch
-              fetchModelData();
+              // Trigger fresh data fetch with force_refresh=true to bypass backend cache
+              fetchModelData(true);
             }}
             loading={initialLoading}
           >

@@ -18,7 +18,7 @@ logger = get_logger(__name__)
 
 class ModelService:
     """Service for managing model deployment and status."""
-    
+
     def __init__(self):
         """Initialize model service."""
         self.registry = model_registry
@@ -33,6 +33,12 @@ class ModelService:
         self._state_dir.mkdir(parents=True, exist_ok=True)
         self._deployments_file = self._state_dir / "ec2_deployments.json"
         self._status_file = self._state_dir / "deployment_status.json"
+
+        # Status cache for fast responses
+        self._status_cache = {}
+        self._status_cache_timestamp = 0
+        self._status_cache_ttl = 30  # Cache TTL in seconds
+        self._cache_lock = threading.Lock()
 
         # Load existing deployment state on startup
         self._load_deployment_state()
@@ -563,8 +569,58 @@ class ModelService:
             logger.error(f"Failed to get current EC2 models: {e}")
             return []
     
+    def get_cached_model_status(self, models: List[str], force_refresh: bool = False) -> Dict[str, Any]:
+        """Get model status from cache for fast responses.
+
+        Args:
+            models: List of model keys to check
+            force_refresh: If True, refresh cache synchronously first
+
+        Returns:
+            Cached status results for all models
+        """
+        current_time = time.time()
+        cache_age = current_time - self._status_cache_timestamp
+
+        # If force_refresh or cache is stale, do a full refresh
+        if force_refresh or cache_age > self._status_cache_ttl:
+            return self.check_multiple_model_status(models)
+
+        # Return from cache - build response from cached data
+        model_status = {}
+        for model_key in models:
+            if self.registry.is_bedrock_model(model_key):
+                model_status[model_key] = {
+                    "status": "available",
+                    "message": "Bedrock model is always available"
+                }
+            elif model_key in self._status_cache:
+                model_status[model_key] = self._status_cache[model_key]
+            elif model_key in self._deployment_status:
+                # Fallback to deployment status
+                status_info = self._deployment_status[model_key]
+                model_status[model_key] = {
+                    "status": self._map_status_for_frontend(status_info.get("status")),
+                    "message": status_info.get("message", ""),
+                    "tag": status_info.get("tag"),
+                    "endpoint": status_info.get("endpoint")
+                }
+            else:
+                model_status[model_key] = {
+                    "status": "not_deployed",
+                    "message": "Model not deployed",
+                    "tag": None
+                }
+
+        return {
+            "status": "success",
+            "model_status": model_status,
+            "from_cache": True,
+            "cache_age": cache_age
+        }
+
     def check_multiple_model_status(self, models: List[str]) -> Dict[str, Any]:
-        """Check deployment status for multiple models.
+        """Check deployment status for multiple models (with full refresh).
 
         Args:
             models: List of model keys to check
@@ -663,10 +719,17 @@ class ModelService:
                     "status": "unknown",
                     "message": "Model not found"
                 }
+
+        # Update the cache with fresh data
+        with self._cache_lock:
+            self._status_cache.update(model_status)
+            self._status_cache_timestamp = time.time()
+
         try:
             return {
                 "status": "success",
-                "model_status": model_status  # Frontend expects 'model_status' not 'results'
+                "model_status": model_status,
+                "from_cache": False
             }
         except Exception as e:
             logger.error(f"Error in batch status check: {e}")

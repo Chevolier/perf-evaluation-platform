@@ -1,6 +1,40 @@
 #!/bin/bash
 
+# Default ports
+BACKEND_PORT=5000
+FRONTEND_PORT=3000
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --backend-port)
+            BACKEND_PORT="$2"
+            shift 2
+            ;;
+        --frontend-port)
+            FRONTEND_PORT="$2"
+            shift 2
+            ;;
+        -h|--help)
+            echo "Usage: ./start.sh [OPTIONS]"
+            echo ""
+            echo "Options:"
+            echo "  --backend-port PORT   Set backend port (default: 5000)"
+            echo "  --frontend-port PORT  Set frontend port (default: 3000)"
+            echo "  -h, --help            Show this help message"
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Use --help for usage information"
+            exit 1
+            ;;
+    esac
+done
+
 echo "🚀 Starting Performance Evaluation Platform..."
+echo "   Backend port: $BACKEND_PORT"
+echo "   Frontend port: $FRONTEND_PORT"
 
 # Check if frontend dependencies are installed
 if [ ! -d "frontend/node_modules" ] || [ ! -f "frontend/node_modules/react/package.json" ]; then
@@ -31,7 +65,7 @@ trap cleanup SIGINT SIGTERM EXIT
 echo "1. Starting backend..."
 cd backend
 source .venv/bin/activate
-uvicorn app:app --host 0.0.0.0 --port 5000 --reload > ../logs/backend.out 2>&1 &
+uvicorn app:app --host 0.0.0.0 --port $BACKEND_PORT --reload > ../logs/backend.out 2>&1 &
 BACKEND_PID=$!
 echo "✓ Backend started (PID: $BACKEND_PID)"
 cd ..
@@ -42,15 +76,15 @@ sleep 3
 # Start frontend in background
 echo "2. Starting frontend..."
 cd frontend
-npm start > ../logs/frontend.out 2>&1 &
+PORT=$FRONTEND_PORT npm start > ../logs/frontend.out 2>&1 &
 FRONTEND_PID=$!
 echo "✓ Frontend started (PID: $FRONTEND_PID)"
 
 echo ""
 echo "🌐 Platform is starting up..."
-echo "🖥️  Frontend: http://localhost:3000"
-echo "📊 Backend: http://localhost:5000"
-echo "📚 API Docs: http://localhost:5000/docs"
+echo "🖥️  Frontend: http://localhost:$FRONTEND_PORT"
+echo "📊 Backend: http://localhost:$BACKEND_PORT"
+echo "📚 API Docs: http://localhost:$BACKEND_PORT/docs"
 echo ""
 echo "📋 Logs:"
 echo "   Frontend: logs/frontend.out"

@@ -26,6 +26,7 @@ class DeployModelsRequest(BaseModel):
 
 class CheckModelStatusRequest(BaseModel):
     models: List[str] = []
+    force_refresh: bool = False
 
 
 class StopModelRequest(BaseModel):
@@ -102,9 +103,12 @@ def deploy_models(data: DeployModelsRequest):
 
 @model_router.post("/check-model-status")
 def check_model_status(data: CheckModelStatusRequest):
-    """Check status of multiple models."""
+    """Check status of multiple models.
+
+    Uses cache for fast responses. Set force_refresh=true to bypass cache.
+    """
     try:
-        result = model_service.check_multiple_model_status(data.models)
+        result = model_service.get_cached_model_status(data.models, force_refresh=data.force_refresh)
         return result
     except Exception as e:
         logger.error(f"Error checking model status: {e}")

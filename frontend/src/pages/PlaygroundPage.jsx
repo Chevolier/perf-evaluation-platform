@@ -35,7 +35,6 @@ import {
   DeleteOutlined
 } from '@ant-design/icons';
 import PlaygroundResultsDisplay from '../components/PlaygroundResultsDisplay';
-import PlaygroundModelSelector from '../components/PlaygroundModelSelector';
 
 const { Title, Text, Paragraph } = Typography;
 const { TextArea } = Input;
@@ -48,6 +47,11 @@ const PlaygroundPage = ({
   onParamsChange,
   onModelChange
 }) => {
+  // State for available models (fetched from backend)
+  const [availableModels, setAvailableModels] = useState([]);
+  const [modelStatus, setModelStatus] = useState({});
+  const [modelsLoading, setModelsLoading] = useState(false);
+
   // Load inference results from localStorage and clean up incomplete results
   const [inferenceResults, setInferenceResults] = useState(() => {
     try {
@@ -72,7 +76,74 @@ const PlaygroundPage = ({
   });
   
   const [isInferring, setIsInferring] = useState(false);
-  const [modelSelectorVisible, setModelSelectorVisible] = useState(false);
+
+  // Fetch available models on component mount
+  useEffect(() => {
+    const fetchModels = async () => {
+      setModelsLoading(true);
+      try {
+        // Fetch model list
+        const response = await fetch('/api/model-list');
+        if (response.ok) {
+          const data = await response.json();
+          if (data.status === 'success' && data.models) {
+            const models = [];
+
+            // Add Bedrock models
+            if (data.models.bedrock) {
+              Object.entries(data.models.bedrock).forEach(([key, info]) => {
+                models.push({
+                  key,
+                  name: info.name,
+                  description: info.description,
+                  category: 'bedrock',
+                  alwaysAvailable: true
+                });
+              });
+            }
+
+            // Add EC2 models
+            if (data.models.ec2) {
+              Object.entries(data.models.ec2).forEach(([key, info]) => {
+                models.push({
+                  key,
+                  name: info.name,
+                  description: info.description,
+                  category: 'ec2',
+                  alwaysAvailable: false
+                });
+              });
+            }
+
+            setAvailableModels(models);
+
+            // Fetch model status
+            const allModelKeys = models.map(m => m.key);
+            if (allModelKeys.length > 0) {
+              const statusResponse = await fetch('/api/check-model-status', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ models: allModelKeys })
+              });
+
+              if (statusResponse.ok) {
+                const statusData = await statusResponse.json();
+                if (statusData.model_status) {
+                  setModelStatus(statusData.model_status);
+                }
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch models:', error);
+      } finally {
+        setModelsLoading(false);
+      }
+    };
+
+    fetchModels();
+  }, []);
   
   // Store original file objects for preview
   const [originalFiles, setOriginalFiles] = useState(() => {
@@ -591,41 +662,73 @@ const PlaygroundPage = ({
 
                 {/* 条件渲染不同的输入方式 */}
                 {inputMode === 'dropdown' ? (
-                  <>
-                    {selectedModels.length === 0 ? (
-                      <div style={{ textAlign: 'center', padding: '20px' }}>
-                        <Text type="secondary">尚未选择任何模型</Text>
-                        <div style={{ marginTop: 12 }}>
-                          <Button
-                            type="primary"
-                            icon={<RobotOutlined />}
-                            onClick={() => setModelSelectorVisible(true)}
-                          >
-                            选择模型
-                          </Button>
+                  <div>
+                    <Text strong>选择模型：</Text>
+                    <Select
+                      style={{ width: '100%', marginTop: 8 }}
+                      placeholder="请选择一个模型"
+                      value={selectedModels.length > 0 ? selectedModels[0] : undefined}
+                      onChange={(value) => {
+                        // Only allow single selection
+                        onModelChange(value ? [value] : []);
+                      }}
+                      loading={modelsLoading}
+                      allowClear
+                      showSearch
+                      optionFilterProp="label"
+                      options={(() => {
+                        // Helper function to check if model is available
+                        const isModelAvailable = (model) => {
+                          if (model.alwaysAvailable) return true;
+                          const status = modelStatus[model.key];
+                          return status?.status === 'available' || status?.status === 'deployed';
+                        };
+
+                        // Group models by category
+                        const bedrockModels = availableModels
+                          .filter(m => m.category === 'bedrock' && isModelAvailable(m))
+                          .map(m => ({
+                            label: m.name,
+                            value: m.key,
+                            desc: m.description
+                          }));
+
+                        const ec2Models = availableModels
+                          .filter(m => m.category === 'ec2' && isModelAvailable(m))
+                          .map(m => ({
+                            label: `${m.name} (已部署)`,
+                            value: m.key,
+                            desc: m.description
+                          }));
+
+                        const options = [];
+
+                        if (bedrockModels.length > 0) {
+                          options.push({
+                            label: 'Bedrock 模型',
+                            options: bedrockModels
+                          });
+                        }
+
+                        if (ec2Models.length > 0) {
+                          options.push({
+                            label: 'EC2 部署模型',
+                            options: ec2Models
+                          });
+                        }
+
+                        return options;
+                      })()}
+                      optionRender={(option) => (
+                        <div>
+                          <div>{option.label}</div>
+                          {option.data.desc && (
+                            <div style={{ fontSize: '12px', color: '#999' }}>{option.data.desc}</div>
+                          )}
                         </div>
-                      </div>
-                    ) : (
-                      <div>
-                        <div style={{ marginBottom: 12 }}>
-                          <Text strong>已选择 {selectedModels.length} 个模型：</Text>
-                        </div>
-                        <div style={{ marginBottom: 12 }}>
-                          {selectedModels.map(model => (
-                            <Tag key={model} color="blue" style={{ margin: '2px' }}>
-                              {model}
-                            </Tag>
-                          ))}
-                        </div>
-                        <Button
-                          size="small"
-                          onClick={() => setModelSelectorVisible(true)}
-                        >
-                          重新选择
-                        </Button>
-                      </div>
-                    )}
-                  </>
+                      )}
+                    />
+                  </div>
                 ) : inputMode === 'manual' ? (
                   <Space direction="vertical" style={{ width: '100%' }}>
                     <div>
@@ -1014,19 +1117,6 @@ const PlaygroundPage = ({
         </Col>
       </Row>
 
-      {/* 模型选择弹窗 */}
-      <PlaygroundModelSelector
-        visible={modelSelectorVisible}
-        onCancel={() => setModelSelectorVisible(false)}
-        onOk={() => setModelSelectorVisible(false)}
-        selectedModels={selectedModels}
-        onModelChange={(newSelectedModels) => {
-          // 更新父组件的selectedModels状态
-          if (typeof onModelChange === 'function') {
-            onModelChange(newSelectedModels);
-          }
-        }}
-      />
     </div>
   );
 };
