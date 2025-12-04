@@ -23,7 +23,7 @@ logger = get_logger(__name__)
 # Calculate venv site-packages path relative to this file
 import glob
 backend_dir = os.path.dirname(os.path.dirname(__file__))
-venv_lib_dir = os.path.join(backend_dir, 'venv', 'lib')
+venv_lib_dir = os.path.join(backend_dir, '.venv', 'lib')
 python_dirs = glob.glob(os.path.join(venv_lib_dir, 'python*'))
 if python_dirs:
     python_dir = os.path.basename(python_dirs[0])
@@ -2759,7 +2759,7 @@ except Exception as e:
         self.test_sessions[session_id]["output_directory"] = output_dir
 
         # Create config.yaml file for litellm
-        config_dir = Path(__file__).parent.parent.parent / 'config'
+        config_dir = Path(__file__).parent.parent / 'config'
         config_dir.mkdir(exist_ok=True)
         config_file = config_dir / 'sm_config.yaml'
 

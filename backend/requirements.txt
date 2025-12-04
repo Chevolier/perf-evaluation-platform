@@ -12,6 +12,6 @@ ffmpeg-python==0.2.0
 kubernetes==33.1.0
 vllm
 litellm==1.78.0
-# litellm[proxy]
+litellm[proxy]
 pyyaml==6.0.2
 transformers>=4.40.0
