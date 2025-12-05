@@ -122,3 +122,4 @@ data/
 .claude/
 
 config/sm_config.yaml
+.pytest_cache
