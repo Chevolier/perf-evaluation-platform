@@ -291,11 +291,11 @@ const PlaygroundPage = ({
     }
 
     // 检查文件大小
-    const maxImageSize = 20 * 1024 * 1024; // 20MB for images
+    const maxImageSize = 5 * 1024 * 1024; // 5MB for images (Bedrock limit)
     const maxVideoSize = 50 * 1024 * 1024; // 50MB for videos
     const maxSize = isVideo ? maxVideoSize : maxImageSize;
     const fileTypeText = isVideo ? '视频' : '图片';
-    const maxSizeMB = isVideo ? 50 : 20;
+    const maxSizeMB = isVideo ? 50 : 5;
 
     if (file.size > maxSize) {
       Modal.warning({
@@ -792,13 +792,13 @@ const PlaygroundPage = ({
                 />
 
                 {/* 上传按钮 - 放在TextArea下方 */}
-                <div style={{ marginTop: '8px' }}>
+                <div style={{ marginTop: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <Upload
                     ref={fileInputRef}
                     name="file"
                     multiple={false}
                     showUploadList={false}
-                    accept="image/*,video/*"
+                    accept="image/*"
                     customRequest={({ file, onSuccess }) => {
                       console.log('=== customRequest called ===');
                       console.log('File:', file);
@@ -810,9 +810,10 @@ const PlaygroundPage = ({
                       icon={<UploadOutlined />}
                       size="small"
                     >
-                      上传素材
+                      上传图片
                     </Button>
                   </Upload>
+                  <Text type="secondary" style={{ fontSize: '12px' }}>（图片不超过5 MB）</Text>
                 </div>
                 
                 {/* 图片预览区域 - 显示在输入框下方 */}
