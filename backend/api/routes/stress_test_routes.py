@@ -1,5 +1,6 @@
 """API routes for stress testing functionality."""
 
+import math
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel
@@ -9,6 +10,23 @@ from utils import get_logger
 
 logger = get_logger(__name__)
 stress_test_router = APIRouter(prefix="/api", tags=["stress-test"])
+
+
+def sanitize_for_json(obj):
+    """Recursively sanitize an object for JSON serialization.
+
+    Replaces inf, -inf, and nan float values with None to prevent JSON serialization errors.
+    """
+    if isinstance(obj, dict):
+        return {k: sanitize_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [sanitize_for_json(item) for item in obj]
+    elif isinstance(obj, float):
+        if math.isinf(obj) or math.isnan(obj):
+            return None
+        return obj
+    else:
+        return obj
 
 # Initialize service
 stress_test_service = StressTestService()
@@ -111,7 +129,10 @@ def get_stress_test_status(session_id: str):
 
         logger.info(f"Session {session_id} status: {session_data.get('status')}, progress: {session_data.get('progress')}")
 
-        return {"status": "success", "test_session": session_data}
+        # Sanitize data to prevent JSON serialization errors with inf/nan values
+        sanitized_data = sanitize_for_json(session_data)
+
+        return {"status": "success", "test_session": sanitized_data}
 
     except HTTPException:
         raise

@@ -9,7 +9,6 @@ from datetime import datetime
 
 from core.models import model_registry
 from utils import get_logger
-from transformers import AutoTokenizer
 
 
 logger = get_logger(__name__)
