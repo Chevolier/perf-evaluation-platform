@@ -485,7 +485,10 @@ const PlaygroundPage = ({
       frames: dataset.files,
       mediaType: dataset.type,
       max_tokens: params.max_tokens,
-      temperature: params.temperature
+      temperature: params.temperature,
+      // Only include resize params if they are specified
+      ...(params.resize_width && { resize_width: params.resize_width }),
+      ...(params.resize_height && { resize_height: params.resize_height })
     };
 
     // Handle different input modes
@@ -1021,6 +1024,43 @@ const PlaygroundPage = ({
                     </Col>
                   </Row>
                 </div>
+
+                {/* 图片缩放设置 - 仅在有上传图片时显示 */}
+                {dataset.files.length > 0 && (
+                  <>
+                    <Divider style={{ margin: '12px 0' }} />
+                    <div>
+                      <Text strong>图片缩放设置: </Text>
+                      <Text type="secondary" style={{ fontSize: '12px', marginLeft: '8px' }}>
+                        （留空则不缩放）
+                      </Text>
+                    </div>
+                    <Row gutter={16} style={{ marginTop: '8px' }}>
+                      <Col span={12}>
+                        <Text>最大宽度:</Text>
+                        <InputNumber
+                          min={100}
+                          max={4096}
+                          placeholder="720"
+                          value={params.resize_width}
+                          onChange={(value) => onParamsChange({ ...params, resize_width: value })}
+                          style={{ width: '100%', marginTop: '4px' }}
+                        />
+                      </Col>
+                      <Col span={12}>
+                        <Text>最大高度:</Text>
+                        <InputNumber
+                          min={100}
+                          max={4096}
+                          placeholder="480"
+                          value={params.resize_height}
+                          onChange={(value) => onParamsChange({ ...params, resize_height: value })}
+                          style={{ width: '100%', marginTop: '4px' }}
+                        />
+                      </Col>
+                    </Row>
+                  </>
+                )}
               </Space>
             </Card>
 

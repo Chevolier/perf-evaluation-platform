@@ -21,6 +21,9 @@ class MultiInferenceRequest(BaseModel):
     mediaType: Optional[str] = None
     max_tokens: int = 1024
     temperature: float = 0.7
+    # Image resize parameters (optional - if not specified, no resize)
+    resize_width: Optional[int] = None
+    resize_height: Optional[int] = None
     # Manual API configuration
     manual_config: Optional[Dict[str, Any]] = None
     # SageMaker configuration

@@ -796,8 +796,10 @@ class InferenceService:
             frames = data.get('frames', [])
             max_tokens = data.get('max_tokens', 4096)
             temperature = data.get('temperature', 0.6)
+            resize_width = data.get('resize_width')
+            resize_height = data.get('resize_height')
 
-            logger.info(f"🔍 SageMaker request - text: '{text_prompt[:50] if text_prompt else ''}...', frames: {len(frames)}, max_tokens: {max_tokens}, temperature: {temperature}")
+            logger.info(f"🔍 SageMaker request - text: '{text_prompt[:50] if text_prompt else ''}...', frames: {len(frames)}, max_tokens: {max_tokens}, temperature: {temperature}, resize: {resize_width}x{resize_height}")
 
             # Build user content - exactly matching reference code format
             if frames:
@@ -810,15 +812,23 @@ class InferenceService:
                 # Add images (only first image for now to match reference)
                 frame_base64 = frames[0]
 
-                # Resize image to avoid endpoint errors (matching reference: 720x480)
-                resized_base64 = self._resize_image_for_sagemaker(frame_base64)
-                image_url_base64 = f"data:image/png;base64,{resized_base64}"
+                # Only resize if resize parameters are specified
+                if resize_width or resize_height:
+                    max_w = resize_width or 720
+                    max_h = resize_height or 480
+                    resized_base64 = self._resize_image_for_sagemaker(frame_base64, max_w, max_h)
+                    image_url_base64 = f"data:image/png;base64,{resized_base64}"
+                    logger.info(f"🖼️ Added resized image ({max_w}x{max_h}), base64 length: {len(resized_base64)}")
+                else:
+                    # No resize - use original image with detected format
+                    image_format = self._detect_image_format(frame_base64)
+                    image_url_base64 = f"data:{image_format};base64,{frame_base64}"
+                    logger.info(f"🖼️ Added original image ({image_format}), base64 length: {len(frame_base64)}")
 
                 user_content.append({
                     "type": "image_url",
                     "image_url": {"url": image_url_base64}
                 })
-                logger.info(f"🖼️ Added resized image, base64 length: {len(resized_base64)}")
 
                 messages = [
                     {"role": "system", "content": "You are a helpful assistant."},
