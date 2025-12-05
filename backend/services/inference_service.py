@@ -612,12 +612,15 @@ class InferenceService:
             # Add image content if frames are provided
             if frames:
                 for frame_base64 in frames:
+                    # Detect actual image format
+                    image_format = self._detect_image_format(frame_base64)
                     content_parts.append({
                         "type": "image_url",
                         "image_url": {
-                            "url": f"data:image/jpeg;base64,{frame_base64}"
+                            "url": f"data:{image_format};base64,{frame_base64}"
                         }
                     })
+                logger.info(f"🖼️ Manual API request with {len(frames)} images")
             
             messages.append({
                 "role": "user",
@@ -771,10 +774,37 @@ class InferenceService:
             if model_name:
                 # Build messages for chat template
                 tokenizer = AutoTokenizer.from_pretrained(model_name)
-                messages = [
-                    {"role": "system", "content": "You are a helpful assistant."},
-                    {"role": "user", "content": text_prompt}
-                ]
+
+                # Build user content - include images for multimodal models
+                if frames:
+                    # For VLM models, build content with images
+                    user_content = []
+                    # Add images first
+                    for frame_base64 in frames:
+                        image_format = self._detect_image_format(frame_base64)
+                        user_content.append({
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{image_format};base64,{frame_base64}"
+                            }
+                        })
+                    # Add text
+                    user_content.append({
+                        "type": "text",
+                        "text": text_prompt
+                    })
+
+                    messages = [
+                        {"role": "system", "content": "You are a helpful assistant."},
+                        {"role": "user", "content": user_content}
+                    ]
+                    logger.info(f"🖼️ SageMaker VLM request with {len(frames)} images")
+                else:
+                    # Text-only request
+                    messages = [
+                        {"role": "system", "content": "You are a helpful assistant."},
+                        {"role": "user", "content": text_prompt}
+                    ]
 
                 # Apply a simple chat template formatting (Qwen style)
                 prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
@@ -808,11 +838,10 @@ class InferenceService:
                     }
                 }
 
-            # Add image frames if provided - for multimodal models
-            if frames:
-                # Some endpoints expect 'images' instead of 'frames'
-                request_payload["images"] = frames
-                request_payload["mediaType"] = data.get("mediaType", "image")
+                # Add image frames if provided - for multimodal models without model_name
+                if frames:
+                    request_payload["images"] = frames
+                    request_payload["mediaType"] = data.get("mediaType", "image")
 
             logger.info(f"🚀 Calling SageMaker endpoint {endpoint_name} with {len(frames)} frames")
             logger.debug(f"Request payload: {json.dumps(request_payload, indent=2)}")

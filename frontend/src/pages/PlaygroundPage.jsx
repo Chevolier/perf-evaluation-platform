@@ -155,6 +155,10 @@ const PlaygroundPage = ({
       return [];
     }
   });
+
+  // Controlled state for image preview
+  const [previewVisible, setPreviewVisible] = useState(false);
+  const [previewImage, setPreviewImage] = useState('');
   
   // Load playground internal state from localStorage
   const [inputMode, setInputMode] = useState(() => {
@@ -258,172 +262,143 @@ const PlaygroundPage = ({
     };
   }, [handlePageRefresh]);
 
-  // 处理文件上传
-  const handleFileUpload = async (file, fileList) => {
-    console.log('handleFileUpload called with:', { 
-      fileListLength: fileList.length, 
-      files: fileList.map(f => ({ name: f.name, type: f.type, size: f.size }))
+  // 处理文件上传 - 使用第一个参数 file (原生 File 对象)
+  const handleFileUpload = (file) => {
+    console.log('=== handleFileUpload START ===');
+    console.log('handleFileUpload called with file:', {
+      name: file.name,
+      type: file.type,
+      size: file.size
     });
-    
-    if (fileList.length === 0) {
-      onDatasetChange({ ...dataset, files: [] });
+
+    // Process file asynchronously
+    processFile(file);
+
+    // Return false synchronously to prevent default upload
+    return false;
+  };
+
+  // Async file processing function
+  const processFile = async (file) => {
+    console.log('=== processFile START ===');
+
+    const isImage = file.type.startsWith('image/');
+    const isVideo = file.type.startsWith('video/');
+
+    if (!isImage && !isVideo) {
+      message.error(`文件 ${file.name} 不支持！只支持图片和视频文件`);
       return false;
     }
 
-    // 处理所有文件
-    const processFiles = async () => {
-      // 检查是否包含视频文件
-      const hasVideo = fileList.some(file => file.type.startsWith('video/'));
-      const maxFiles = hasVideo ? 3 : 10; // 视频文件最多3个，图片最多10个
-      
-      // 限制文件数量
-      if (fileList.length > maxFiles) {
-        message.error(`最多只能上传${maxFiles}个文件（${hasVideo ? '包含视频时' : '图片'}），以避免内存不足`);
-        return;
-      }
+    // 检查文件大小
+    const maxImageSize = 20 * 1024 * 1024; // 20MB for images
+    const maxVideoSize = 50 * 1024 * 1024; // 50MB for videos
+    const maxSize = isVideo ? maxVideoSize : maxImageSize;
+    const fileTypeText = isVideo ? '视频' : '图片';
+    const maxSizeMB = isVideo ? 50 : 20;
 
-      // Reset original files before processing new ones
-      setOriginalFiles([]);
-      
-      const base64Files = [];
-      const newOriginalFiles = [];
-      let fileType = 'image'; // 默认类型
-      let totalSize = 0;
-      const maxImageSize = 5 * 1024 * 1024; // 5MB for images
-      const maxVideoSize = 50 * 1024 * 1024; // 50MB for videos
-      const maxTotalSize = 100 * 1024 * 1024; // 100MB total
-
-      for (const uploadFile of fileList) {
-        const isImage = uploadFile.type.startsWith('image/');
-        const isVideo = uploadFile.type.startsWith('video/');
-        
-        if (!isImage && !isVideo) {
-          message.error(`文件 ${uploadFile.name} 不支持！只支持图片和视频文件`);
-          continue;
-        }
-
-        // 检查文件大小
-        const maxSize = isVideo ? maxVideoSize : maxImageSize;
-        const fileTypeText = isVideo ? '视频' : '图片';
-        const maxSizeMB = isVideo ? 50 : 5;
-        
-        if (uploadFile.size > maxSize) {
-          Modal.warning({
-            title: `${fileTypeText}文件过大`,
-            content: (
-              <div>
-                <p><strong>文件：</strong>{uploadFile.name}</p>
-                <p><strong>当前大小：</strong>{(uploadFile.size/1024/1024).toFixed(1)}MB</p>
-                <p><strong>大小限制：</strong>{fileTypeText}文件不能超过 <span style={{color: '#f50'}}>{maxSizeMB}MB</span></p>
-                <div style={{marginTop: 16, padding: 12, backgroundColor: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: 6}}>
-                  <p style={{margin: 0, fontSize: '13px'}}><strong>建议：</strong></p>
-                  <ul style={{margin: '8px 0', paddingLeft: 20, fontSize: '13px'}}>
-                    {isVideo ? (
-                      <>
-                        <li>使用视频压缩工具减小文件大小</li>
-                        <li>降低视频分辨率（如1080p→720p）</li>
-                        <li>缩短视频时长</li>
-                        <li>使用更高效的编码格式（如H.264）</li>
-                      </>
-                    ) : (
-                      <>
-                        <li>使用图片压缩工具减小文件大小</li>
-                        <li>降低图片分辨率</li>
-                        <li>选择更高效的图片格式（如WebP、JPEG）</li>
-                        <li>调整图片质量设置</li>
-                      </>
-                    )}
-                  </ul>
-                </div>
-              </div>
-            ),
-            okText: '知道了',
-            width: 480
-          });
-          continue;
-        }
-
-        totalSize += uploadFile.size;
-        if (totalSize > maxTotalSize) {
-          message.error(`文件总大小过大（${(totalSize/1024/1024).toFixed(1)}MB），总计不能超过100MB`);
-          break;
-        }
-
-        // 设置文件类型（如果有视频，则优先设为video）
-        if (isVideo) {
-          fileType = 'video';
-        }
-
-        try {
-          console.log(`Processing file: ${uploadFile.name}, type: ${uploadFile.type}, size: ${(uploadFile.size/1024/1024).toFixed(2)}MB`);
-          
-          // 显示处理进度
-          message.loading(`正在处理${fileTypeText}文件: ${uploadFile.name}...`, 0);
-          
-          // 转换为base64
-          const base64 = await new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => {
-              console.log(`Successfully processed: ${uploadFile.name}`);
-              resolve(reader.result.split(',')[1]);
-            };
-            reader.onerror = (error) => {
-              console.error(`Failed to read file: ${uploadFile.name}`, error);
-              reject(error);
-            };
-            reader.readAsDataURL(uploadFile);
-          });
-
-          // 创建预览URL
-          const previewUrl = await new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => {
-              console.log(`Created preview URL for: ${uploadFile.name}`);
-              resolve(reader.result);
-            };
-            reader.onerror = (error) => {
-              console.error(`Failed to create preview URL: ${uploadFile.name}`, error);
-              reject(error);
-            };
-            reader.readAsDataURL(uploadFile);
-          });
-
-          base64Files.push(base64);
-          
-          // Store file info for preview
-          newOriginalFiles.push({
-            name: uploadFile.name,
-            type: uploadFile.type,
-            size: uploadFile.size,
-            previewUrl: previewUrl,
-            isImage: isImage,
-            isVideo: isVideo
-          });
-          
-          message.destroy(); // 清除loading消息
-        } catch (error) {
-          message.destroy(); // 清除loading消息
-          message.error(`文件 ${uploadFile.name} 处理失败: ${error.message || '未知错误'}`);
-          console.error('File processing error:', error);
-        }
-      }
-
-      if (base64Files.length === 0) {
-        message.warning('没有成功处理任何文件');
-        setOriginalFiles([]);
-        return;
-      }
-
-      message.success(`成功处理 ${base64Files.length} 个文件`);
-      setOriginalFiles(newOriginalFiles);
-      onDatasetChange({
-        ...dataset,
-        files: base64Files,
-        type: fileType
+    if (file.size > maxSize) {
+      Modal.warning({
+        title: `${fileTypeText}文件过大`,
+        content: (
+          <div>
+            <p><strong>文件：</strong>{file.name}</p>
+            <p><strong>当前大小：</strong>{(file.size/1024/1024).toFixed(1)}MB</p>
+            <p><strong>大小限制：</strong>{fileTypeText}文件不能超过 <span style={{color: '#f50'}}>{maxSizeMB}MB</span></p>
+            <div style={{marginTop: 16, padding: 12, backgroundColor: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: 6}}>
+              <p style={{margin: 0, fontSize: '13px'}}><strong>建议：</strong></p>
+              <ul style={{margin: '8px 0', paddingLeft: 20, fontSize: '13px'}}>
+                {isVideo ? (
+                  <>
+                    <li>使用视频压缩工具减小文件大小</li>
+                    <li>降低视频分辨率（如1080p→720p）</li>
+                    <li>缩短视频时长</li>
+                    <li>使用更高效的编码格式（如H.264）</li>
+                  </>
+                ) : (
+                  <>
+                    <li>使用图片压缩工具减小文件大小</li>
+                    <li>降低图片分辨率</li>
+                    <li>选择更高效的图片格式（如WebP、JPEG）</li>
+                    <li>调整图片质量设置</li>
+                  </>
+                )}
+              </ul>
+            </div>
+          </div>
+        ),
+        okText: '知道了',
+        width: 480
       });
-    };
+      return false;
+    }
 
-    processFiles();
+    try {
+      console.log(`Processing file: ${file.name}, type: ${file.type}, size: ${(file.size/1024/1024).toFixed(2)}MB`);
+
+      // 显示处理进度
+      message.loading(`正在处理${fileTypeText}文件: ${file.name}...`, 0);
+
+      // 转换为base64
+      const base64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          console.log(`Successfully processed: ${file.name}`);
+          resolve(reader.result.split(',')[1]);
+        };
+        reader.onerror = (error) => {
+          console.error(`Failed to read file: ${file.name}`, error);
+          reject(error);
+        };
+        reader.readAsDataURL(file);
+      });
+
+      // 创建预览URL
+      const previewUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          console.log(`Created preview URL for: ${file.name}`);
+          resolve(reader.result);
+        };
+        reader.onerror = (error) => {
+          console.error(`Failed to create preview URL: ${file.name}`, error);
+          reject(error);
+        };
+        reader.readAsDataURL(file);
+      });
+
+      message.destroy(); // 清除loading消息
+      message.success(`成功处理文件: ${file.name}`);
+
+      console.log('Setting originalFiles with previewUrl:', previewUrl.substring(0, 100) + '...');
+      console.log('Setting dataset.files with base64 length:', base64.length);
+
+      // Update state with single file (replace previous)
+      const newOriginalFile = {
+        name: file.name,
+        type: file.type,
+        size: file.size,
+        previewUrl: previewUrl,
+        isImage: isImage,
+        isVideo: isVideo
+      };
+      setOriginalFiles([newOriginalFile]);
+
+      // Update dataset with new file
+      const newDataset = {
+        prompt: dataset.prompt,  // Keep existing prompt
+        files: [base64],
+        type: isVideo ? 'video' : 'image'
+      };
+      console.log('Calling onDatasetChange with:', { ...newDataset, files: [`base64 string of length ${base64.length}`] });
+      onDatasetChange(newDataset);
+
+    } catch (error) {
+      message.destroy(); // 清除loading消息
+      message.error(`文件 ${file.name} 处理失败: ${error.message || '未知错误'}`);
+      console.error('File processing error:', error);
+    }
+
     return false; // 阻止自动上传
   };
 
@@ -802,61 +777,42 @@ const PlaygroundPage = ({
 
             {/* 提示词输入 - 集成上传功能 */}
             <Card title="输入" size="small">
-              <div style={{ position: 'relative' }}>
+              <div>
                 {/* 文本输入区域 */}
-                <div style={{ position: 'relative' }}>
-                  <TextArea
-                    value={dataset.prompt}
-                    onChange={(e) => onDatasetChange({ ...dataset, prompt: e.target.value })}
-                    placeholder="请输入提示词，描述你希望模型完成的任务..."
-                    rows={6}
-                    maxLength={2000}
-                    showCount
-                    style={{
-                      paddingBottom: '48px',
-                      resize: 'none'
+                <TextArea
+                  value={dataset.prompt}
+                  onChange={(e) => onDatasetChange({ ...dataset, prompt: e.target.value })}
+                  placeholder="请输入提示词，描述你希望模型完成的任务..."
+                  rows={6}
+                  maxLength={2000}
+                  showCount
+                  style={{
+                    resize: 'none'
+                  }}
+                />
+
+                {/* 上传按钮 - 放在TextArea下方 */}
+                <div style={{ marginTop: '8px' }}>
+                  <Upload
+                    ref={fileInputRef}
+                    name="file"
+                    multiple={false}
+                    showUploadList={false}
+                    accept="image/*,video/*"
+                    customRequest={({ file, onSuccess }) => {
+                      console.log('=== customRequest called ===');
+                      console.log('File:', file);
+                      processFile(file);
+                      onSuccess('ok');
                     }}
-                  />
-                  
-                  {/* 底部工具栏 - 模仿Bedrock样式 */}
-                  <div style={{
-                    position: 'absolute',
-                    bottom: '8px',
-                    left: '8px',
-                    right: '8px',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    zIndex: 1
-                  }}>
-                    {/* 左侧上传按钮 */}
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <Upload
-                        ref={fileInputRef}
-                        name="file"
-                        multiple={true}
-                        beforeUpload={handleFileUpload}
-                        showUploadList={false}
-                        accept="image/*,video/*"
-                      >
-                        <Button 
-                          type="text" 
-                          size="small"
-                          icon={<UploadOutlined />}
-                          style={{
-                            color: '#666',
-                            border: 'none',
-                            boxShadow: 'none',
-                            background: 'transparent'
-                          }}
-                        >
-                          上传素材
-                        </Button>
-                      </Upload>
-                    </div>
-                    
-                    {/* 右侧字符计数 - 使用内置的showCount会自动显示 */}
-                  </div>
+                  >
+                    <Button
+                      icon={<UploadOutlined />}
+                      size="small"
+                    >
+                      上传素材
+                    </Button>
+                  </Upload>
                 </div>
                 
                 {/* 图片预览区域 - 显示在输入框下方 */}
@@ -898,15 +854,15 @@ const PlaygroundPage = ({
                         background: '#fafafa'
                       }}>
                         {originalFiles.map((fileInfo, index) => (
-                          <div 
-                            key={index} 
-                            style={{ 
+                          <div
+                            key={index}
+                            style={{
                               position: 'relative',
                               border: '1px solid #d9d9d9',
                               borderRadius: '6px',
-                              overflow: 'hidden',
                               background: '#fff',
-                              cursor: fileInfo.isImage ? 'pointer' : 'default'
+                              cursor: fileInfo.isImage ? 'pointer' : 'default',
+                              margin: '4px'
                             }}
                             onClick={() => {
                               if (fileInfo.isImage) {
@@ -936,20 +892,21 @@ const PlaygroundPage = ({
                                   borderRadius: '4px'
                                 }}
                                 preview={{
-                                  mask: (
-                                    <div style={{
-                                      background: 'rgba(0,0,0,0.5)',
-                                      color: 'white',
-                                      padding: '4px',
-                                      borderRadius: '4px',
-                                      fontSize: '12px'
-                                    }}>
-                                      <EyeOutlined /> 预览
-                                    </div>
-                                  )
+                                  visible: previewVisible && previewImage === fileInfo.previewUrl,
+                                  src: fileInfo.previewUrl,
+                                  onVisibleChange: (visible) => {
+                                    setPreviewVisible(visible);
+                                    if (!visible) {
+                                      setPreviewImage('');
+                                    }
+                                  },
+                                  destroyOnClose: true
                                 }}
-                                data-preview-id={`preview-${index}`}
-                                fallback="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMIAAADDCAYAAADQvc6UAAABRWlDQ1BJQ0MgUHJvZmlsZQAAKJFjYGASSSwoyGFhYGDIzSspCnJ3UoiIjFJgf8LAwSDCIMogwMCcmFxc4BgQ4ANUwgCjUcG3awyMIPqyLsis7PPOq3QdDFcvjV3jOD1boQVTPQrgSkktTgbSf4A4LbmgqISBgTEFyFYuLykAsTuAbJEioKOA7DkgdjqEvQHEToKwj4DVhAQ5A9k3gGyB5IxEoBmML4BsnSQk8XQkNtReEOBxcfXxUQg1Mjc0dyHgXNJBSWpFCYh2zi+oLMpMzyhRcASGUqqCZ16yno6CkYGRAQMDKMwhqj/fAIcloxgHQqxAjIHBEugw5sUIsSQpBobtQPdLciLEVJYzMPBHMDBsayhILEqEO4DxG0txmrERhM29nYGBddr//5/DGRjYNRkY/l7////39v///y4Dmn+LgeHANwDrkl1AuO+pmgAAADhlWElmTU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAAqACAAQAAAABAAAAwqADAAQAAAABAAAAwwAAAAD9b/HnAAAHlklEQVR4Ae3dP3Ik1RnG4W+FgYxN"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setPreviewImage(fileInfo.previewUrl);
+                                  setPreviewVisible(true);
+                                }}
                               />
                             ) : fileInfo.isVideo ? (
                               <div style={{
@@ -978,30 +935,34 @@ const PlaygroundPage = ({
                             )}
                             
                             {/* 删除按钮 */}
-                            <Button
-                              type="text"
-                              size="small"
-                              icon={<DeleteOutlined />}
+                            <div
                               onClick={(e) => {
-                                e.stopPropagation(); // 防止触发图片预览
+                                e.stopPropagation();
+                                e.preventDefault();
+                                console.log('Delete button clicked for index:', index);
                                 handleRemoveFile(index);
                               }}
                               style={{
                                 position: 'absolute',
-                                top: '2px',
-                                right: '2px',
-                                width: '18px',
-                                height: '18px',
-                                background: 'rgba(0,0,0,0.6)',
+                                top: '-4px',
+                                right: '-4px',
+                                width: '20px',
+                                height: '20px',
+                                background: '#ff4d4f',
                                 color: '#fff',
-                                border: 'none',
+                                border: '2px solid #fff',
                                 borderRadius: '50%',
-                                fontSize: '10px',
+                                fontSize: '12px',
                                 display: 'flex',
                                 alignItems: 'center',
-                                justifyContent: 'center'
+                                justifyContent: 'center',
+                                cursor: 'pointer',
+                                zIndex: 10,
+                                boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
                               }}
-                            />
+                            >
+                              <CloseOutlined style={{ fontSize: '10px' }} />
+                            </div>
                           </div>
                         ))}
                       </div>
