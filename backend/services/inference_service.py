@@ -56,7 +56,55 @@ class InferenceService:
         except Exception:
             # If anything goes wrong, default to JPEG
             return 'image/jpeg'
-    
+
+    def _resize_image_for_sagemaker(self, base64_data: str, max_width: int = 720, max_height: int = 480) -> str:
+        """Resize image for SageMaker endpoint to avoid size errors.
+
+        Args:
+            base64_data: Base64 encoded image data
+            max_width: Maximum width (default 720)
+            max_height: Maximum height (default 480)
+
+        Returns:
+            Base64 encoded resized PNG image
+        """
+        import io
+        from PIL import Image
+
+        try:
+            # Decode base64 to bytes
+            image_bytes = base64.b64decode(base64_data)
+
+            # Open image
+            image = Image.open(io.BytesIO(image_bytes))
+
+            # Convert to RGB if necessary (for PNG with alpha channel)
+            if image.mode in ('RGBA', 'LA', 'P'):
+                image = image.convert('RGB')
+
+            # Resize while maintaining aspect ratio
+            original_width, original_height = image.size
+            ratio = min(max_width / original_width, max_height / original_height)
+
+            if ratio < 1:  # Only resize if image is larger than max dimensions
+                new_width = int(original_width * ratio)
+                new_height = int(original_height * ratio)
+                image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                logger.info(f"🖼️ Resized image from {original_width}x{original_height} to {new_width}x{new_height}")
+
+            # Save to PNG format
+            buffer = io.BytesIO()
+            image.save(buffer, format="PNG")
+            resized_bytes = buffer.getvalue()
+
+            # Encode back to base64
+            return base64.b64encode(resized_bytes).decode('utf-8')
+
+        except Exception as e:
+            logger.error(f"Error resizing image: {e}")
+            # Return original if resize fails
+            return base64_data
+
     def multi_inference(self, data: Dict[str, Any]) -> Generator[str, None, None]:
         """Run inference on multiple models simultaneously.
         
@@ -731,36 +779,17 @@ class InferenceService:
             result_queue: Queue to put results
         """
         try:
+            import boto3
+
             start_time = datetime.now()
             endpoint_name = sagemaker_config.get('endpoint_name')
-            model_name = sagemaker_config.get('model_name', "")
+            model_name = sagemaker_config.get('model_name', endpoint_name)
 
             if not endpoint_name:
                 raise ValueError("endpoint_name is required for SageMaker endpoint")
 
-            # Import SageMaker SDK
-            try:
-                import boto3
-                import sagemaker
-                from sagemaker import serializers, deserializers
-            except ImportError:
-                raise ImportError("SageMaker SDK is required. Please install: pip install sagemaker boto3")
-
-            # Get SageMaker session and role
-            try:
-                role = sagemaker.get_execution_role()
-                sess = sagemaker.session.Session()
-            except Exception:
-                # Fallback for environments without SageMaker execution role
-                sess = sagemaker.session.Session()
-                role = None
-
-            # Create predictor
-            predictor = sagemaker.Predictor(
-                endpoint_name=endpoint_name,
-                sagemaker_session=sess,
-                serializer=serializers.JSONSerializer()
-            )
+            # Create SageMaker runtime client
+            smr_client = boto3.client("sagemaker-runtime")
 
             # Prepare request
             text_prompt = data.get('text', '')
@@ -768,110 +797,83 @@ class InferenceService:
             max_tokens = data.get('max_tokens', 4096)
             temperature = data.get('temperature', 0.6)
 
-            # For text-only models, we can apply chat template formatting on our side
-            # This matches the format from your working example
-            input_tokens = 0
-            if model_name:
-                # Build messages for chat template
-                tokenizer = AutoTokenizer.from_pretrained(model_name)
+            logger.info(f"🔍 SageMaker request - text: '{text_prompt[:50] if text_prompt else ''}...', frames: {len(frames)}, max_tokens: {max_tokens}, temperature: {temperature}")
 
-                # Build user content - include images for multimodal models
-                if frames:
-                    # For VLM models, build content with images
-                    user_content = []
-                    # Add images first
-                    for frame_base64 in frames:
-                        image_format = self._detect_image_format(frame_base64)
-                        user_content.append({
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:{image_format};base64,{frame_base64}"
-                            }
-                        })
-                    # Add text
-                    user_content.append({
-                        "type": "text",
-                        "text": text_prompt
-                    })
+            # Build user content - exactly matching reference code format
+            if frames:
+                # VLM request with images
+                # Reference format: text first, then image_url
+                user_content = [
+                    {"type": "text", "text": text_prompt if text_prompt else "Please describe this image."}
+                ]
 
-                    messages = [
-                        {"role": "system", "content": "You are a helpful assistant."},
-                        {"role": "user", "content": user_content}
-                    ]
-                    logger.info(f"🖼️ SageMaker VLM request with {len(frames)} images")
-                else:
-                    # Text-only request
-                    messages = [
-                        {"role": "system", "content": "You are a helpful assistant."},
-                        {"role": "user", "content": text_prompt}
-                    ]
+                # Add images (only first image for now to match reference)
+                frame_base64 = frames[0]
 
-                # Apply a simple chat template formatting (Qwen style)
-                prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-                print(f"prompt: {prompt}")
-                input_tokens = len(tokenizer.tokenize(prompt))
+                # Resize image to avoid endpoint errors (matching reference: 720x480)
+                resized_base64 = self._resize_image_for_sagemaker(frame_base64)
+                image_url_base64 = f"data:image/png;base64,{resized_base64}"
 
-                request_payload = {
-                    "inputs": prompt,
-                    "parameters": {
-                        "max_new_tokens": max_tokens,
-                        "temperature": temperature,
-                        "top_p": 0.9,
-                        "include_stop_str_in_output": False,
-                        "ignore_eos": False,
-                        "repetition_penalty": 1.0,
-                        "details": True
-                    }
-                }
+                user_content.append({
+                    "type": "image_url",
+                    "image_url": {"url": image_url_base64}
+                })
+                logger.info(f"🖼️ Added resized image, base64 length: {len(resized_base64)}")
+
+                messages = [
+                    {"role": "system", "content": "You are a helpful assistant."},
+                    {"role": "user", "content": user_content}
+                ]
             else:
-                # Generic format for other models
-                request_payload = {
-                    "inputs": text_prompt,
-                    "parameters": {
-                        "max_new_tokens": max_tokens,
-                        "temperature": temperature,
-                        "top_p": 0.9,
-                        "include_stop_str_in_output": False,
-                        "ignore_eos": False,
-                        "repetition_penalty": 1.0,
-                        "details": True
-                    }
-                }
+                # Text-only request
+                messages = [
+                    {"role": "system", "content": "You are a helpful assistant."},
+                    {"role": "user", "content": text_prompt}
+                ]
 
-                # Add image frames if provided - for multimodal models without model_name
-                if frames:
-                    request_payload["images"] = frames
-                    request_payload["mediaType"] = data.get("mediaType", "image")
+            # Build request payload - exactly matching reference format
+            request_payload = {
+                "messages": messages,
+                "temperature": temperature,
+                "top_p": 0.8,
+                "top_k": 20,
+                "image_max_pixels": 1080 ** 2,
+            }
 
-            logger.info(f"🚀 Calling SageMaker endpoint {endpoint_name} with {len(frames)} frames")
-            logger.debug(f"Request payload: {json.dumps(request_payload, indent=2)}")
+            # Only add max_tokens if specified (some models don't accept it)
+            if max_tokens:
+                request_payload["max_tokens"] = max_tokens
 
-            # Make prediction
-            response = predictor.predict(request_payload)
+            logger.info(f"🚀 Calling SageMaker endpoint {endpoint_name}")
+            logger.info(f"📦 Payload: messages count={len(messages)}, has_images={bool(frames)}")
+
+            # Invoke endpoint using boto3 directly
+            response = smr_client.invoke_endpoint(
+                EndpointName=endpoint_name,
+                ContentType="application/json",
+                Body=json.dumps(request_payload)
+            )
 
             # Parse response
-            if isinstance(response, bytes):
-                response_text = response.decode('utf-8')
+            response_text = response["Body"].read().decode("utf-8")
+            response_json = json.loads(response_text)
+
+            # Extract content from OpenAI-compatible response format
+            content = ""
+            output_tokens = 0
+
+            if 'choices' in response_json and response_json['choices']:
+                choice = response_json['choices'][0]
+                if 'message' in choice:
+                    content = choice['message'].get('content', '')
+
+            # Get usage info if available
+            if 'usage' in response_json:
+                output_tokens = response_json['usage'].get('completion_tokens', 0)
+                input_tokens = response_json['usage'].get('prompt_tokens', 0)
             else:
-                response_text = str(response)
-
-            try:
-                response_json = json.loads(response_text)
-                if 'generated_text' in response_json:
-                    content = response_json['generated_text']
-                else:
-                    content = response_text
-
-                if 'generated_tokens' in response_json:
-                    output_tokens = response_json['generated_tokens']
-                else:
-                    # Fallback: estimate tokens based on text length
-                    output_tokens = len(content.split()) if content else 0
-
-            except json.JSONDecodeError:
-                content = response_text
-                # Estimate tokens for raw text response
-                output_tokens = len(response_text.split()) if response_text else 0
+                input_tokens = 0
+                output_tokens = len(content.split()) if content else 0
 
             end_time = datetime.now()
             processing_time = (end_time - start_time).total_seconds()
@@ -888,7 +890,7 @@ class InferenceService:
                         'output_tokens': output_tokens,
                         'total_tokens': total_tokens
                     },
-                    'raw_response': response_json if 'response_json' in locals() else None
+                    'raw_response': response_json
                 },
                 'metadata': {
                     'processingTime': f"{processing_time:.2f}s",
