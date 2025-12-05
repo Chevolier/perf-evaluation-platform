@@ -62,7 +62,16 @@ Recommended instance g5.2xlarge.
 ./start.sh
 ```
 
-This will automatically install backend and frontend packages and start the service.
+If the environments are not configured, it will automatically install backend and frontend packages, then start the service. If the environments are already setup, it will directly start the service.
+
+If you need to update the environments, you can run 
+```bash
+./setup.sh
+```
+then run 
+```bash
+./start.sh
+```
 
 ### Manual Setup
 

@@ -1,7 +1,7 @@
 model_list:
-  - model_name: Qwen/Qwen3-Coder-30B-A3B-Instruct
+  - model_name: Qwen/Qwen3-VL-8B-Instruct
     litellm_params:
-      model: sagemaker/Qwen3-Coder-30B-A3B-Instruct-2025-10-28-01-07-54-288
+      model: sagemaker/endpoint-qwen3-vl-8b-1024-2025-12-05-04-15-04
       drop_params: True
       aws_access_key_id:
       aws_secret_access_key:
