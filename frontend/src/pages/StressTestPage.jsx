@@ -1831,7 +1831,7 @@ const StressTestPage = () => {
                           <Option value="openqa">openqa</Option>
                           <Option value="longalpaca">longalpaca</Option>
                           <Option value="flickr8k">flickr8k</Option>
-                          <Option value="custom">custom</Option>
+                          <Option value="custom">custom</Option>                         
                         </Select>
                       </Form.Item>
                     </Col>

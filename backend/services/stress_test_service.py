@@ -1057,6 +1057,10 @@ class StressTestService:
             # Check if VLM parameters should be included (when image parameters are provided)
             has_vlm_params = 'image_width' in test_params and 'image_height' in test_params and 'image_num' in test_params
 
+            # Datasets that support token/prompt length parameters (random datasets)
+            # Other public datasets (openqa, longalpaca, flickr8k, etc.) have their own prompts
+            datasets_with_token_params = ['random', 'random_vl']
+            use_token_params = dataset in datasets_with_token_params
 
             # Create appropriate script content based on dataset type
             if dataset == 'custom' and local_dataset_path:
@@ -1107,6 +1111,19 @@ except Exception as e:
 '''
             else:
                 # Use standard dataset parameter for non-custom datasets
+                # Build token params string only for random/random_vl datasets
+                if use_token_params:
+                    token_params_str = f"""min_tokens={min_tokens},
+        max_tokens={max_tokens},
+        prefix_length={prefix_length},
+        min_prompt_length={min_prompt_length},
+        max_prompt_length={max_prompt_length},
+        extra_args={{'ignore_eos': True}},
+        """
+                else:
+                    # Public datasets (openqa, longalpaca, flickr8k, etc.) use their own prompts
+                    token_params_str = ""
+
                 script_content = f'''#!/usr/bin/env python
 import sys
 import json
@@ -1126,13 +1143,7 @@ try:
         url='{api_url}',
         api='openai',
         dataset='{dataset}',
-        min_tokens={min_tokens},
-        max_tokens={max_tokens},
-        prefix_length={prefix_length},
-        min_prompt_length={min_prompt_length},
-        max_prompt_length={max_prompt_length},
-        extra_args={{'ignore_eos': True}},
-        tokenizer_path='{tokenizer_path}',
+        {token_params_str}tokenizer_path='{tokenizer_path}',
         temperature={temperature},
         outputs_dir='{output_dir}',
         stream=True,
@@ -1155,7 +1166,7 @@ except Exception as e:
     traceback.print_exc()
     sys.exit(1)
 '''
-            
+
             # # Write script to temporary file
             # with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as script_file:
             #     script_file.write(script_content)
@@ -2438,6 +2449,11 @@ except Exception as e:
             # Check if VLM parameters should be included (when image parameters are provided)
             has_vlm_params = 'image_width' in test_params and 'image_height' in test_params and 'image_num' in test_params
 
+            # Datasets that support token/prompt length parameters (random datasets)
+            # Other public datasets (openqa, longalpaca, flickr8k, etc.) have their own prompts
+            datasets_with_token_params = ['random', 'random_vl']
+            use_token_params = dataset in datasets_with_token_params
+
             # Create appropriate script content based on dataset type
             if dataset == 'custom' and local_dataset_path:
                 # Use dataset_path for custom datasets
@@ -2487,6 +2503,19 @@ except Exception as e:
 '''
             else:
                 # Use standard dataset parameter for non-custom datasets
+                # Build token params string only for random/random_vl datasets
+                if use_token_params:
+                    token_params_str = f"""min_tokens={min_tokens},
+        max_tokens={max_tokens},
+        prefix_length={prefix_length},
+        min_prompt_length={min_prompt_length},
+        max_prompt_length={max_prompt_length},
+        extra_args={{'ignore_eos': True}},
+        """
+                else:
+                    # Public datasets (openqa, longalpaca, flickr8k, etc.) use their own prompts
+                    token_params_str = ""
+
                 script_content = f'''#!/usr/bin/env python
 import sys
 import json
@@ -2506,13 +2535,7 @@ try:
         url='{api_url}',
         api='openai',
         dataset='{dataset}',
-        min_tokens={min_tokens},
-        max_tokens={max_tokens},
-        prefix_length={prefix_length},
-        min_prompt_length={min_prompt_length},
-        max_prompt_length={max_prompt_length},
-        extra_args={{'ignore_eos': True}},
-        tokenizer_path='{tokenizer_path}',
+        {token_params_str}tokenizer_path='{tokenizer_path}',
         temperature={temperature},
         outputs_dir='{output_dir}',
         stream=True,
@@ -2535,11 +2558,11 @@ except Exception as e:
     traceback.print_exc()
     sys.exit(1)
 '''
-            
+
             script_path = f"{output_dir}/run_evalscope.py"
             with open(script_path, 'w', encoding='utf-8') as f:
                 f.write(script_content)
-            
+
             logger.info(f"[DEBUG] Custom API Evalscope execution script written to: {script_path}")
             
             # Run evalscope in subprocess with conda environment
@@ -3063,6 +3086,11 @@ except Exception as e:
             # Check if VLM parameters should be included (when image parameters are provided)
             has_vlm_params = 'image_width' in test_params and 'image_height' in test_params and 'image_num' in test_params
 
+            # Datasets that support token/prompt length parameters (random datasets)
+            # Other public datasets (openqa, longalpaca, flickr8k, etc.) have their own prompts
+            datasets_with_token_params = ['random', 'random_vl']
+            use_token_params = dataset in datasets_with_token_params
+
             # Create appropriate script content based on dataset type
             if dataset == 'custom' and local_dataset_path:
                 # Use dataset_path for custom datasets
@@ -3112,6 +3140,19 @@ except Exception as e:
 '''
             else:
                 # Use standard dataset parameter for non-custom datasets
+                # Build token params string only for random/random_vl datasets
+                if use_token_params:
+                    token_params_str = f"""min_tokens={min_tokens},
+        max_tokens={max_tokens},
+        prefix_length={prefix_length},
+        min_prompt_length={min_prompt_length},
+        max_prompt_length={max_prompt_length},
+        extra_args={{'ignore_eos': True}},
+        """
+                else:
+                    # Public datasets (openqa, longalpaca, flickr8k, etc.) use their own prompts
+                    token_params_str = ""
+
                 script_content = f'''#!/usr/bin/env python
 import sys
 import json
@@ -3131,13 +3172,7 @@ try:
         url='{api_url}',
         api='openai',
         dataset='{dataset}',
-        min_tokens={min_tokens},
-        max_tokens={max_tokens},
-        prefix_length={prefix_length},
-        min_prompt_length={min_prompt_length},
-        max_prompt_length={max_prompt_length},
-        extra_args={{'ignore_eos': True}},
-        tokenizer_path='{tokenizer_path}',
+        {token_params_str}tokenizer_path='{tokenizer_path}',
         temperature={temperature},
         outputs_dir='{output_dir}',
         stream=True,
@@ -3160,22 +3195,22 @@ except Exception as e:
     traceback.print_exc()
     sys.exit(1)
 '''
-            
+
             script_path = f"{output_dir}/run_evalscope.py"
             with open(script_path, 'w', encoding='utf-8') as f:
                 f.write(script_content)
-            
-            logger.info(f"[DEBUG] Custom API Evalscope execution script written to: {script_path}")
-            
+
+            logger.info(f"[DEBUG] SageMaker Evalscope execution script written to: {script_path}")
+
             # Run evalscope in subprocess with conda environment
             env = os.environ.copy()
             cmd = [
                 '/bin/bash', '-c',
                 f'source /home/ubuntu/anaconda3/etc/profile.d/conda.sh && conda activate evalscope && python {script_path}'
             ]
-            
-            logger.info(f"Executing custom API evalscope command in subprocess...")
-            
+
+            logger.info(f"Executing SageMaker evalscope command in subprocess...")
+
             # Calculate timeout based on cartesian product (evalscope runs all combinations)
             num_combinations = len(num_requests_list) * len(concurrency_list)
             base_timeout = 1200  # 20 minutes per combination

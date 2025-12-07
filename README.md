@@ -165,6 +165,7 @@ cd frontend && npm start
 
 **3. Performance Testing (性能评测)**
 - Stress testing with configurable parameters
+- Support random/random_vl datasets, some open datasets and custom dataset, for custom dataset, prepare it using jsonl format with each line having at least the prompt keyword: {"prompt": "Tell me a joke."}
 - Throughput and latency benchmarking
 - Concurrent request simulation
 - Performance metrics collection
