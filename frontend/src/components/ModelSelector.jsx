@@ -11,7 +11,7 @@ const modelGroups = [
     ]
   },
   {
-    label: '本地开源模型 (EMD)',
+    label: '本地开源模型 (EC2)',
     options: [
       { label: 'Qwen2-VL-7B-Instruct', value: 'qwen2-vl-7b' },
       { label: 'Qwen2.5-VL-7B-Instruct', value: 'qwen2.5-vl-7b' },
