@@ -24,9 +24,39 @@ async def lifespan(app: FastAPI):
     """Application lifespan events."""
     # Startup
     logger.info("🚀 Application starting up...")
+
+    # Start launch reconciler if enabled
+    reconciler = None
+    try:
+        from services.launch_reconciler import LaunchReconciler
+        from services.launch_service import LaunchService
+
+        config = get_config()
+        reconciler_enabled = config.get('launch.reconciler.enabled', True)
+        if reconciler_enabled:
+            launch_service = LaunchService()
+            reconciler = LaunchReconciler(
+                launch_service=launch_service,
+                interval_seconds=config.get('launch.reconciler.interval_seconds', 30)
+            )
+            reconciler.start_background_thread()
+            logger.info("✅ Launch reconciler started")
+        else:
+            logger.info("⏸️ Launch reconciler disabled")
+
+    except Exception as e:
+        logger.warning(f"Failed to start launch reconciler: {e}")
+
     yield
+
     # Shutdown
     logger.info("🛑 Application shutting down...")
+    if reconciler:
+        try:
+            reconciler.stop()
+            logger.info("✅ Launch reconciler stopped")
+        except Exception as e:
+            logger.warning(f"Error stopping reconciler: {e}")
 
 
 def create_app(environment: str = None) -> FastAPI:

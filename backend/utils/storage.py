@@ -282,7 +282,29 @@ class DatabaseManager:
                     completed_at TIMESTAMP
                 )
             """)
-            
+
+            # Launch jobs table for unified deployment tracking
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS launch_jobs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    job_id TEXT UNIQUE NOT NULL,
+                    method TEXT NOT NULL,
+                    model_key TEXT NOT NULL,
+                    engine TEXT,
+                    status TEXT NOT NULL,
+                    params TEXT,
+                    endpoint_url TEXT,
+                    deployment_id TEXT,
+                    error_message TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    started_at TIMESTAMP,
+                    completed_at TIMESTAMP,
+                    user_id TEXT,
+                    metadata TEXT
+                )
+            """)
+
             conn.commit()
     
     def update_deployment_status(self, model_key: str, status: str, 
@@ -345,11 +367,163 @@ class DatabaseManager:
             cursor = conn.cursor()
             
             cursor.execute("""
-                SELECT * FROM model_deployments 
+                SELECT * FROM model_deployments
                 WHERE model_key = ?
                 ORDER BY updated_at DESC
                 LIMIT 1
             """, (model_key,))
-            
+
             row = cursor.fetchone()
             return dict(row) if row else None
+
+    def create_launch_job(self, job_id: str, method: str, model_key: str,
+                         engine: str, params: Dict[str, Any], user_id: str = None) -> None:
+        """Create a new launch job record.
+
+        Args:
+            job_id: Unique job identifier
+            method: Launch method (SAGEMAKER_ENDPOINT, HYPERPOD, EKS, EC2)
+            model_key: Model to launch
+            engine: Inference engine (vllm, sglang, etc.)
+            params: Method-specific parameters as JSON
+            user_id: User identifier (optional)
+        """
+        params_json = json.dumps(params, ensure_ascii=False)
+
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO launch_jobs
+                (job_id, method, model_key, engine, status, params, user_id)
+                VALUES (?, ?, ?, ?, 'queued', ?, ?)
+            """, (job_id, method, model_key, engine, params_json, user_id))
+            conn.commit()
+
+    def update_launch_job(self, job_id: str, **fields) -> None:
+        """Update launch job fields.
+
+        Args:
+            job_id: Job identifier
+            **fields: Fields to update
+        """
+        if not fields:
+            return
+
+        # Convert dict fields to JSON
+        json_fields = ['params', 'metadata']
+        for field in json_fields:
+            if field in fields and isinstance(fields[field], dict):
+                fields[field] = json.dumps(fields[field], ensure_ascii=False)
+
+        # Build dynamic update query
+        set_clauses = []
+        values = []
+        for key, value in fields.items():
+            set_clauses.append(f"{key} = ?")
+            values.append(value)
+
+        values.append(job_id)
+
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(f"""
+                UPDATE launch_jobs
+                SET {', '.join(set_clauses)}, updated_at = CURRENT_TIMESTAMP
+                WHERE job_id = ?
+            """, values)
+            conn.commit()
+
+    def get_launch_job(self, job_id: str) -> Optional[Dict[str, Any]]:
+        """Get launch job by ID.
+
+        Args:
+            job_id: Job identifier
+
+        Returns:
+            Launch job dictionary or None
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT * FROM launch_jobs WHERE job_id = ?
+            """, (job_id,))
+
+            row = cursor.fetchone()
+            if not row:
+                return None
+
+            data = dict(row)
+
+            # Parse JSON fields
+            for field in ['params', 'metadata']:
+                if data.get(field):
+                    try:
+                        data[field] = json.loads(data[field])
+                    except json.JSONDecodeError:
+                        data[field] = {}
+
+            return data
+
+    def list_launch_jobs(self, filters: Dict[str, Any] = None,
+                        limit: int = 50, offset: int = 0) -> List[Dict[str, Any]]:
+        """List launch jobs with optional filtering.
+
+        Args:
+            filters: Optional filters (method, status, model_key, user_id)
+            limit: Maximum number of results
+            offset: Number of results to skip
+
+        Returns:
+            List of launch job dictionaries
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+
+            query = "SELECT * FROM launch_jobs"
+            params = []
+            clauses = []
+
+            if filters:
+                for key, value in filters.items():
+                    if value is not None:
+                        clauses.append(f"{key} = ?")
+                        params.append(value)
+
+            if clauses:
+                query += " WHERE " + " AND ".join(clauses)
+
+            query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+            params.extend([limit, offset])
+
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+
+            jobs = []
+            for row in rows:
+                data = dict(row)
+
+                # Parse JSON fields
+                for field in ['params', 'metadata']:
+                    if data.get(field):
+                        try:
+                            data[field] = json.loads(data[field])
+                        except json.JSONDecodeError:
+                            data[field] = {}
+
+                jobs.append(data)
+
+            return jobs
+
+    def get_launch_jobs_by_model(self, model_key: str) -> List[Dict[str, Any]]:
+        """Get all launch jobs for a specific model.
+
+        Args:
+            model_key: Model identifier
+
+        Returns:
+            List of launch job dictionaries ordered by creation time (desc)
+        """
+        return self.list_launch_jobs(filters={'model_key': model_key})
