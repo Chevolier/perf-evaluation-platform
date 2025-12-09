@@ -1182,12 +1182,15 @@ except Exception as e:
             self._update_session(session_id, {
                 "current_message": "正在执行evalscope基准测试..."
             })
-            
+
+            # Path to venv activate script
+            venv_path = os.path.join(backend_dir, '.venv', 'bin', 'activate')
+
             # Run evalscope in subprocess with conda environment
             env = os.environ.copy()
             cmd = [
                 '/bin/bash', '-c',
-                f'source /home/ubuntu/anaconda3/etc/profile.d/conda.sh && conda activate evalscope && python {script_path}'
+                f'source {venv_path} && python {script_path}'
             ]
             
             logger.info(f"Executing evalscope command in subprocess...")
@@ -2564,12 +2567,15 @@ except Exception as e:
                 f.write(script_content)
 
             logger.info(f"[DEBUG] Custom API Evalscope execution script written to: {script_path}")
-            
+
+            # Path to venv activate script
+            venv_path = os.path.join(backend_dir, '.venv', 'bin', 'activate')
+
             # Run evalscope in subprocess with conda environment
             env = os.environ.copy()
             cmd = [
                 '/bin/bash', '-c',
-                f'source /home/ubuntu/anaconda3/etc/profile.d/conda.sh && conda activate evalscope && python {script_path}'
+                f'source {venv_path} && python {script_path}'
             ]
             
             logger.info(f"Executing custom API evalscope command in subprocess...")
@@ -3202,11 +3208,14 @@ except Exception as e:
 
             logger.info(f"[DEBUG] SageMaker Evalscope execution script written to: {script_path}")
 
+            # Path to venv activate script
+            venv_path = os.path.join(backend_dir, '.venv', 'bin', 'activate')
+
             # Run evalscope in subprocess with conda environment
             env = os.environ.copy()
             cmd = [
                 '/bin/bash', '-c',
-                f'source /home/ubuntu/anaconda3/etc/profile.d/conda.sh && conda activate evalscope && python {script_path}'
+                f'source {venv_path} && python {script_path}'
             ]
 
             logger.info(f"Executing SageMaker evalscope command in subprocess...")
