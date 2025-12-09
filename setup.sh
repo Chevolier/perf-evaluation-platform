@@ -69,8 +69,22 @@ node_version=$(node --version 2>&1)
 if [[ $? -eq 0 ]]; then
     echo "✓ Node.js found: $node_version"
 else
-    echo "❌ Node.js not found. Please install Node.js 16+"
-    exit 1
+    echo "❌ Node.js not found. Install Node.js 16+"
+    # Download and install nvm:
+    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+
+    # in lieu of restarting the shell
+    \. "$HOME/.nvm/nvm.sh"
+
+    # Download and install Node.js:
+    nvm install 24
+
+    # Verify the Node.js version:
+    node -v # Should print "v24.11.1".
+
+    # Verify npm version:
+    npm -v # Should print "11.6.2".
+    # exit 1
 fi
 
 cd ../frontend
