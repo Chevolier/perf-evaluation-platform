@@ -14,35 +14,54 @@ A comprehensive platform for model (LLMs, VLMs, etc.) deployment and performance
 ## 🏗️ Architecture
 
 ```
-├── backend/                    # Modular Flask API server
-│   ├── app.py                  # Flask application factory
+├── backend/                    # Modular FastAPI API server
+│   ├── app.py                  # FastAPI application factory
 │   ├── api/                    # API layer
-│   │   └── routes/            # Route blueprints
-│   │       ├── model_routes.py      # Model management
-│   │       ├── inference_routes.py  # Inference operations
-│   │       ├── stress_test_routes.py # Performance testing
-│   │       └── results_routes.py    # Results management
+│   │   └── routes/             # Route blueprints
+│   │       ├── model_routes.py       # Model management & deployment
+│   │       ├── inference_routes.py   # Inference operations
+│   │       ├── stress_test_routes.py # Performance testing APIs
+│   │       └── results_routes.py     # Results management & export
 │   ├── services/               # Business logic layer
-│   │   ├── model_service.py         # Model deployment & status
-│   │   ├── inference_service.py     # Multi-model inference
-│   │   └── stress_test_service.py   # Performance testing
+│   │   ├── model_service.py          # Model deployment & status
+│   │   ├── inference_service.py      # Multi-model inference
+│   │   └── stress_test_service.py    # Stress testing orchestration
 │   ├── core/                   # Core functionality
-│   │   └── models/            # Model definitions & registry
+│   │   ├── models/             # Model definitions & registry
+│   │   │   ├── model_registry.py     # Model configuration registry
+│   │   │   └── bedrock_models.py     # Bedrock model definitions
+│   │   └── clients/            # API clients
 │   ├── config/                 # Configuration management
-│   └── utils/                  # Utilities & logging
+│   │   ├── config_manager.py         # Config loading & management
+│   │   ├── settings.py               # Application settings
+│   │   └── environments/             # Environment-specific configs
+│   ├── utils/                  # Utilities
+│   │   ├── logging_config.py         # Logging configuration
+│   │   ├── storage.py                # File storage utilities
+│   │   ├── helpers.py                # General helpers
+│   │   └── image_processing.py       # Image processing utils
+│   ├── evalscope/              # Evaluation framework integration
+│   └── data/                   # Backend data storage
 ├── frontend/                   # React web application
-│   ├── src/
-│   │   ├── pages/             # Main application pages
-│   │   │   ├── ModelHubPage.jsx     # Model deployment interface
-│   │   │   ├── PlaygroundPage.jsx   # Interactive inference
-│   │   │   ├── StressTestPage.jsx   # Performance testing
-│   │   │   └── VisualizationPage.jsx # Results visualization
-│   │   ├── components/        # Reusable UI components
-│   │   └── App.js             # Main application shell
-│   └── package.json           # Node.js dependencies
-├── scripts/                    # Setup and utility scripts
+│   └── src/
+│       ├── pages/              # Main application pages
+│       │   ├── ModelHubPage.jsx      # Model deployment interface
+│       │   ├── PlaygroundPage.jsx    # Interactive inference testing
+│       │   ├── StressTestPage.jsx    # Performance stress testing
+│       │   └── VisualizationPage.jsx # Results visualization
+│       ├── components/         # Reusable UI components
+│       │   ├── PlaygroundModelSelector.jsx  # Model selection UI
+│       │   ├── PlaygroundResultsDisplay.jsx # Results display
+│       │   ├── ModelSelector.jsx            # Generic model selector
+│       │   └── ...                          # Other components
+│       └── App.js              # Main application shell & routing
+├── outputs/                    # Test results & session data
+├── data/                       # Datasets & data files
 ├── tests/                      # Test suites
-└── requirements.txt            # Python dependencies
+├── docs/                       # Documentation & images
+├── setup.sh                    # Environment setup script
+├── start.sh                    # Application start script
+└── requirements.txt            # Root Python dependencies
 ```
 
 ## 🚀 Quick Start
@@ -64,14 +83,7 @@ Recommended instance g5.2xlarge.
 
 If the environments are not configured, it will automatically install backend and frontend packages, then start the service. If the environments are already setup, it will directly start the service.
 
-If you need to update the environments, you can run 
-```bash
-./setup.sh
-```
-then run 
-```bash
-./start.sh
-```
+If you need to update the environments, you can run setup first `./setup.sh`, then run `./start.sh`
 
 ### Manual Setup
 
