@@ -72,8 +72,6 @@ A comprehensive platform for model (LLMs, VLMs, etc.) deployment and performance
 - Node.js 16+ 
 - AWS credentials configured
 
-Recommended instance g5.2xlarge.
-
 ### Automated Setup (Recommended)
 
 ```bash
@@ -251,6 +249,6 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - Open an issue with detailed requirements
 - Include use cases and expected behavior
 
----
+## 🙏 Acknowledgment
 
-**🚀 Built for enterprise-scale model performance evaluation and deployment**
+We reused the codes from [evalscope](https://github.com/modelscope/evalscope) for stress testing.
