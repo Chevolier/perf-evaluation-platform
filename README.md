@@ -2,67 +2,49 @@
 
 A comprehensive platform for model (LLMs, VLMs, etc.) deployment and performance evaluation. Supports 1-click deployment of various models on EC2 using vLLM, SGLang, plus comprehensive performance testing and visualization.
 
-## ✨ Features
+## 📖 Platform Overview
 
-- **Model Deployment**: Deploy and manage models with real-time status tracking
-- **Interactive Playground**: Multi-model comparison with streaming inference
-- **Performance Testing**: Stress testing and throughput benchmarking
-- **Result Visualization**: Charts and analytics for performance metrics
-- **Multimodal Support**: Text, image, and video processing capabilities
-- **Enterprise Architecture**: Modular backend with service layer architecture
+The platform contains the following 4 core modules.
 
-## 🏗️ Architecture
+### 1. Model Deployment (模型部署)
+- Deploy models to AWS infrastructure (EC2)
+- Support for multiple instance types (g5.xlarge, g6e.xlarge, etc.) and inference engines (vllm, sglang)
+- Real-time deployment status monitoring
 
-```
-├── backend/                    # Modular FastAPI API server
-│   ├── app.py                  # FastAPI application factory
-│   ├── api/                    # API layer
-│   │   └── routes/             # Route blueprints
-│   │       ├── model_routes.py       # Model management & deployment
-│   │       ├── inference_routes.py   # Inference operations
-│   │       ├── stress_test_routes.py # Performance testing APIs
-│   │       └── results_routes.py     # Results management & export
-│   ├── services/               # Business logic layer
-│   │   ├── model_service.py          # Model deployment & status
-│   │   ├── inference_service.py      # Multi-model inference
-│   │   └── stress_test_service.py    # Stress testing orchestration
-│   ├── core/                   # Core functionality
-│   │   ├── models/             # Model definitions & registry
-│   │   │   ├── model_registry.py     # Model configuration registry
-│   │   │   └── bedrock_models.py     # Bedrock model definitions
-│   │   └── clients/            # API clients
-│   ├── config/                 # Configuration management
-│   │   ├── config_manager.py         # Config loading & management
-│   │   ├── settings.py               # Application settings
-│   │   └── environments/             # Environment-specific configs
-│   ├── utils/                  # Utilities
-│   │   ├── logging_config.py         # Logging configuration
-│   │   ├── storage.py                # File storage utilities
-│   │   ├── helpers.py                # General helpers
-│   │   └── image_processing.py       # Image processing utils
-│   ├── evalscope/              # Evaluation framework integration
-│   └── data/                   # Backend data storage
-├── frontend/                   # React web application
-│   └── src/
-│       ├── pages/              # Main application pages
-│       │   ├── ModelHubPage.jsx      # Model deployment interface
-│       │   ├── PlaygroundPage.jsx    # Interactive inference testing
-│       │   ├── StressTestPage.jsx    # Performance stress testing
-│       │   └── VisualizationPage.jsx # Results visualization
-│       ├── components/         # Reusable UI components
-│       │   ├── PlaygroundModelSelector.jsx  # Model selection UI
-│       │   ├── PlaygroundResultsDisplay.jsx # Results display
-│       │   ├── ModelSelector.jsx            # Generic model selector
-│       │   └── ...                          # Other components
-│       └── App.js              # Main application shell & routing
-├── outputs/                    # Test results & session data
-├── data/                       # Datasets & data files
-├── tests/                      # Test suites
-├── docs/                       # Documentation & images
-├── setup.sh                    # Environment setup script
-├── start.sh                    # Application start script
-└── requirements.txt            # Root Python dependencies
-```
+<img src="docs/images/Deployment.png" 
+     alt="Model Deployment (模型部署)" 
+     width="800">
+
+### 2. Interactive Playground (在线体验)
+- Test the connectivity to the deployed model
+- Multimodal input support (text, images)
+- Real-time response generation (to come)
+
+<img src="docs/images/Playground.png" 
+     alt="Plaground (在线体验)" 
+     width="800">
+
+### 3. Performance Testing (性能评测)
+- Stress testing with configurable parameters
+- Support random/random_vl datasets, some open datasets and custom dataset, for custom dataset, prepare it using jsonl format with each line having at least the prompt keyword: {"prompt": "Tell me a joke."}
+- Throughput and latency benchmarking
+- Concurrent request simulation
+- Performance metrics collection
+
+<img src="docs/images/StressTest.png" 
+     alt="Stress Test (性能评测)" 
+     width="800">
+
+### 4. Result Visualization (结果展示)
+- Performance charts and analytics
+- Model comparison dashboards
+- Historical trend analysis
+- Export capabilities
+
+<img src="docs/images/Visualization.png" 
+     alt="Visualization (结果展示)" 
+     width="800">
+
 
 ## 🚀 Quick Start
 
@@ -157,49 +139,6 @@ cd frontend && npm start
 - **Health Check**: http://localhost:5000/health
 
 Similarly, open the frontend url in your browser would see the platform.
-
-## 📖 Platform Overview
-
-### Core Modules
-
-**1. Model Deployment (模型部署)**
-- Deploy models to AWS infrastructure (EC2)
-- Support for multiple instance types (g5.xlarge, g6e.xlarge, etc.) and inference engines (vllm, sglang)
-- Real-time deployment status monitoring
-
-<img src="docs/images/Deployment.png" 
-     alt="Model Deployment (模型部署)" 
-     width="800">
-
-**2. Interactive Playground (在线体验)**
-- Test the connectivity to the deployed model
-- Multimodal input support (text, images)
-- Real-time response generation (to come)
-
-<img src="docs/images/Playground.png" 
-     alt="Plaground (在线体验)" 
-     width="800">
-
-**3. Performance Testing (性能评测)**
-- Stress testing with configurable parameters
-- Support random/random_vl datasets, some open datasets and custom dataset, for custom dataset, prepare it using jsonl format with each line having at least the prompt keyword: {"prompt": "Tell me a joke."}
-- Throughput and latency benchmarking
-- Concurrent request simulation
-- Performance metrics collection
-
-<img src="docs/images/StressTest.png" 
-     alt="Stress Test (性能评测)" 
-     width="800">
-
-**4. Result Visualization (结果展示)**
-- Performance charts and analytics
-- Model comparison dashboards
-- Historical trend analysis
-- Export capabilities
-
-<img src="docs/images/Visualization.png" 
-     alt="Visualization (结果展示)" 
-     width="800">
 
 ### System Requirements
 
