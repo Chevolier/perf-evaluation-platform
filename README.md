@@ -4,7 +4,7 @@ A comprehensive platform for model (LLMs, VLMs, etc.) deployment and performance
 
 ## ✨ Features
 
-- **Model Hub**: Deploy and manage models with real-time status tracking
+- **Model Deployment**: Deploy and manage models with real-time status tracking
 - **Interactive Playground**: Multi-model comparison with streaming inference
 - **Performance Testing**: Stress testing and throughput benchmarking
 - **Result Visualization**: Charts and analytics for performance metrics
