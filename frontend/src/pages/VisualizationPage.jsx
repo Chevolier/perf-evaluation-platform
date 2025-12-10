@@ -413,15 +413,21 @@ const VisualizationPage = () => {
           const outputPricingPerMillionTokens = timeForMillionTokensHours * hourlyPrice;
 
           // Add data points for the 8 specific metrics requested
+          // Format values with appropriate decimal digits:
+          // - RPS: 2 decimal digits
+          // - Throughput: integers
+          // - Latency: 3 decimal digits
+          // - TTFT/TPOT/ITL: 1 decimal digit (in ms)
+          // - Pricing: 3 decimal digits
           const metrics = [
-            { name: 'Request throughput (req/s)', value: row.RPS_req_s },
-            { name: 'Output token throughput (tok/s)', value: row.Gen_Throughput_tok_s },
-            { name: 'Total token throughput (tok/s)', value: row.Total_Throughput_tok_s },
-            { name: 'Average latency (s)', value: row.Avg_Latency_s },
-            { name: 'Average time to first token (s)', value: row.Avg_TTFT_s },
-            { name: 'Average time per output token (s)', value: row.Avg_TPOT_s },
-            { name: 'Average inter-token latency (s)', value: row.Avg_ITL_s },
-            { name: 'Output pricing per million tokens ($)', value: outputPricingPerMillionTokens }
+            { name: 'Request throughput (req/s)', value: parseFloat((row.RPS_req_s || 0).toFixed(2)) },
+            { name: 'Output token throughput (tok/s)', value: Math.round(row.Gen_Throughput_tok_s || 0) },
+            { name: 'Total token throughput (tok/s)', value: Math.round(row.Total_Throughput_tok_s || 0) },
+            { name: 'Average latency (s)', value: parseFloat((row.Avg_Latency_s || 0).toFixed(3)) },
+            { name: 'Average time to first token (ms)', value: parseFloat(((row.Avg_TTFT_s || 0) * 1000).toFixed(1)) },
+            { name: 'Average time per output token (ms)', value: parseFloat(((row.Avg_TPOT_s || 0) * 1000).toFixed(1)) },
+            { name: 'Average inter-token latency (ms)', value: parseFloat(((row.Avg_ITL_s || 0) * 1000).toFixed(1)) },
+            { name: 'Output pricing per million tokens ($)', value: parseFloat(outputPricingPerMillionTokens.toFixed(3)) }
           ];
           
           metrics.forEach(metric => {
@@ -467,8 +473,11 @@ const VisualizationPage = () => {
     if (metric === 'Output token throughput (tok/s)' || metric === 'Total token throughput (tok/s)') {
       return 'tok/s';
     }
-    if (metric === 'Average latency (s)' || metric === 'Average time to first token (s)' || metric === 'Average time per output token (s)' || metric === 'Average inter-token latency (s)') {
+    if (metric === 'Average latency (s)') {
       return 'seconds';
+    }
+    if (metric === 'Average time to first token (ms)' || metric === 'Average time per output token (ms)' || metric === 'Average inter-token latency (ms)') {
+      return 'ms';
     }
     if (metric === 'Output pricing per million tokens ($)') {
       return 'USD per 1M tokens';
@@ -514,9 +523,9 @@ const VisualizationPage = () => {
         'Output token throughput (tok/s)',
         'Total token throughput (tok/s)',
         'Average latency (s)',
-        'Average time to first token (s)',
-        'Average time per output token (s)',
-        'Average inter-token latency (s)',
+        'Average time to first token (ms)',
+        'Average time per output token (ms)',
+        'Average inter-token latency (ms)',
         'Output pricing per million tokens ($)'
       ];
 
@@ -572,9 +581,9 @@ const VisualizationPage = () => {
                 <th>Gen Throughput (tok/s)</th>
                 <th>Total Throughput (tok/s)</th>
                 <th>Avg Latency (s)</th>
-                <th>Avg TTFT (s)</th>
-                <th>Avg TPOT (s)</th>
-                <th>Avg ITL (s)</th>
+                <th>Avg TTFT (ms)</th>
+                <th>Avg TPOT (ms)</th>
+                <th>Avg ITL (ms)</th>
                 <th>Cost/1M Tokens ($)</th>
               </tr>
             </thead>
@@ -590,12 +599,12 @@ const VisualizationPage = () => {
                   <tr>
                     <td>${row.Concurrency || 0}</td>
                     <td>${(row.RPS_req_s || 0).toFixed(2)}</td>
-                    <td>${(row.Gen_Throughput_tok_s || 0).toFixed(2)}</td>
-                    <td>${(row.Total_Throughput_tok_s || 0).toFixed(2)}</td>
+                    <td>${Math.round(row.Gen_Throughput_tok_s || 0)}</td>
+                    <td>${Math.round(row.Total_Throughput_tok_s || 0)}</td>
                     <td>${(row.Avg_Latency_s || 0).toFixed(3)}</td>
-                    <td>${(row.Avg_TTFT_s || 0).toFixed(3)}</td>
-                    <td>${(row.Avg_TPOT_s || 0).toFixed(4)}</td>
-                    <td>${(row.Avg_ITL_s || row.Avg_TPOT_s || 0).toFixed(4)}</td>
+                    <td>${((row.Avg_TTFT_s || 0) * 1000).toFixed(1)}</td>
+                    <td>${((row.Avg_TPOT_s || 0) * 1000).toFixed(1)}</td>
+                    <td>${((row.Avg_ITL_s || row.Avg_TPOT_s || 0) * 1000).toFixed(1)}</td>
                     <td>$${outputPricingPerMillionTokens.toFixed(3)}</td>
                   </tr>
                 `;
@@ -1039,9 +1048,9 @@ const VisualizationPage = () => {
       'Output token throughput (tok/s)',
       'Total token throughput (tok/s)',
       'Average latency (s)',
-      'Average time to first token (s)',
-      'Average time per output token (s)',
-      'Average inter-token latency (s)',
+      'Average time to first token (ms)',
+      'Average time per output token (ms)',
+      'Average inter-token latency (ms)',
       'Output pricing per million tokens ($)'
     ];
 
