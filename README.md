@@ -142,26 +142,25 @@ cd frontend && npm start
 
 ## 📖 Platform Overview
 
-### The frontend has 4 pages:
-1. 模型部署: Supports 1-click model deployment on local EC2, supports selecting among different instances like g5.xlarge, g6e.xlarge, p4d.xlarge, etc., different inference frameworks like vllm, sglang.
-2. 在线体验: Supports three ways to test the model: a. If you deployed the model using step 1, you'll find the model in the list, and you can choose the model to test. b. If you deployed a model manually, you can input your OpenAI-compatible api url and model name and test it directly. c. If you deploy using SageMaker Endpoint, you can input your Endpoint name and model name.  
-3. 性能评测: Similarly, you can stress test on both the deployed model on this platform and manually-deployed model elsewhere by inputting your api url and model name. After stress test, you can click the button download to download the detailed evaluation results.
-4. 结果展示: You can select your previous results and compare them together. You can also click the download button to download a html file of the comparison results.
-
-
 ### Core Modules
 
-**1. Model Hub (模型部署)**
-- Deploy EMD models to AWS infrastructure
+**1. Model Deployment (模型部署)**
+- Deploy models to AWS infrastructure (EC2)
+- Support for multiple instance types (g5.xlarge, g6e.xlarge, etc.) and inference engines (vllm, sglang)
 - Real-time deployment status monitoring
-- Support for multiple instance types and inference engines
-- Batch deployment and management
+
+<img src="docs/images/Deployment.png" 
+     alt="Model Deployment (模型部署)" 
+     width="800">
 
 **2. Interactive Playground (在线体验)**
-- Multi-model inference comparison
-- Streaming and batch processing modes
-- Multimodal input support (text, images, video)
-- Real-time response generation
+- Test the connectivity to the deployed model
+- Multimodal input support (text, images)
+- Real-time response generation (to come)
+
+<img src="docs/images/Playground.png" 
+     alt="Plaground (在线体验)" 
+     width="800">
 
 **3. Performance Testing (性能评测)**
 - Stress testing with configurable parameters
@@ -170,31 +169,25 @@ cd frontend && npm start
 - Concurrent request simulation
 - Performance metrics collection
 
+<img src="docs/images/StressTest.png" 
+     alt="Stress Test (性能评测)" 
+     width="800">
+
 **4. Result Visualization (结果展示)**
 - Performance charts and analytics
 - Model comparison dashboards
 - Historical trend analysis
 - Export capabilities
 
-### Supported Models
-
-**EC2 Local Models** :
-- Qwen2-VL-7B-Instruct
-- Qwen2.5-VL-32B-Instruct  
-- Qwen-8B
-
-**AWS Bedrock Models** (API-based):
-- Claude 4
-- Nova
-
-### Media Processing
-
-- **Images**: PNG, JPEG, GIF, WebP
-- **Videos**: MP4, AVI, MOV (automatic frame extraction)
-- **Text**: Full Unicode support with context handling
-
+<img src="docs/images/Visualization.png" 
+     alt="Visualization (结果展示)" 
+     width="800">
 
 ### System Requirements
+
+1. To deploy an model in the same instance, then select the appropriate EC2 instance based on the model, for instance, to deploy Qwen3-8B, select an instance with GPU memory >= 24 GB, like g5.xlarge.
+
+2. If only use the platform for test, models are deployed elsewhere, then the following requirements are enough, e.g., m5.2xlarge.
 
 - **Minimum**: 8GB RAM, 4 CPU cores
 - **Recommended**: 16GB RAM, 8 CPU cores
@@ -233,7 +226,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 **For Technical Issues:**
 - Check the troubleshooting section above
-- Review logs in `logs/development.log`
+- Review logs in `logs/backend.log`, `logs/frontend.log`, `backend/logs/development.log`
 - Test system health with provided test scripts
 
 **For Feature Requests:**
