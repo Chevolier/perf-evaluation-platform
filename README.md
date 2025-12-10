@@ -214,7 +214,7 @@ Similarly, open the frontend url in your browser would see the platform.
 - **Storage**: 50GB free space for model deployments
 - **Network**: Stable internet for AWS API calls
 
-## TODOs
+## 📋 TODOs
 - [ ] Streaming Output in Playground Page
 - [ ] Support of SageMaker Endpoint VLM models
 - [ ] Support of evaluations of LLM/VLM models on various benchmarks
