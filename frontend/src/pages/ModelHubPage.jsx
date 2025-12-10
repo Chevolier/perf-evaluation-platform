@@ -804,6 +804,7 @@ const ModelHubPage = () => {
                       options={[
                         { value: 'vllm', label: 'vLLM' },
                         { value: 'sglang', label: 'SGLang' },
+                        { value: 'vllm-neuron', label: 'vLLM-Neuron' },
                       ]}
                     />
                   </Form.Item>
@@ -825,6 +826,8 @@ const ModelHubPage = () => {
                         { value: 'p5.48xlarge', label: 'p5.48xlarge (8 A100, 640GB RAM)' },
                         { value: 'p5e.48xlarge', label: 'p5e.48xlarge (8 H100, 1128GB RAM)' },
                         { value: 'p5en.48xlarge', label: 'p5en.48xlarge (8 H100, 1128GB RAM)' },
+                        { value: 'inf2.xlarge', label: 'inf2.xlarge (1 Inf2, 32GB RAM)' },
+                        { value: 'trn2.48xlarge', label: 'trn2.xlarge (16 Inf2, 1.5TB RAM)' },
                       ]}
                     />
                   </Form.Item>
