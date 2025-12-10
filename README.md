@@ -106,20 +106,18 @@ curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
 \. "$HOME/.nvm/nvm.sh"
 
 # Download and install Node.js:
-nvm install 22
+nvm install 24
 
 # Verify the Node.js version:
-node -v # Should print "v22.19.0".
-nvm current # Should print "v22.19.0".
+node -v # Should print "v24.11.1".
 
 # Verify npm version:
-npm -v # Should print "10.9.3".
+npm -v # Should print "11.6.2".
 ```
 
 ```bash
 # Install Node.js dependencies
 cd frontend
-npm install jszip
 npm install
 ```
 
@@ -194,6 +192,11 @@ cd frontend && npm start
 - **Storage**: 50GB free space for model deployments
 - **Network**: Stable internet for AWS API calls
 
+## TODOs
+- [ ] Streaming Output in Playground Page
+- [ ] Support of SageMaker Endpoint VLM models
+- [ ] Support of evaluations of LLM/VLM models on various benchmarks
+
 ## 🔒 Security Best Practices
 
 - Store AWS credentials in environment variables or AWS credentials file
@@ -201,13 +204,6 @@ cd frontend && npm start
 - Enable VPC security groups for deployed models
 - Implement rate limiting for production deployments
 - Regular security updates for all dependencies
-
-## 📈 Performance Optimization
-
-- **Model Deployment**: Use appropriate instance types for workloads
-- **Frontend**: Enable compression and caching for production
-- **Backend**: Configure proper logging levels in production
-- **Database**: Use connection pooling for high-traffic scenarios
 
 ## 🤝 Contributing
 
