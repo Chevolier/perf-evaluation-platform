@@ -1156,13 +1156,19 @@ const StressTestPage = () => {
       }
     };
 
+    // Pre-process latency data (3 decimal digits)
+    const latencyData = chartData.map(row => ({
+      ...row,
+      avg_latency: parseFloat((row.avg_latency || 0).toFixed(3))
+    }));
+
     const latencyConfig = {
-      data: chartData,
+      data: latencyData,
       xField: 'concurrency',
       yField: 'avg_latency',
       smooth: true,
       color: '#fa541c',
-      point: { 
+      point: {
         size: 4,
         shape: 'circle'
       },
@@ -1178,10 +1184,10 @@ const StressTestPage = () => {
       }
     };
 
-    // Convert TTFT data to milliseconds
+    // Convert TTFT data to milliseconds (1 decimal digit)
     const ttftDataMs = chartData.map(row => ({
       ...row,
-      avg_ttft_ms: (row.avg_ttft || 0) * 1000
+      avg_ttft_ms: parseFloat(((row.avg_ttft || 0) * 1000).toFixed(1))
     }));
 
     const ttftConfig = {
@@ -1206,10 +1212,10 @@ const StressTestPage = () => {
       }
     };
 
-    // Convert TPOT data to milliseconds
+    // Convert TPOT data to milliseconds (1 decimal digit)
     const tpotDataMs = chartData.map(row => ({
       ...row,
-      avg_tpot_ms: (row.avg_tpot || 0) * 1000
+      avg_tpot_ms: parseFloat(((row.avg_tpot || 0) * 1000).toFixed(1))
     }));
 
     const tpotConfig = {
@@ -1234,10 +1240,10 @@ const StressTestPage = () => {
       }
     };
 
-    // Convert ITL data to milliseconds
+    // Convert ITL data to milliseconds (1 decimal digit)
     const itlDataMs = chartData.map(row => ({
       ...row,
-      avg_itl_ms: (row.avg_itl || 0) * 1000
+      avg_itl_ms: parseFloat(((row.avg_itl || 0) * 1000).toFixed(1))
     }));
 
     const itlConfig = {
@@ -1262,7 +1268,7 @@ const StressTestPage = () => {
       }
     };
 
-    // Calculate output pricing data
+    // Calculate output pricing data (3 decimal digits)
     const pricingData = chartData.map(row => {
       const outputThroughput = row.gen_toks_per_sec || 0;
       const instanceType = 'g5.2xlarge'; // Default instance type - could be made dynamic
@@ -1274,7 +1280,7 @@ const StressTestPage = () => {
 
       return {
         ...row,
-        pricing: outputPricingPerMillionTokens
+        pricing: parseFloat(outputPricingPerMillionTokens.toFixed(3))
       };
     });
 
