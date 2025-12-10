@@ -1185,15 +1185,15 @@ const StressTestPage = () => {
     };
 
     // Convert TTFT data to milliseconds (1 decimal digit)
-    const ttftDataMs = chartData.map(row => ({
+    const ttftData = chartData.map(row => ({
       ...row,
-      avg_ttft_ms: parseFloat(((row.avg_ttft || 0) * 1000).toFixed(1))
+      avg_ttft: parseFloat(((row.avg_ttft || 0) * 1000).toFixed(1))
     }));
 
     const ttftConfig = {
-      data: ttftDataMs,
+      data: ttftData,
       xField: 'concurrency',
-      yField: 'avg_ttft_ms',
+      yField: 'avg_ttft',
       smooth: true,
       color: '#722ed1',
       point: {
@@ -1213,15 +1213,15 @@ const StressTestPage = () => {
     };
 
     // Convert TPOT data to milliseconds (1 decimal digit)
-    const tpotDataMs = chartData.map(row => ({
+    const tpotData = chartData.map(row => ({
       ...row,
-      avg_tpot_ms: parseFloat(((row.avg_tpot || 0) * 1000).toFixed(1))
+      avg_tpot: parseFloat(((row.avg_tpot || 0) * 1000).toFixed(1))
     }));
 
     const tpotConfig = {
-      data: tpotDataMs,
+      data: tpotData,
       xField: 'concurrency',
-      yField: 'avg_tpot_ms',
+      yField: 'avg_tpot',
       smooth: true,
       color: '#13c2c2',
       point: {
@@ -1241,15 +1241,15 @@ const StressTestPage = () => {
     };
 
     // Convert ITL data to milliseconds (1 decimal digit)
-    const itlDataMs = chartData.map(row => ({
+    const itlData = chartData.map(row => ({
       ...row,
-      avg_itl_ms: parseFloat(((row.avg_itl || 0) * 1000).toFixed(1))
+      avg_itl: parseFloat(((row.avg_itl || 0) * 1000).toFixed(1))
     }));
 
     const itlConfig = {
-      data: itlDataMs,
+      data: itlData,
       xField: 'concurrency',
-      yField: 'avg_itl_ms',
+      yField: 'avg_itl',
       smooth: true,
       color: '#eb2f96',
       point: {
