@@ -1053,7 +1053,7 @@ const StressTestPage = () => {
               <div style={{ textAlign: 'center', padding: '16px', background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: '6px' }}>
                 <Text strong style={{ color: '#52c41a', fontSize: '16px' }}>Highest RPS</Text>
                 <div style={{ fontSize: '14px', marginTop: '8px' }}>
-                  {summary?.best_rps?.config || 'N/A'}
+                  {summary?.best_rps?.config || summary?.best_rps_config || 'N/A'}
                 </div>
               </div>
             </Col>
@@ -1061,7 +1061,7 @@ const StressTestPage = () => {
               <div style={{ textAlign: 'center', padding: '16px', background: '#f0f5ff', border: '1px solid #91d5ff', borderRadius: '6px' }}>
                 <Text strong style={{ color: '#1890ff', fontSize: '16px' }}>Lowest Latency</Text>
                 <div style={{ fontSize: '14px', marginTop: '8px' }}>
-                  {summary?.best_latency?.config || 'N/A'}
+                  {summary?.best_latency?.config || summary?.best_latency_config || 'N/A'}
                 </div>
               </div>
             </Col>
