@@ -947,28 +947,28 @@ const StressTestPage = () => {
         render: (value) => value?.toFixed(0) || 'N/A'
       },
       {
-        title: 'Avg TTFT(s)',
+        title: 'Avg TTFT(ms)',
         dataIndex: 'avg_ttft',
         key: 'avg_ttft',
         width: 100,
         align: 'center',
-        render: (value) => value?.toFixed(3) || 'N/A'
+        render: (value) => value != null ? (value * 1000).toFixed(1) : 'N/A'
       },
       {
-        title: 'Avg TPOT(s)',
+        title: 'Avg TPOT(ms)',
         dataIndex: 'avg_tpot',
         key: 'avg_tpot',
         width: 100,
         align: 'center',
-        render: (value) => value?.toFixed(3) || 'N/A'
+        render: (value) => value != null ? (value * 1000).toFixed(1) : 'N/A'
       },
       {
-        title: 'Avg ITL(s)',
+        title: 'Avg ITL(ms)',
         dataIndex: 'avg_itl',
         key: 'avg_itl',
         width: 100,
         align: 'center',
-        render: (value) => value?.toFixed(3) || 'N/A'
+        render: (value) => value != null ? (value * 1000).toFixed(1) : 'N/A'
       },
       {
         title: 'Success Rate',
@@ -1082,13 +1082,21 @@ const StressTestPage = () => {
     const chartData = [...tableData].sort((a, b) => a.concurrency - b.concurrency);
     console.log('Performance chart data:', chartData);
 
+    // Pre-process data with formatted values for tooltips
+    const formattedChartData = chartData.map(row => ({
+      ...row,
+      rps: parseFloat((row.rps || 0).toFixed(2)),
+      gen_toks: Math.round(row.gen_toks_per_sec || 0),
+      total_toks: Math.round(row.total_toks_per_sec || 0)
+    }));
+
     const rpsConfig = {
-      data: chartData,
+      data: formattedChartData,
       xField: 'concurrency',
       yField: 'rps',
       smooth: true,
       color: '#1890ff',
-      point: { 
+      point: {
         size: 4,
         shape: 'circle'
       },
@@ -1105,12 +1113,12 @@ const StressTestPage = () => {
     };
 
     const genThroughputConfig = {
-      data: chartData,
+      data: formattedChartData,
       xField: 'concurrency',
-      yField: 'gen_toks_per_sec',
+      yField: 'gen_toks',
       smooth: true,
       color: '#52c41a',
-      point: { 
+      point: {
         size: 4,
         shape: 'circle'
       },
@@ -1127,12 +1135,12 @@ const StressTestPage = () => {
     };
 
     const totalThroughputConfig = {
-      data: chartData,
+      data: formattedChartData,
       xField: 'concurrency',
-      yField: 'total_toks_per_sec',
+      yField: 'total_toks',
       smooth: true,
       color: '#389e0d',
-      point: { 
+      point: {
         size: 4,
         shape: 'circle'
       },
@@ -1170,13 +1178,19 @@ const StressTestPage = () => {
       }
     };
 
+    // Convert TTFT data to milliseconds
+    const ttftDataMs = chartData.map(row => ({
+      ...row,
+      avg_ttft_ms: (row.avg_ttft || 0) * 1000
+    }));
+
     const ttftConfig = {
-      data: chartData,
+      data: ttftDataMs,
       xField: 'concurrency',
-      yField: 'avg_ttft',
+      yField: 'avg_ttft_ms',
       smooth: true,
       color: '#722ed1',
-      point: { 
+      point: {
         size: 4,
         shape: 'circle'
       },
@@ -1187,15 +1201,21 @@ const StressTestPage = () => {
       },
       yAxis: {
         title: {
-          text: 'Average TTFT (s)'
+          text: 'TTFT (ms)'
         }
       }
     };
 
+    // Convert TPOT data to milliseconds
+    const tpotDataMs = chartData.map(row => ({
+      ...row,
+      avg_tpot_ms: (row.avg_tpot || 0) * 1000
+    }));
+
     const tpotConfig = {
-      data: chartData,
+      data: tpotDataMs,
       xField: 'concurrency',
-      yField: 'avg_tpot',
+      yField: 'avg_tpot_ms',
       smooth: true,
       color: '#13c2c2',
       point: {
@@ -1209,15 +1229,21 @@ const StressTestPage = () => {
       },
       yAxis: {
         title: {
-          text: 'Average TPOT (s)'
+          text: 'TPOT (ms)'
         }
       }
     };
 
+    // Convert ITL data to milliseconds
+    const itlDataMs = chartData.map(row => ({
+      ...row,
+      avg_itl_ms: (row.avg_itl || 0) * 1000
+    }));
+
     const itlConfig = {
-      data: chartData,
+      data: itlDataMs,
       xField: 'concurrency',
-      yField: 'avg_itl',
+      yField: 'avg_itl_ms',
       smooth: true,
       color: '#eb2f96',
       point: {
@@ -1231,7 +1257,7 @@ const StressTestPage = () => {
       },
       yAxis: {
         title: {
-          text: 'Average ITL (s)'
+          text: 'ITL (ms)'
         }
       }
     };
@@ -1275,53 +1301,53 @@ const StressTestPage = () => {
     };
 
     return (
-      <Card title="Performance Metrics vs Concurrency" size="small">
+      <Card title="Performance Metrics" size="small">
         <Row gutter={[16, 16]}>
           <Col span={12}>
             <div style={{ textAlign: 'center', marginBottom: '16px' }}>
-              <Text strong>RPS vs Concurrency</Text>
+              <Text strong>RPS (req/s)</Text>
             </div>
             <Line {...rpsConfig} height={200} />
           </Col>
           <Col span={12}>
             <div style={{ textAlign: 'center', marginBottom: '16px' }}>
-              <Text strong>Gen. Throughput vs Concurrency</Text>
+              <Text strong>Gen. Throughput (tok/s)</Text>
             </div>
             <Line {...genThroughputConfig} height={200} />
           </Col>
           <Col span={12}>
             <div style={{ textAlign: 'center', marginBottom: '16px' }}>
-              <Text strong>Total Throughput vs Concurrency</Text>
+              <Text strong>Total Throughput (tok/s)</Text>
             </div>
             <Line {...totalThroughputConfig} height={200} />
           </Col>
           <Col span={12}>
             <div style={{ textAlign: 'center', marginBottom: '16px' }}>
-              <Text strong>Average Latency vs Concurrency</Text>
+              <Text strong>Average Latency (s)</Text>
             </div>
             <Line {...latencyConfig} height={200} />
           </Col>
           <Col span={12}>
             <div style={{ textAlign: 'center', marginBottom: '16px' }}>
-              <Text strong>Average TTFT vs Concurrency</Text>
+              <Text strong>Average TTFT (ms)</Text>
             </div>
             <Line {...ttftConfig} height={200} />
           </Col>
           <Col span={12}>
             <div style={{ textAlign: 'center', marginBottom: '16px' }}>
-              <Text strong>Average TPOT vs Concurrency</Text>
+              <Text strong>Average TPOT (ms)</Text>
             </div>
             <Line {...tpotConfig} height={200} />
           </Col>
           <Col span={12}>
             <div style={{ textAlign: 'center', marginBottom: '16px' }}>
-              <Text strong>Average ITL vs Concurrency</Text>
+              <Text strong>Average ITL (ms)</Text>
             </div>
             <Line {...itlConfig} height={200} />
           </Col>
           <Col span={12}>
             <div style={{ textAlign: 'center', marginBottom: '16px' }}>
-              <Text strong>Output Pricing vs Concurrency</Text>
+              <Text strong>Output Pricing ($/1M tok)</Text>
             </div>
             <Line {...pricingConfig} height={200} />
           </Col>
