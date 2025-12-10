@@ -98,7 +98,6 @@ htmlcov/
 # Media files (for testing)
 *.jpg
 *.jpeg
-*.png
 *.gif
 *.mp4
 *.avi
