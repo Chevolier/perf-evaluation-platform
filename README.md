@@ -81,7 +81,7 @@ Recommended instance g5.2xlarge.
 ./start.sh
 ```
 
-If the environments are not configured, it will automatically install backend and frontend packages, then start the service. If the environments are already setup, it will directly start the service. The output of the command would be
+If the environments are not configured, it will automatically install backend and frontend packages, then start the service. If the environments are already setup, it will directly start the service. The output of the command is
 
 ```
 🌐 Platform is starting up...  
