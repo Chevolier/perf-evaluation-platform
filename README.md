@@ -77,7 +77,7 @@ Recommended instance g5.2xlarge.
 ### Automated Setup (Recommended)
 
 ```bash
-# Run the setup script 
+# Automatic setup and service start. 
 ./start.sh
 ```
 
