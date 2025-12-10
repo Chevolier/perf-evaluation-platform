@@ -81,7 +81,16 @@ Recommended instance g5.2xlarge.
 ./start.sh
 ```
 
-If the environments are not configured, it will automatically install backend and frontend packages, then start the service. If the environments are already setup, it will directly start the service.
+If the environments are not configured, it will automatically install backend and frontend packages, then start the service. If the environments are already setup, it will directly start the service. The output of the command would be
+
+```
+🌐 Platform is starting up...  
+🖥️  Frontend: http://localhost:3000  
+📊 Backend: http://localhost:5000  
+📚 API Docs: http://localhost:5000/docs
+```
+
+Then open the frontend url in your browser would see the platform.
 
 If you need to update the environments, you can run setup first `./setup.sh`, then run `./start.sh`
 
@@ -149,6 +158,7 @@ cd frontend && npm start
 - **Backend API**: http://localhost:5000
 - **Health Check**: http://localhost:5000/health
 
+Similarly, open the frontend url in your browser would see the platform.
 
 ## 📖 Platform Overview
 
