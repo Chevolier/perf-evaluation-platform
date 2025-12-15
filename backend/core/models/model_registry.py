@@ -87,27 +87,72 @@ EC2_MODELS = {
 
 
 # Bedrock Models Configuration
+# Model IDs use inference profile IDs with "us." prefix for on-demand throughput
+# Verified from: aws bedrock list-inference-profiles --region us-west-2
 BEDROCK_MODELS = {
+    # Anthropic Claude Models (ordered by capability: Opus > Sonnet > Haiku)
+    "claude-opus-4.5": {
+        "name": "Claude Opus 4.5",
+        "description": "Anthropic Claude Opus 4.5 - Most capable model",
+        "model_id": "us.anthropic.claude-opus-4-5-20251101-v1:0",
+        "supports_multimodal": True,
+        "supports_streaming": True,
+        "max_tokens": 16384
+    },
+    "claude-opus-4.1": {
+        "name": "Claude Opus 4.1",
+        "description": "Anthropic Claude Opus 4.1 - High capability model",
+        "model_id": "us.anthropic.claude-opus-4-1-20250805-v1:0",
+        "supports_multimodal": True,
+        "supports_streaming": True,
+        "max_tokens": 16384
+    },
     "claude-sonnet-4.5": {
         "name": "Claude Sonnet 4.5",
-        "description": "Anthropic Claude Sonnet 4.5",
-        "model_id": "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "description": "Anthropic Claude Sonnet 4.5 - Balanced performance and speed",
+        "model_id": "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "supports_multimodal": True,
+        "supports_streaming": True,
+        "max_tokens": 16384
+    },
+    "claude-sonnet-4": {
+        "name": "Claude Sonnet 4",
+        "description": "Anthropic Claude Sonnet 4 - Balanced performance",
+        "model_id": "us.anthropic.claude-sonnet-4-20250514-v1:0",
         "supports_multimodal": True,
         "supports_streaming": True,
         "max_tokens": 16384
     },
     "claude-haiku-4.5": {
         "name": "Claude Haiku 4.5",
-        "description": "Anthropic Claude Haiku 4.5",
-        "model_id": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "description": "Anthropic Claude Haiku 4.5 - Fast and efficient",
+        "model_id": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
         "supports_multimodal": True,
         "supports_streaming": True,
         "max_tokens": 16384
     },
-    "nova": {
+
+    # Amazon Nova Models
+    "nova-pro": {
+        "name": "Nova Pro",
+        "description": "Amazon Nova Pro - Supports text, image, and video",
+        "model_id": "us.amazon.nova-pro-v1:0",
+        "supports_multimodal": True,
+        "supports_streaming": True,
+        "max_tokens": 16384
+    },
+    "nova-lite": {
+        "name": "Nova Lite",
+        "description": "Amazon Nova Lite - Fast and efficient",
+        "model_id": "us.amazon.nova-lite-v1:0",
+        "supports_multimodal": True,
+        "supports_streaming": True,
+        "max_tokens": 16384
+    },
+    "nova-2-lite": {
         "name": "Nova 2 Lite",
-        "description": "Amazon Nova 2 Lite",
-        "model_id": "global.amazon.nova-2-lite-v1:0",
+        "description": "Amazon Nova 2 Lite - Supports text, image, and video",
+        "model_id": "us.amazon.nova-2-lite-v1:0",
         "supports_multimodal": True,
         "supports_streaming": True,
         "max_tokens": 16384

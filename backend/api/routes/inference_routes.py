@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
-from services.inference_service import InferenceService
+from services.async_inference_service import AsyncInferenceService
 from utils import get_logger
 
 logger = get_logger(__name__)
@@ -48,23 +48,27 @@ class SingleInferenceRequest(BaseModel):
 
 
 @inference_router.post("/multi-inference")
-def multi_inference(data: MultiInferenceRequest):
-    """Run inference on multiple models simultaneously with streaming results."""
+async def multi_inference(data: MultiInferenceRequest):
+    """Run inference on multiple models simultaneously with streaming results.
+
+    Uses async streaming for incremental frontend display.
+    """
     try:
         logger.info(f"Multi-inference request received with data: {data.model_dump()}")
 
-        # Create fresh InferenceService instance to ensure latest code is used
-        inference_service = InferenceService()
+        # Create async inference service for true streaming
+        async_inference_service = AsyncInferenceService()
 
-        # Stream results back to client
-        logger.info("Starting streaming response for multi-inference")
+        # Stream results back to client using async generator
+        logger.info("Starting async streaming response for multi-inference")
         return StreamingResponse(
-            inference_service.multi_inference(data.model_dump()),
+            async_inference_service.multi_inference(data.model_dump()),
             media_type='text/plain',
             headers={
                 'Cache-Control': 'no-cache',
                 'Connection': 'keep-alive',
-                'Access-Control-Allow-Origin': '*'
+                'Access-Control-Allow-Origin': '*',
+                'X-Accel-Buffering': 'no'  # Disable nginx buffering
             }
         )
 
@@ -74,24 +78,31 @@ def multi_inference(data: MultiInferenceRequest):
 
 
 @inference_router.post("/inference")
-def single_inference(data: SingleInferenceRequest):
+async def single_inference(data: SingleInferenceRequest):
     """Run inference on a single model."""
     try:
+        import json
+
         if not data.model:
             raise HTTPException(status_code=400, detail="No model specified")
 
-        # Create fresh InferenceService instance and use multi-inference with single model
-        inference_service = InferenceService()
+        # Create async inference service and collect results
+        async_inference_service = AsyncInferenceService()
         request_data = data.model_dump()
         request_data['models'] = [data.model]
-        results = list(inference_service.multi_inference(request_data))
 
-        # Return the first (and only) result
-        if results:
-            import json
-            return json.loads(results[0])
-        else:
-            raise HTTPException(status_code=500, detail="No results returned")
+        results = []
+        async for chunk in async_inference_service.multi_inference(request_data):
+            results.append(chunk)
+
+        # Return the first result with actual content (skip heartbeats)
+        for result in results:
+            if result.startswith('data: '):
+                parsed = json.loads(result[6:].strip())
+                if parsed.get('status') in ['success', 'error']:
+                    return parsed
+
+        raise HTTPException(status_code=500, detail="No results returned")
 
     except HTTPException:
         raise

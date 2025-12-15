@@ -9,6 +9,23 @@ import {
 
 const { Title, Text } = Typography;
 
+// CSS for blinking cursor animation
+const cursorStyle = document.createElement('style');
+cursorStyle.textContent = `
+  @keyframes blink {
+    0%, 50% { opacity: 1; }
+    51%, 100% { opacity: 0; }
+  }
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+`;
+if (!document.head.querySelector('#streaming-animations')) {
+  cursorStyle.id = 'streaming-animations';
+  document.head.appendChild(cursorStyle);
+}
+
 const PlaygroundResultsDisplay = ({ results, loading }) => {
   const getStatusIcon = (status) => {
     switch (status) {
@@ -21,6 +38,8 @@ const PlaygroundResultsDisplay = ({ results, loading }) => {
       case 'loading':
       case 'processing':
         return <ClockCircleOutlined style={{ color: '#1890ff' }} />;
+      case 'streaming':
+        return <ClockCircleOutlined style={{ color: '#1890ff', animation: 'spin 1s linear infinite' }} />;
       default:
         return <ClockCircleOutlined style={{ color: '#d9d9d9' }} />;
     }
@@ -37,6 +56,8 @@ const PlaygroundResultsDisplay = ({ results, loading }) => {
       case 'loading':
       case 'processing':
         return <Tag color="processing">处理中</Tag>;
+      case 'streaming':
+        return <Tag color="blue">生成中...</Tag>;
       default:
         return <Tag color="default">等待</Tag>;
     }
@@ -235,10 +256,11 @@ const PlaygroundResultsDisplay = ({ results, loading }) => {
         <Card
           key={modelName}
           size="small"
-          style={{ 
+          style={{
             marginBottom: 16,
-            border: result.status === 'success' ? '1px solid #52c41a' : 
-                   result.status === 'error' ? '1px solid #ff4d4f' : '1px solid #d9d9d9'
+            border: result.status === 'success' ? '1px solid #52c41a' :
+                   result.status === 'error' ? '1px solid #ff4d4f' :
+                   result.status === 'streaming' ? '1px solid #1890ff' : '1px solid #d9d9d9'
           }}
           title={
             <Space>
@@ -258,23 +280,33 @@ const PlaygroundResultsDisplay = ({ results, loading }) => {
             </Space>
           }
         >
-          {result.status === 'success' && result.result ? (
+          {(result.status === 'success' || result.status === 'streaming') && result.result ? (
             <div>
               <div
                 style={{
                   marginBottom: 12,
                   maxHeight: '400px',
                   overflowY: 'auto',
-                  backgroundColor: '#fafafa',
+                  backgroundColor: result.status === 'streaming' ? '#f0f7ff' : '#fafafa',
                   padding: '12px',
                   borderRadius: '6px',
-                  border: '1px solid #f0f0f0'
+                  border: result.status === 'streaming' ? '1px solid #91caff' : '1px solid #f0f0f0'
                 }}
               >
                 {renderFormattedContent(formatResponse(result.result))}
+                {result.status === 'streaming' && (
+                  <span style={{
+                    display: 'inline-block',
+                    width: '8px',
+                    height: '16px',
+                    backgroundColor: '#1890ff',
+                    marginLeft: '2px',
+                    animation: 'blink 1s infinite'
+                  }} />
+                )}
               </div>
-              
-              {result.result.usage && (
+
+              {result.status === 'success' && result.result.usage && (
                 <div>
                   <Divider style={{ margin: '8px 0' }} />
                   <Space size="large">
@@ -289,6 +321,11 @@ const PlaygroundResultsDisplay = ({ results, loading }) => {
                     </Text>
                   </Space>
                 </div>
+              )}
+              {result.duration_ms && result.status === 'success' && (
+                <Text type="secondary" style={{ fontSize: '12px', marginLeft: '16px' }}>
+                  响应时间: {result.duration_ms.toFixed(2)}ms
+                </Text>
               )}
             </div>
           ) : result.status === 'error' ? (

@@ -553,12 +553,42 @@ const PlaygroundPage = ({
                 const data = JSON.parse(jsonStr);
                 console.log('✅ Parsed data:', data);
                 
-                if (data.type === 'complete') {
+                if (data.type === 'complete' && !data.model) {
+                  // Global completion signal (no model = all done)
                   console.log('🏁 Stream complete');
                   setIsInferring(false);
                   break;
-                } else if (data.model) {
-                  console.log('📊 Updating results for model:', data.model);
+                } else if (data.type === 'complete' && data.model && data.status === 'success') {
+                  // Per-model completion with final result
+                  console.log('✅ Model complete:', data.model);
+                  setInferenceResults(prev => ({
+                    ...prev,
+                    [data.model]: {
+                      ...data,
+                      status: 'success'  // Ensure status is success, not streaming
+                    }
+                  }));
+                } else if (data.type === 'partial' && data.model) {
+                  // Streaming: accumulate partial content
+                  console.log('📝 Partial content for model:', data.model, data.content);
+                  setInferenceResults(prev => {
+                    const existing = prev[data.model] || {};
+                    return {
+                      ...prev,
+                      [data.model]: {
+                        ...existing,
+                        model: data.model,
+                        status: 'streaming',
+                        result: {
+                          ...(existing.result || {}),
+                          content: data.accumulated_content || ((existing.result?.content || '') + data.content)
+                        }
+                      }
+                    };
+                  });
+                } else if (data.model && (data.status === 'success' || data.status === 'error')) {
+                  // Final result with complete data
+                  console.log('📊 Final result for model:', data.model);
                   setInferenceResults(prev => ({
                     ...prev,
                     [data.model]: data

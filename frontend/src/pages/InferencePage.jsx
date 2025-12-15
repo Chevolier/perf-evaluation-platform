@@ -74,18 +74,8 @@ const InferencePage = ({
   const refreshProcessingModels = async (modelNames) => {
     const base64Data = await filesToBase64(dataset.files);
     
-    const modelMapping = {
-      'Claude3.5': 'claude35',
-      'Claude4': 'claude4',
-      'Nova Pro': 'nova',
-      'qwen2-vl-7b': 'qwen2-vl-7b',
-      'qwen2.5-vl-32b': 'qwen2.5-vl-32b',
-      'qwen2.5-0.5b': 'qwen2.5-0.5b',
-      'gemma-3-4b': 'gemma-3-4b',
-      'ui-tars-1.5-7b': 'ui-tars-1.5-7b'
-    };
-    
-    const mappedModels = modelNames.map(model => modelMapping[model] || model);
+    // Model keys now match backend directly - no mapping needed
+    const mappedModels = modelNames;
     
     const response = await fetch('/api/multi-inference', {
       method: 'POST',
@@ -239,19 +229,8 @@ const InferencePage = ({
       // Prepare data for multi-inference
       const base64Data = await filesToBase64(dataset.files);
       
-      // Map frontend model names to backend names
-      const modelMapping = {
-        'Claude3.5': 'claude35',
-        'Claude4': 'claude4',
-        'Nova Pro': 'nova',
-        'qwen2-vl-7b': 'qwen2-vl-7b',
-        'qwen2.5-vl-32b': 'qwen2.5-vl-32b',
-        'qwen2.5-0.5b': 'qwen2.5-0.5b',
-        'gemma-3-4b': 'gemma-3-4b',
-        'ui-tars-1.5-7b': 'ui-tars-1.5-7b'
-      };
-      
-      const mappedModels = selectedModels.map(model => modelMapping[model] || model);
+      // Model keys now match backend directly - no mapping needed
+      const mappedModels = selectedModels;
       
       // Initialize loading states for all models
       const initialResults = {};

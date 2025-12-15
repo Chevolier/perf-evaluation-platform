@@ -27,21 +27,33 @@ const ModelSelectionModal = ({
       color: '#1890ff',
       models: [
         {
-          key: 'claude4',
-          name: 'Claude 4',
-          description: '最新的Claude模型，具备强大的推理能力',
+          key: 'claude-opus-4.5',
+          name: 'Claude Opus 4.5',
+          description: '最强大的Claude模型，顶级推理能力',
           capabilities: []
         },
         {
-          key: 'claude35',
-          name: 'Claude 3.5 Sonnet',
+          key: 'claude-sonnet-4.5',
+          name: 'Claude Sonnet 4.5',
           description: '平衡性能与速度的高效模型',
           capabilities: []
         },
         {
-          key: 'nova',
+          key: 'claude-haiku-4.5',
+          name: 'Claude Haiku 4.5',
+          description: '快速高效的轻量模型',
+          capabilities: []
+        },
+        {
+          key: 'nova-pro',
           name: 'Amazon Nova Pro',
           description: 'AWS原生多模态大模型',
+          capabilities: []
+        },
+        {
+          key: 'nova-lite',
+          name: 'Amazon Nova Lite',
+          description: 'AWS轻量级多模态模型',
           capabilities: []
         }
       ]
