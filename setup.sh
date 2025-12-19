@@ -12,7 +12,7 @@ if ! command -v uv &> /dev/null; then
     curl -LsSf https://astral.sh/uv/install.sh | sh
     
     # Add uv to PATH for this session
-    export PATH="\$HOME/.local/bin:\$PATH"
+    export PATH="$HOME/.local/bin:$PATH"
     source ~/.local/bin/env
     
     # Check again after installation
