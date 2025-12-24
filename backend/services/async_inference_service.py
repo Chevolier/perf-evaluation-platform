@@ -11,6 +11,16 @@ import aiohttp
 
 from core.models import model_registry
 from utils import get_logger
+from .streaming_helpers import (
+    build_bedrock_request,
+    classify_bedrock_model,
+    parse_bedrock_chunk,
+    parse_openai_chunk,
+    finalize_usage,
+    SSEBuffer,
+    detect_image_format,
+    extract_context_limits_from_error,
+)
 
 
 logger = get_logger(__name__)
@@ -43,23 +53,6 @@ class AsyncInferenceService:
         if self._http_session and not self._http_session.closed:
             await self._http_session.close()
 
-    def _detect_image_format(self, base64_data: str) -> str:
-        """Detect image format from base64 data."""
-        try:
-            decoded_bytes = base64.b64decode(base64_data[:100])
-            if decoded_bytes.startswith(b'\xff\xd8\xff'):
-                return 'image/jpeg'
-            elif decoded_bytes.startswith(b'\x89PNG\r\n\x1a\n'):
-                return 'image/png'
-            elif decoded_bytes.startswith(b'GIF87a') or decoded_bytes.startswith(b'GIF89a'):
-                return 'image/gif'
-            elif decoded_bytes.startswith(b'RIFF') and b'WEBP' in decoded_bytes[:12]:
-                return 'image/webp'
-            else:
-                return 'image/jpeg'
-        except Exception:
-            return 'image/jpeg'
-
     def _resize_image_for_sagemaker(self, base64_data: str, max_width: int = 720, max_height: int = 480) -> str:
         """Resize image for SageMaker endpoint."""
         import io
@@ -88,123 +81,6 @@ class AsyncInferenceService:
         except Exception as e:
             logger.error(f"Error resizing image: {e}")
             return base64_data
-
-    def _build_bedrock_request(self, model: str, model_info: Dict, data: Dict) -> Dict:
-        """Build request body for Bedrock models."""
-        model_id = model_info.get('model_id', '')
-        text_prompt = data.get('text') or data.get('prompt') or ''
-        frames = data.get('frames') or data.get('images') or []
-        max_tokens = data.get('max_tokens', 1000)
-        temperature = data.get('temperature', 0.7)
-        messages = data.get('messages')
-
-        # Build message content
-        message_content = []
-
-        if messages:
-            for msg in messages:
-                if msg.get('role') == 'user':
-                    content = msg.get('content', '')
-                    if isinstance(content, str):
-                        text_prompt = content
-                    elif isinstance(content, list):
-                        for item in content:
-                            if isinstance(item, dict):
-                                message_content.append(item)
-                            elif isinstance(item, str):
-                                message_content.append({"type": "text", "text": item})
-                    break
-
-        if text_prompt and not message_content:
-            message_content.append({"type": "text", "text": text_prompt})
-
-        if not message_content:
-            message_content.append({"type": "text", "text": "Hello"})
-
-        # Add images for multimodal models
-        if frames and model_info.get('supports_multimodal', False):
-            for frame_base64 in frames:
-                message_content.append({
-                    "type": "image",
-                    "source": {
-                        "type": "base64",
-                        "media_type": "image/jpeg",
-                        "data": frame_base64
-                    }
-                })
-
-        # Build request based on model type
-        if 'claude' in model.lower() or 'anthropic' in model_id.lower():
-            return {
-                "anthropic_version": "bedrock-2023-05-31",
-                "max_tokens": max_tokens,
-                "temperature": temperature,
-                "messages": [{"role": "user", "content": message_content}]
-            }
-        elif 'nova' in model.lower() or 'amazon' in model_id.lower():
-            nova_content = []
-            for item in message_content:
-                if item.get('type') == 'text':
-                    nova_content.append({"text": item.get('text', '')})
-                elif item.get('type') == 'image':
-                    source = item.get('source', {})
-                    nova_content.append({
-                        "image": {
-                            "format": source.get('media_type', 'image/jpeg').split('/')[-1],
-                            "source": {"bytes": source.get('data', '')}
-                        }
-                    })
-            if not nova_content:
-                nova_content.append({"text": "Hello"})
-            return {
-                "messages": [{"role": "user", "content": nova_content}],
-                "inferenceConfig": {"maxTokens": max_tokens, "temperature": temperature}
-            }
-        else:
-            return {
-                "messages": [{"role": "user", "content": message_content}],
-                "max_tokens": max_tokens,
-                "temperature": temperature
-            }
-
-    def _parse_stream_chunk(self, chunk_data: dict, is_claude: bool, is_nova: bool) -> tuple:
-        """Parse streaming chunk based on model type.
-
-        Returns: (text_chunk, is_final, usage_dict)
-        """
-        text_chunk = ""
-        is_final = False
-        usage = {}
-
-        if is_claude:
-            event_type = chunk_data.get('type', '')
-            if event_type == 'content_block_delta':
-                delta = chunk_data.get('delta', {})
-                if delta.get('type') == 'text_delta':
-                    text_chunk = delta.get('text', '')
-            elif event_type == 'message_delta':
-                if 'usage' in chunk_data:
-                    usage = {'output_tokens': chunk_data['usage'].get('output_tokens', 0)}
-                    is_final = True
-            elif event_type == 'message_start':
-                msg = chunk_data.get('message', {})
-                if 'usage' in msg:
-                    usage = {'input_tokens': msg['usage'].get('input_tokens', 0)}
-
-        elif is_nova:
-            if 'contentBlockDelta' in chunk_data:
-                delta = chunk_data['contentBlockDelta'].get('delta', {})
-                text_chunk = delta.get('text', '')
-            elif 'metadata' in chunk_data:
-                meta_usage = chunk_data['metadata'].get('usage', {})
-                usage = {
-                    'input_tokens': meta_usage.get('inputTokens', 0),
-                    'output_tokens': meta_usage.get('outputTokens', 0),
-                    'total_tokens': meta_usage.get('totalTokens', 0)
-                }
-                is_final = True
-
-        return text_chunk, is_final, usage
 
     async def multi_inference(self, data: Dict[str, Any]) -> AsyncGenerator[str, None]:
         """Run inference on multiple models with true async streaming.
@@ -316,7 +192,8 @@ class AsyncInferenceService:
             if not model_id:
                 raise ValueError(f"No model_id found for model {model}")
 
-            request_body = self._build_bedrock_request(model, model_info, data)
+            # Use shared helper for request building
+            request_body = build_bedrock_request(model, model_info, data)
 
             logger.info(f"🚀 Async Bedrock call to {model_id}")
 
@@ -334,8 +211,7 @@ class AsyncInferenceService:
 
                 content = ""
                 usage = {}
-                is_claude = 'claude' in model.lower() or 'anthropic' in model_id.lower()
-                is_nova = 'nova' in model.lower() or 'amazon' in model_id.lower()
+                is_claude, is_nova = classify_bedrock_model(model, model_id)
 
                 # TRUE ASYNC iteration over stream
                 async for event in response['body']:
@@ -343,7 +219,8 @@ class AsyncInferenceService:
                     if chunk:
                         chunk_data = json.loads(chunk.get('bytes', b'{}').decode('utf-8'))
 
-                        text_chunk, is_final, chunk_usage = self._parse_stream_chunk(
+                        # Use shared helper for chunk parsing
+                        text_chunk, is_final, chunk_usage = parse_bedrock_chunk(
                             chunk_data, is_claude, is_nova
                         )
 
@@ -362,16 +239,12 @@ class AsyncInferenceService:
                         if chunk_usage:
                             usage.update(chunk_usage)
 
-                # Calculate total tokens
-                if 'total_tokens' not in usage and 'input_tokens' in usage and 'output_tokens' in usage:
-                    usage['total_tokens'] = usage.get('input_tokens', 0) + usage.get('output_tokens', 0)
-
-                # Send completion
+                # Send completion with finalized usage
                 await result_queue.put({
                     'model': model,
                     'type': 'complete',
                     'status': 'success',
-                    'result': {'content': content, 'usage': usage},
+                    'result': {'content': content, 'usage': finalize_usage(usage)},
                     'duration_ms': (datetime.now() - start_time).total_seconds() * 1000
                 })
 
@@ -431,7 +304,7 @@ class AsyncInferenceService:
 
             if frames and model_info.get('supports_multimodal', False):
                 for frame_base64 in frames:
-                    image_format = self._detect_image_format(frame_base64)
+                    image_format = detect_image_format(frame_base64)
                     content_parts.append({
                         "type": "image_url",
                         "image_url": {"url": f"data:{image_format};base64,{frame_base64}"}
@@ -447,44 +320,111 @@ class AsyncInferenceService:
                 "messages": messages,
                 "max_tokens": max_tokens,
                 "temperature": temperature,
-                "stream": False
+                "stream": True,
+                "stream_options": {"include_usage": True}
             }
 
-            logger.info(f"🚀 Async EC2 call to {model} at {endpoint}")
+            logger.info(f"🚀 Async EC2 streaming call to {model} at {endpoint}")
 
             session = await self.get_http_session()
             vllm_url = f"{endpoint}/v1/chat/completions"
 
-            async with session.post(
-                vllm_url,
-                json=vllm_payload,
-                headers={'Content-Type': 'application/json'}
-            ) as response:
-                if not response.ok:
-                    error_text = await response.text()
-                    raise ValueError(f"vLLM request failed: {response.status} - {error_text}")
+            for attempt in range(2):
+                async with session.post(
+                    vllm_url,
+                    json=vllm_payload,
+                    headers={'Content-Type': 'application/json'}
+                ) as response:
+                    if not response.ok:
+                        error_text = await response.text()
 
-                response_body = await response.json()
+                        if response.status == 400 and attempt == 0:
+                            limits = extract_context_limits_from_error(error_text)
+                            if limits:
+                                max_ctx, input_tokens = limits
+                                allowed = max(1, max_ctx - input_tokens - 1)
+                                if allowed < vllm_payload.get("max_tokens", allowed + 1):
+                                    logger.warning(
+                                        f"vLLM max_tokens too large; retrying with max_tokens={allowed} "
+                                        f"(max_ctx={max_ctx}, input_tokens={input_tokens})"
+                                    )
+                                    vllm_payload["max_tokens"] = allowed
+                                    continue
 
-                content = ""
-                usage = {}
-                if 'choices' in response_body and response_body['choices']:
-                    choice = response_body['choices'][0]
-                    if 'message' in choice:
-                        content = choice['message'].get('content', '')
-                    if 'usage' in response_body:
-                        usage = response_body['usage']
+                        raise ValueError(f"vLLM request failed: {response.status} - {error_text}")
 
-                await result_queue.put({
-                    'model': model,
-                    'status': 'success',
-                    'result': {
-                        'content': content,
-                        'usage': usage,
-                        'raw_response': response_body
-                    },
-                    'duration_ms': (datetime.now() - start_time).total_seconds() * 1000
-                })
+                    # Check content-type for streaming support
+                    content_type = response.headers.get('content-type', '')
+                    if 'text/event-stream' not in content_type:
+                        # Non-streaming response - parse as JSON
+                        response_data = await response.json()
+                        content = response_data.get('choices', [{}])[0].get('message', {}).get('content', '')
+                        usage = response_data.get('usage', {})
+                        await result_queue.put({
+                            'model': model,
+                            'type': 'complete',
+                            'status': 'success',
+                            'result': {
+                                'content': content,
+                                'usage': finalize_usage(usage)
+                            },
+                            'duration_ms': (datetime.now() - start_time).total_seconds() * 1000,
+                            'streaming': False
+                        })
+                        return
+
+                    content = ""
+                    usage = {}
+                    buffer = SSEBuffer()
+
+                    # Stream and parse SSE chunks
+                    async for chunk_bytes in response.content:
+                        for data_str in buffer.add(chunk_bytes.decode('utf-8')):
+                            try:
+                                chunk_data = json.loads(data_str)
+                                text_chunk, is_final, chunk_usage = parse_openai_chunk(chunk_data)
+
+                                if text_chunk:
+                                    content += text_chunk
+                                    await result_queue.put({
+                                        'model': model,
+                                        'type': 'partial',
+                                        'content': text_chunk,
+                                        'accumulated_content': content
+                                    })
+                                    await asyncio.sleep(0.01)
+
+                                if chunk_usage:
+                                    usage.update(chunk_usage)
+
+                            except json.JSONDecodeError:
+                                logger.warning(f"Failed to parse SSE chunk: {data_str[:50]}")
+                                continue
+
+                    # Flush any remaining data in buffer
+                    for data_str in buffer.flush():
+                        try:
+                            chunk_data = json.loads(data_str)
+                            text_chunk, _, chunk_usage = parse_openai_chunk(chunk_data)
+                            if text_chunk:
+                                content += text_chunk
+                            if chunk_usage:
+                                usage.update(chunk_usage)
+                        except json.JSONDecodeError:
+                            pass
+
+                    await result_queue.put({
+                        'model': model,
+                        'type': 'complete',
+                        'status': 'success',
+                        'result': {
+                            'content': content,
+                            'usage': finalize_usage(usage)
+                        },
+                        'duration_ms': (datetime.now() - start_time).total_seconds() * 1000,
+                        'streaming': True
+                    })
+                    return
 
         except Exception as e:
             logger.error(f"Error processing EC2 model {model}: {e}")
@@ -500,7 +440,7 @@ class AsyncInferenceService:
         data: Dict[str, Any],
         result_queue: asyncio.Queue
     ) -> None:
-        """Process manually configured API endpoint with aiohttp."""
+        """Process manually configured API endpoint with streaming auto-detect."""
         model_name = manual_config.get('model_name', 'Unknown')
         try:
             start_time = datetime.now()
@@ -520,7 +460,7 @@ class AsyncInferenceService:
 
             if frames:
                 for frame_base64 in frames:
-                    image_format = self._detect_image_format(frame_base64)
+                    image_format = detect_image_format(frame_base64)
                     content_parts.append({
                         "type": "image_url",
                         "image_url": {"url": f"data:{image_format};base64,{frame_base64}"}
@@ -533,58 +473,157 @@ class AsyncInferenceService:
                 "temperature": temperature
             }
 
-            logger.info(f"🚀 Async Manual API call to {api_url}")
-
             session = await self.get_http_session()
+            stream_enabled = manual_config.get('stream', True)
+            streaming_success = False
 
-            async with session.post(
-                api_url,
-                json=request_payload,
-                headers={"Content-Type": "application/json"}
-            ) as response:
-                if not response.ok:
-                    error_text = await response.text()
-                    raise ValueError(f"API call failed: {response.status} - {error_text}")
-
-                response_data = await response.json()
-
-                content = ""
-                usage = {}
-
-                if 'choices' in response_data and response_data['choices']:
-                    choice = response_data['choices'][0]
-                    if 'message' in choice:
-                        message = choice['message']
-                        if 'reasoning_content' in message and message['reasoning_content']:
-                            reasoning = message['reasoning_content'].strip()
-                            main_content = message.get('content', '').strip() if message.get('content') else ''
-                            if reasoning and main_content:
-                                content = f"**Reasoning:**\n{reasoning}\n\n**Response:**\n{main_content}"
-                            elif reasoning:
-                                content = f"**Reasoning:**\n{reasoning}"
-                            else:
-                                content = main_content
-                        elif 'content' in message:
-                            content = message['content']
-
-                if 'usage' in response_data:
-                    usage = {
-                        'input_tokens': response_data['usage'].get('prompt_tokens', 0),
-                        'output_tokens': response_data['usage'].get('completion_tokens', 0),
-                        'total_tokens': response_data['usage'].get('total_tokens', 0)
+            # Try streaming first if enabled
+            if stream_enabled:
+                try:
+                    streaming_payload = {
+                        **request_payload,
+                        "stream": True,
+                        "stream_options": {"include_usage": True}
                     }
 
-                await result_queue.put({
-                    'model': f"{model_name} (Manual API)",
-                    'status': 'success',
-                    'result': {
-                        'content': content,
-                        'usage': usage,
-                        'raw_response': response_data
-                    },
-                    'duration_ms': (datetime.now() - start_time).total_seconds() * 1000,
-                    'api_url': api_url
-                })
+                    logger.info(f"🚀 Async Manual API streaming call to {api_url}")
+
+                    async with session.post(
+                        api_url,
+                        json=streaming_payload,
+                        headers={"Content-Type": "application/json"}
+                    ) as response:
+                        if response.ok:
+                            content_type = response.headers.get('content-type', '')
+
+                            if 'text/event-stream' in content_type:
+                                streaming_success = True
+                                logger.info(f"✅ Manual API supports streaming: {api_url}")
+
+                                content = ""
+                                usage = {}
+                                buffer = SSEBuffer()
+
+                                async for chunk_bytes in response.content:
+                                    for data_str in buffer.add(chunk_bytes.decode('utf-8')):
+                                        try:
+                                            chunk_data = json.loads(data_str)
+                                            text_chunk, is_final, chunk_usage = parse_openai_chunk(chunk_data)
+
+                                            if text_chunk:
+                                                content += text_chunk
+                                                await result_queue.put({
+                                                    'model': f"{model_name} (Manual API)",
+                                                    'type': 'partial',
+                                                    'content': text_chunk,
+                                                    'accumulated_content': content
+                                                })
+                                                await asyncio.sleep(0.01)
+
+                                            if chunk_usage:
+                                                usage.update(chunk_usage)
+
+                                        except json.JSONDecodeError:
+                                            continue
+
+                                # Flush any remaining data in buffer
+                                for data_str in buffer.flush():
+                                    try:
+                                        chunk_data = json.loads(data_str)
+                                        text_chunk, _, chunk_usage = parse_openai_chunk(chunk_data)
+                                        if text_chunk:
+                                            content += text_chunk
+                                        if chunk_usage:
+                                            usage.update(chunk_usage)
+                                    except json.JSONDecodeError:
+                                        pass
+
+                                await result_queue.put({
+                                    'model': f"{model_name} (Manual API)",
+                                    'type': 'complete',
+                                    'status': 'success',
+                                    'result': {
+                                        'content': content,
+                                        'usage': finalize_usage(usage)
+                                    },
+                                    'duration_ms': (datetime.now() - start_time).total_seconds() * 1000,
+                                    'api_url': api_url,
+                                    'streaming': True
+                                })
+                                return
+
+                except Exception as stream_error:
+                    logger.warning(f"Streaming attempt failed, falling back: {stream_error}")
+
+            # Fallback to non-streaming
+            if not streaming_success:
+                logger.info(f"🚀 Async Manual API non-streaming call to {api_url}")
+                for attempt in range(2):
+                    async with session.post(
+                        api_url,
+                        json=request_payload,
+                        headers={"Content-Type": "application/json"}
+                    ) as response:
+                        if not response.ok:
+                            error_text = await response.text()
+
+                            if response.status == 400 and attempt == 0:
+                                limits = extract_context_limits_from_error(error_text)
+                                if limits:
+                                    max_ctx, input_tokens = limits
+                                    allowed = max(1, max_ctx - input_tokens - 1)
+                                    if allowed < request_payload.get("max_tokens", allowed + 1):
+                                        logger.warning(
+                                            f"Manual API max_tokens too large; retrying with max_tokens={allowed} "
+                                            f"(max_ctx={max_ctx}, input_tokens={input_tokens})"
+                                        )
+                                        request_payload["max_tokens"] = allowed
+                                        continue
+
+                            raise ValueError(f"API call failed: {response.status} - {error_text}")
+
+                        response_data = await response.json()
+                        break
+
+                    content = ""
+                    usage = {}
+
+                    if 'choices' in response_data and response_data['choices']:
+                        choice = response_data['choices'][0]
+                        if 'message' in choice:
+                            message = choice['message']
+                            if 'reasoning_content' in message and message['reasoning_content']:
+                                reasoning = message['reasoning_content'].strip()
+                                main_content = message.get('content', '').strip() if message.get('content') else ''
+                                if reasoning and main_content:
+                                    content = f"**Reasoning:**\n{reasoning}\n\n**Response:**\n{main_content}"
+                                elif reasoning:
+                                    content = f"**Reasoning:**\n{reasoning}"
+                                else:
+                                    content = main_content
+                            elif 'content' in message:
+                                content = message['content']
+
+                    if 'usage' in response_data:
+                        usage = {
+                            'input_tokens': response_data['usage'].get('prompt_tokens', 0),
+                            'output_tokens': response_data['usage'].get('completion_tokens', 0),
+                            'total_tokens': response_data['usage'].get('total_tokens', 0)
+                        }
+
+                    await result_queue.put({
+                        'model': f"{model_name} (Manual API)",
+                        'type': 'complete',
+                        'status': 'success',
+                        'result': {
+                            'content': content,
+                            'usage': usage,
+                            'raw_response': response_data
+                        },
+                        'duration_ms': (datetime.now() - start_time).total_seconds() * 1000,
+                        'api_url': api_url,
+                        'streaming': False
+                    })
 
         except Exception as e:
             logger.error(f"Error processing manual API: {e}")
@@ -601,9 +640,15 @@ class AsyncInferenceService:
         data: Dict[str, Any],
         result_queue: asyncio.Queue
     ) -> None:
-        """Process SageMaker endpoint with aioboto3."""
+        """Process SageMaker endpoint with aioboto3.
+
+        Supports streaming via invoke_endpoint_with_response_stream with automatic
+        fallback to non-streaming invoke_endpoint if streaming is not supported.
+        """
         endpoint_name = sagemaker_config.get('endpoint_name', 'Unknown')
         model_name = sagemaker_config.get('model_name', endpoint_name)
+        stream_enabled = sagemaker_config.get('stream', True)  # Default to trying streaming
+
         try:
             start_time = datetime.now()
 
@@ -628,7 +673,7 @@ class AsyncInferenceService:
                     resized_base64 = self._resize_image_for_sagemaker(frame_base64, max_w, max_h)
                     image_url_base64 = f"data:image/png;base64,{resized_base64}"
                 else:
-                    image_format = self._detect_image_format(frame_base64)
+                    image_format = detect_image_format(frame_base64)
                     image_url_base64 = f"data:{image_format};base64,{frame_base64}"
 
                 user_content.append({
@@ -658,41 +703,123 @@ class AsyncInferenceService:
 
             logger.info(f"🚀 Async SageMaker call to {endpoint_name}")
 
+            streaming_success = False
+
             async with self._aioboto3_session.client('sagemaker-runtime') as smr_client:
-                response = await smr_client.invoke_endpoint(
-                    EndpointName=endpoint_name,
-                    ContentType="application/json",
-                    Body=json.dumps(request_payload)
-                )
+                # Try streaming first if enabled
+                if stream_enabled:
+                    try:
+                        streaming_payload = {
+                            **request_payload,
+                            "stream": True,
+                            "stream_options": {"include_usage": True}
+                        }
 
-                response_body = await response['Body'].read()
-                response_json = json.loads(response_body.decode('utf-8'))
+                        response = await smr_client.invoke_endpoint_with_response_stream(
+                            EndpointName=endpoint_name,
+                            ContentType="application/json",
+                            Body=json.dumps(streaming_payload)
+                        )
 
-                content = ""
-                if 'choices' in response_json and response_json['choices']:
-                    choice = response_json['choices'][0]
-                    if 'message' in choice:
-                        content = choice['message'].get('content', '')
+                        streaming_success = True
+                        logger.info(f"📡 Async SageMaker streaming enabled for {endpoint_name}")
 
-                usage = {}
-                if 'usage' in response_json:
-                    usage = {
-                        'input_tokens': response_json['usage'].get('prompt_tokens', 0),
-                        'output_tokens': response_json['usage'].get('completion_tokens', 0),
-                        'total_tokens': response_json['usage'].get('total_tokens', 0)
-                    }
+                        content = ""
+                        usage = {}
+                        buffer = SSEBuffer()
 
-                await result_queue.put({
-                    'model': model_name,
-                    'status': 'success',
-                    'result': {
-                        'content': content,
-                        'usage': usage,
-                        'raw_response': response_json
-                    },
-                    'duration_ms': (datetime.now() - start_time).total_seconds() * 1000,
-                    'metadata': {'endpoint_name': endpoint_name}
-                })
+                        async for event in response['Body']:
+                            chunk_bytes = event.get('PayloadPart', {}).get('Bytes', b'')
+                            if not chunk_bytes:
+                                continue
+
+                            for data_str in buffer.add(chunk_bytes.decode('utf-8')):
+                                try:
+                                    chunk_data = json.loads(data_str)
+                                    text_chunk, is_final, chunk_usage = parse_openai_chunk(chunk_data)
+
+                                    if text_chunk:
+                                        content += text_chunk
+                                        await result_queue.put({
+                                            'model': model_name,
+                                            'type': 'partial',
+                                            'content': text_chunk,
+                                            'accumulated_content': content
+                                        })
+                                        await asyncio.sleep(0.01)
+
+                                    if chunk_usage:
+                                        usage.update(chunk_usage)
+                                except json.JSONDecodeError:
+                                    continue
+
+                        # Flush any remaining buffer
+                        for data_str in buffer.flush():
+                            try:
+                                chunk_data = json.loads(data_str)
+                                text_chunk, _, chunk_usage = parse_openai_chunk(chunk_data)
+                                if text_chunk:
+                                    content += text_chunk
+                                if chunk_usage:
+                                    usage.update(chunk_usage)
+                            except json.JSONDecodeError:
+                                pass
+
+                        await result_queue.put({
+                            'model': model_name,
+                            'type': 'complete',
+                            'status': 'success',
+                            'result': {
+                                'content': content,
+                                'usage': finalize_usage(usage)
+                            },
+                            'duration_ms': (datetime.now() - start_time).total_seconds() * 1000,
+                            'metadata': {'endpoint_name': endpoint_name, 'streaming': True}
+                        })
+
+                        logger.info(f"✅ Async SageMaker {endpoint_name} (streaming) completed")
+                        return
+
+                    except Exception as e:
+                        logger.warning(f"SageMaker streaming not supported for {endpoint_name}, falling back: {e}")
+                        streaming_success = False
+
+                # Non-streaming fallback
+                if not streaming_success:
+                    response = await smr_client.invoke_endpoint(
+                        EndpointName=endpoint_name,
+                        ContentType="application/json",
+                        Body=json.dumps(request_payload)
+                    )
+
+                    response_body = await response['Body'].read()
+                    response_json = json.loads(response_body.decode('utf-8'))
+
+                    content = ""
+                    if 'choices' in response_json and response_json['choices']:
+                        choice = response_json['choices'][0]
+                        if 'message' in choice:
+                            content = choice['message'].get('content', '')
+
+                    usage = {}
+                    if 'usage' in response_json:
+                        usage = {
+                            'input_tokens': response_json['usage'].get('prompt_tokens', 0),
+                            'output_tokens': response_json['usage'].get('completion_tokens', 0),
+                            'total_tokens': response_json['usage'].get('total_tokens', 0)
+                        }
+
+                    await result_queue.put({
+                        'model': model_name,
+                        'status': 'success',
+                        'result': {
+                            'content': content,
+                            'usage': usage,
+                            'raw_response': response_json
+                        },
+                        'duration_ms': (datetime.now() - start_time).total_seconds() * 1000,
+                        'metadata': {'endpoint_name': endpoint_name}
+                    })
 
         except Exception as e:
             logger.error(f"Error processing SageMaker endpoint {endpoint_name}: {e}")

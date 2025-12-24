@@ -19,7 +19,7 @@ class MultiInferenceRequest(BaseModel):
     images: Optional[List[str]] = None
     frames: Optional[List[str]] = None  # Frontend sends 'frames' field
     mediaType: Optional[str] = None
-    max_tokens: int = 1024
+    max_tokens: int = 4096
     temperature: float = 0.7
     # Image resize parameters (optional - if not specified, no resize)
     resize_width: Optional[int] = None
@@ -40,7 +40,7 @@ class SingleInferenceRequest(BaseModel):
     messages: Optional[List[Dict[str, Any]]] = None
     images: Optional[List[str]] = None
     frames: Optional[List[str]] = None
-    max_tokens: int = 1024
+    max_tokens: int = 4096
     temperature: float = 0.7
 
     class Config:

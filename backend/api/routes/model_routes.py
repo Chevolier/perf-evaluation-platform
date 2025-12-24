@@ -18,6 +18,7 @@ class DeployModelsRequest(BaseModel):
     instance_type: str = "g5.2xlarge"
     engine_type: str = "vllm"
     service_type: str = "vllm_realtime"
+    port: int = 8000
     tp_size: int = 1
     dp_size: int = 1
     gpu_memory_utilization: float = 0.9
@@ -70,6 +71,7 @@ def deploy_models(data: DeployModelsRequest):
         logger.info(f"  Instance type: {data.instance_type}")
         logger.info(f"  Engine type: {data.engine_type}")
         logger.info(f"  Service type: {data.service_type}")
+        logger.info(f"  Port: {data.port}")
         logger.info(f"  TP size: {data.tp_size}")
         logger.info(f"  DP size: {data.dp_size}")
         logger.info(f"  GPU memory utilization: {data.gpu_memory_utilization}")
@@ -79,13 +81,12 @@ def deploy_models(data: DeployModelsRequest):
         for model_key in data.models:
             logger.info(f"🚀 Deploying model: {model_key}")
 
-            port = 8000
             result = model_service.deploy_model_on_ec2(
                 model_key=model_key,
                 instance_type=data.instance_type,
                 engine_type=data.engine_type,
                 service_type=data.service_type,
-                port=port,
+                port=data.port,
                 tp_size=data.tp_size,
                 dp_size=data.dp_size,
                 gpu_memory_utilization=data.gpu_memory_utilization,

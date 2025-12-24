@@ -55,16 +55,16 @@ function App() {
   const [params, setParams] = useState(() => {
     try {
       // Force update to new default values - remove this block after deployment
-      const newDefaults = { max_tokens: 1024, temperature: 0.6 };
+      const newDefaults = { max_tokens: 4096, temperature: 0.6 };
       localStorage.setItem('playground_params', JSON.stringify(newDefaults));
       return newDefaults;
 
       // Original code - uncomment this and remove the above after users see new defaults
       // const saved = localStorage.getItem('playground_params');
-      // return saved ? JSON.parse(saved) : { max_tokens: 1024, temperature: 0.6 };
+      // return saved ? JSON.parse(saved) : { max_tokens: 4096, temperature: 0.6 };
     } catch (error) {
       console.error('Failed to load params from localStorage:', error);
-      return { max_tokens: 1024, temperature: 0.6 };
+      return { max_tokens: 4096, temperature: 0.6 };
     }
   });
   

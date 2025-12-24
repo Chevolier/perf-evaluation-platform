@@ -87,7 +87,7 @@ const InferencePage = ({
         text: dataset.prompt,
         frames: base64Data,
         mediaType: dataset.type,
-        max_tokens: params.max_tokens || 1024,
+        max_tokens: params.max_tokens || 4096,
         temperature: params.temperature || 0.6
       })
     });
@@ -254,7 +254,7 @@ const InferencePage = ({
           text: dataset.prompt,
           frames: base64Data,
           mediaType: dataset.type,
-          max_tokens: params.max_tokens || 1024,
+          max_tokens: params.max_tokens || 4096,
           temperature: params.temperature || 0.1
         })
       });

@@ -128,7 +128,7 @@ const StreamingResultsDisplay = ({ dataset, selectedModels, params, onStreamComp
         frames: base64Data,
         media: base64Data, // 为Nova准备的字段
         mediaType: dataset.type,
-        max_tokens: params.max_tokens || 1024,
+        max_tokens: params.max_tokens || 4096,
         temperature: params.temperature || 0.1,
         models: selectedModels
       };

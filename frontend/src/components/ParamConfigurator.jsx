@@ -5,7 +5,7 @@ const ParamConfigurator = ({ value = {}, onChange }) => {
   const [form] = Form.useForm();
   
   const defaultValues = {
-    max_tokens: 1024,
+    max_tokens: 4096,
     temperature: 0.6,
     ...value
   };
@@ -25,7 +25,7 @@ const ParamConfigurator = ({ value = {}, onChange }) => {
         <InputNumber 
           min={1} 
           max={4096} 
-          placeholder="1024"
+          placeholder="4096"
           style={{ width: '100%' }} 
         />
       </Form.Item>
