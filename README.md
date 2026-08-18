@@ -1,3 +1,5 @@
+
+
 # Model Performance Evaluation Platform
 
 A comprehensive platform for model (LLMs, VLMs, etc.) deployment and performance evaluation. Supports 1-click deployment of various models on EC2 using vLLM, SGLang, plus comprehensive performance testing and visualization.
@@ -181,7 +183,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 **For Technical Issues:**
 - Check the troubleshooting section above
-- Review logs in `logs/backend.log`, `logs/frontend.log`, `backend/logs/development.log`
+- Review logs in `logs/backend.log`, `logs/frontend.log`, `logs/app.log`, `backend/logs/development.log`
 - Test system health with provided test scripts
 
 **For Feature Requests:**
